@@ -513,9 +513,9 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (!t->pieces || mbt_peer_choked(tp->peer))
 		return;
 
-	int limit = 512; /* per-peer: 128 blocks = 8 pieces of 256KB */
+	int limit = 256; /* default if peer doesn't advertise reqq */
 	int peer_limit = mbt_peer_reqq(tp->peer);
-	if (peer_limit > 0 && peer_limit < limit)
+	if (peer_limit > 0)
 		limit = peer_limit;
 
 	int sent = 0;
