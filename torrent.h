@@ -29,6 +29,7 @@ struct mbt_torrent_config {
 	void *storage_ctx;
 	mbt_picker_fn picker;
 	void *picker_ctx;
+	int request_timeout_sec;           /* 0 = default 15s */
 };
 
 /* Torrent events reported to session */

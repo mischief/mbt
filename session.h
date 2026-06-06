@@ -23,6 +23,7 @@ struct mbt_session_config {
 	void *picker_ctx;
 
 	uint16_t listen_port;  /* 0 = don't listen for incoming */
+	int request_timeout;   /* seconds before stale requests reset (0 = default 15s) */
 };
 
 /* Session lifecycle */

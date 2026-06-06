@@ -56,6 +56,7 @@ struct mbt_session {
 	void *picker_ctx;
 
 	uint16_t listen_port;
+	int request_timeout_sec;
 	uint8_t peer_id[20];
 
 	struct mbt_session_callbacks cb;
@@ -167,6 +168,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->picker = cfg->picker;
 	s->picker_ctx = cfg->picker_ctx;
 	s->listen_port = cfg->listen_port;
+	s->request_timeout_sec = cfg->request_timeout;
 
 	STAILQ_INIT(&s->torrents);
 	STAILQ_INIT(&s->pending);
@@ -324,6 +326,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct infohash *ih)
 		.storage_ctx = s->storage_ctx,
 		.picker = s->picker,
 		.picker_ctx = s->picker_ctx,
+		.request_timeout_sec = s->request_timeout_sec,
 	};
 
 	int rv = mbt_torrent_new(&st->torrent, &cfg);

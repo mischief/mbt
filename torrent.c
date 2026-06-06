@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #include <sha1.h>
 
@@ -31,6 +32,7 @@ struct piece_info {
 	uint8_t hash[20];      /* expected SHA1 */
 	enum mbt_piece_state state;
 	struct torrent_peer *owner; /* peer downloading this piece, NULL if pending */
+	uint64_t last_activity; /* monotonic time of last block received (usec) */
 };
 
 /* Per-peer entry in the torrent's peer list */
@@ -38,6 +40,8 @@ struct torrent_peer {
 	struct mbt_peer *peer;
 	struct torrent_peer *next;
 	int outstanding;       /* in-flight requests */
+	int hash_failures;     /* consecutive hash failures from this peer */
+	int banned;
 };
 
 struct mbt_torrent {
@@ -73,11 +77,81 @@ struct mbt_torrent {
 	/* Peers */
 	struct torrent_peer *peers;
 	int peer_count;
+
+	/* Request timeout */
+	struct mbt_ev_timer *timeout_timer;
+	int request_timeout_sec; /* 0 = disabled */
+
+	/* Endgame mode */
+	int endgame;  /* 1 when all pieces are requested at least once */
+};
+
+enum {
+	MAX_HASH_FAILURES = 3,   /* ban after this many consecutive failures */
+	ENDGAME_THRESHOLD = 10,  /* enter endgame with this many pieces remaining */
 };
 
 /* --- Forward declarations --- */
 static void torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
+
+static uint64_t
+now_usec(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+/* --- Request timeout --- */
+
+static void
+torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_torrent *t = v;
+	uint64_t now = now_usec();
+	uint64_t deadline = (uint64_t)t->request_timeout_sec * 1000000;
+	int reset_count = 0;
+
+	if (!t->pieces)
+		goto reschedule;
+
+	for (uint32_t i = 0; i < t->piece_count; i++) {
+		struct piece_info *pi = &t->pieces[i];
+		if (pi->state != MBT_PIECE_ACTIVE)
+			continue;
+		if (pi->last_activity == 0)
+			continue;
+		if (now - pi->last_activity < deadline)
+			continue;
+
+		/* Timed out — reset piece */
+		mbt_log_warn(MBT_LOG_TORRENT, "piece %u timed out from %s:%hu, resetting",
+		             i, pi->owner ? mbt_peer_addr(pi->owner->peer) : "?",
+		             pi->owner ? mbt_peer_port(pi->owner->peer) : 0);
+
+		pi->state = MBT_PIECE_PENDING;
+		pi->owner = NULL;
+		pi->received = 0;
+		pi->requested = 0;
+		pi->last_activity = 0;
+		free(pi->data);
+		pi->data = NULL;
+		reset_count++;
+	}
+
+	/* Drive all unchoked peers if we freed up pieces */
+	if (reset_count > 0) {
+		struct torrent_peer *tp;
+		for (tp = t->peers; tp; tp = tp->next) {
+			if (!tp->banned && !mbt_peer_choked(tp->peer))
+				torrent_drive_peer(t, tp);
+		}
+	}
+
+reschedule:
+	mbt_ev_timer_mod(timer, 5 * 1000000ULL); /* check every 5s */
+}
 
 /* --- Peer callbacks --- */
 
@@ -178,6 +252,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	memcpy(pi->data + offset, data, len);
 	pi->received += len;
+	pi->last_activity = now_usec();
 
 	tp->outstanding--;
 
@@ -192,14 +267,26 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 		SHA1Final(digest, &ctx);
 
 		if (memcmp(digest, pi->hash, 20) != 0) {
-			/* Hash mismatch — reset piece */
-			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch, re-requesting", piece);
+			/* Hash mismatch — reset piece, blame peer */
+			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch from %s:%hu",
+			             piece, mbt_peer_addr(p), mbt_peer_port(p));
 			pi->received = 0;
 			pi->requested = 0;
 			pi->state = MBT_PIECE_PENDING;
 			pi->owner = NULL;
+			pi->last_activity = 0;
 			free(pi->data);
 			pi->data = NULL;
+
+			/* Ban peer after repeated failures */
+			tp->hash_failures++;
+			if (tp->hash_failures >= MAX_HASH_FAILURES) {
+				mbt_log_warn(MBT_LOG_TORRENT, "banning %s:%hu after %d hash failures",
+				             mbt_peer_addr(p), mbt_peer_port(p), tp->hash_failures);
+				tp->banned = 1;
+				mbt_peer_free(tp->peer);
+				tp->peer = NULL;
+			}
 		} else {
 			/* Verified — store */
 			mbt_bitmap_set(t->have, piece);
@@ -219,6 +306,19 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 			if (t->cb.on_piece_complete)
 				t->cb.on_piece_complete(t, piece, t->cb_arg);
+
+			/* Endgame: cancel this piece from all other peers */
+			if (t->endgame) {
+				struct torrent_peer *otp;
+				for (otp = t->peers; otp; otp = otp->next) {
+					if (otp == tp || !otp->peer || otp->banned)
+						continue;
+					for (size_t off = 0; off < pi->length; off += BLOCK_SIZE) {
+						uint32_t clen = MIN(BLOCK_SIZE, pi->length - off);
+						mbt_peer_send_cancel(otp->peer, piece, off, clen);
+					}
+				}
+			}
 
 			/* Check completion */
 			if (t->have_count == t->piece_count) {
@@ -374,8 +474,30 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 
 	while (tp->outstanding < limit) {
 		int idx = t->picker(t, tp->peer, t->picker_ctx);
-		if (idx < 0)
+		if (idx < 0) {
+			/* Check if we should enter endgame */
+			if (!t->endgame && t->piece_count > 0) {
+				uint32_t remaining = t->piece_count - t->have_count;
+				if (remaining <= ENDGAME_THRESHOLD && remaining > 0) {
+					t->endgame = 1;
+					mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
+					/* In endgame, request all remaining pieces from this peer too */
+					for (uint32_t i = 0; i < t->piece_count && tp->outstanding < limit; i++) {
+						if (mbt_bitmap_isset(t->have, i) > 0)
+							continue;
+						struct piece_info *epi = &t->pieces[i];
+						if (!epi->data) continue; /* not yet allocated = not in progress */
+						/* Re-request all blocks */
+						for (size_t off = 0; off < epi->length && tp->outstanding < limit; off += BLOCK_SIZE) {
+							uint32_t req_len = MIN(BLOCK_SIZE, epi->length - off);
+							mbt_peer_send_request(tp->peer, i, off, req_len);
+							tp->outstanding++;
+						}
+					}
+				}
+			}
 			break;
+		}
 
 		struct piece_info *pi = &t->pieces[idx];
 		if (mbt_bitmap_isset(t->have, idx) > 0)
@@ -390,6 +512,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			if (!pi->data) return;
 			pi->state = MBT_PIECE_ACTIVE;
 			pi->owner = tp;
+			pi->last_activity = now_usec();
 		}
 
 		/* Request unrequested blocks for this piece */
@@ -428,6 +551,10 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->storage_ctx = cfg->storage_ctx;
 	t->picker = cfg->picker;
 	t->picker_ctx = cfg->picker_ctx;
+	t->request_timeout_sec = cfg->request_timeout_sec ? cfg->request_timeout_sec : 15;
+
+	/* Start timeout scanner */
+	mbt_ev_timer_new(t->ev, &t->timeout_timer, 5 * 1000000ULL, torrent_timeout_cb, t);
 
 	*out = t;
 	return 0;
@@ -455,6 +582,8 @@ mbt_torrent_free(struct mbt_torrent *t)
 		free(t->pieces);
 	}
 
+	if (t->timeout_timer)
+		mbt_ev_timer_free(t->timeout_timer);
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);
 	free(t->name);
