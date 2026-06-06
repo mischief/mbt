@@ -12,7 +12,7 @@
 #include <assert.h>
 #include <err.h>
 
-#include <systemd/sd-event.h>
+#include "event.h"
 
 #include <hex.h>
 #include "infohash.h"
@@ -29,11 +29,11 @@ struct node {
 
 	struct torrent_tree torrents;
 
-	sd_event *ev;
+	struct mbt_ev *ev;
 };
 
 int
-node_new(struct node **node, uint16_t port, sd_event *ev)
+node_new(struct node **node, uint16_t port, struct mbt_ev *ev)
 {
 	struct node *p;
 	int rv, fd = -1, y = 1;
@@ -88,7 +88,7 @@ node_new(struct node **node, uint16_t port, sd_event *ev)
 
 	RB_INIT(&p->torrents);
 
-	p->ev = sd_event_ref(ev);
+	p->ev = ev;
 
 	*node = p;
 
@@ -118,15 +118,12 @@ node_freep(struct node **node)
 		torrent_unref(t);
 	}
 
-	sd_event_unref(n->ev);
-
 	free(n);
 }
 
 int
 node_send_remote(struct node *p, struct remote *r, unsigned char *buf, size_t sz)
 {
-
 	return 0;
 }
 
@@ -142,21 +139,6 @@ node_add_torrent(struct node *n, struct torrent *t)
 	RB_INSERT(torrent_tree, &n->torrents, t);
 }
 
-/*
-int
-node_rx(sd_event_source *s, int fd, uint32_t revents, void *userdata)
-{
-	int rv;
-	unsigned char frame[ETH_DATA_LEN];
-	char hex[ETH_DATA_LEN*2+1];
-	struct sockaddr_storage sa;
-	socklen_t sasz;
-	struct utp_frame *utp;
-
-	return 0;
-}
-*/
-
 uint8_t*
 node_id(struct node *n, size_t *len)
 {
@@ -164,9 +146,8 @@ node_id(struct node *n, size_t *len)
 	return n->id;
 }
 
-sd_event*
-node_event_ref(struct node *n)
+struct mbt_ev*
+node_event(struct node *n)
 {
-	return sd_event_ref(n->ev);
+	return n->ev;
 }
-

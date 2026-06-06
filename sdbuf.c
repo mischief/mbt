@@ -1,5 +1,4 @@
 #include <sys/param.h>
-#include <sys/epoll.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +6,11 @@
 #include <errno.h>
 
 #include <sdbuf.h>
+
+/* sdbuf_io revents flags (matches epoll values) */
+#ifndef EPOLLIN
+#define EPOLLIN 0x001
+#endif
 
 struct buf
 {

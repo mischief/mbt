@@ -12,8 +12,6 @@
 #include <errno.h>
 #include <err.h>
 
-#include <systemd/sd-event.h>
-
 #include "infohash.h"
 #include "lsd.h"
 

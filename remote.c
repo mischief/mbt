@@ -10,10 +10,9 @@
 #include <errno.h>
 #include <err.h>
 
-#include <systemd/sd-event.h>
-
 #include <sha1.h>
 
+#include "event.h"
 #include <hex.h>
 #include "infohash.h"
 #include <be.h>
@@ -37,30 +36,29 @@ free_ucharp(unsigned char **p)
 }
 
 static int remote_read_handshake(struct remote *r);
-static int remote_io(sd_event_source *s, int fd, uint32_t revents, void *v);
+static void remote_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v);
 static int remote_rx(struct remote *r);
 static int remote_extension_tx(struct remote *r);
 static int remote_send_interest(struct remote *r, int interested);
 
-static int
-remote_teardown_defer(sd_event_source *s, void *v)
+static void
+remote_teardown_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct remote *r = v;
 
 	warnx("%s: %s:%hu: removing peer", __func__, r->remote, r->port);
 
 	torrent_remove_remote(r->t, r);
-
-	return 0;
 }
 
 static void
 remote_onerror(struct remote *r, int err)
 {
-	/* even though it's unused, let's be consistent about passing negative errnos */
 	assert(err <= 0);
 
-	sd_event_add_defer(r->event, NULL, remote_teardown_defer, r);
+	/* Deferred teardown via zero-timeout timer */
+	if(!r->defer)
+		mbt_ev_timer_new(r->ev, &r->defer, 0, remote_teardown_cb, r);
 }
 
 static int
@@ -122,7 +120,7 @@ remote_eventcb(struct sdbuf *b, int event, int err, void *v)
 }
 
 int
-remote_new(struct torrent *t, struct remote **r, struct infohash *ih, sd_event *event)
+remote_new(struct torrent *t, struct remote **r, struct infohash *ih, struct mbt_ev *ev)
 {
 	struct remote *remote;
 
@@ -134,7 +132,7 @@ remote_new(struct torrent *t, struct remote **r, struct infohash *ih, sd_event *
 
 	remote->t = t;
 
-	remote->event = sd_event_ref(event);
+	remote->ev = ev;
 
 	if(sdbuf_new(&remote->buf, remote_readcb, remote_writecb, remote_eventcb, remote) < 0){
 		free(remote);
@@ -179,10 +177,12 @@ remote_unref(struct remote *r)
 
 	warnx("%s: %s:%hu destroying", __func__, r->remote, r->port);
 
-	sd_event_source_disable_unref(r->source);
-	sd_event_source_disable_unref(r->timer_source);
-
-	sd_event_unref(r->event);
+	if(r->io)
+		mbt_ev_io_free(r->io);
+	if(r->timer)
+		mbt_ev_timer_free(r->timer);
+	if(r->defer)
+		mbt_ev_timer_free(r->defer);
 
 	sdbuf_free(r->buf);
 
@@ -294,23 +294,16 @@ remote_send_interest(struct remote *r, int interested)
 	return 0;
 }
 
-static int
-remote_timer(sd_event_source *s, uint64_t usec, void *v)
+static void
+remote_timer_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct remote *r = v;
-	int rv;
 
-	if((rv = sd_event_source_set_time(s, usec + (60*1000000ULL))) < 0)
-		return rv;
+	/* reschedule 60s keepalive */
+	mbt_ev_timer_mod(timer, 60*1000000ULL);
 
-	if((rv = sd_event_source_set_enabled(s, SD_EVENT_ONESHOT)) < 0)
-		return rv;
-
-	// sending keep alive
-	if(remote_write(r, "\0\0\0\0", 4) < 0)
-		return -errno;
-
-	return 0;
+	/* send keepalive */
+	remote_write(r, "\0\0\0\0", 4);
 }
 
 static int
@@ -320,10 +313,11 @@ remote_connected(struct remote *r)
 
 	warnx("%s: connected to %s:%hu", __func__, r->remote, r->port);
 
-	if(r->source)
-		rv = sd_event_source_set_io_events(r->source, EPOLLIN);
+	/* Switch IO to read mode */
+	if(r->io)
+		rv = mbt_ev_io_mod(r->io, MBT_EV_READ);
 	else
-		rv = sd_event_add_io(r->event, &r->source, r->fd, EPOLLIN, remote_io, r);
+		rv = mbt_ev_io_new(r->ev, &r->io, r->fd, MBT_EV_READ, remote_io_cb, r);
 
 	if(rv < 0){
 		warnx("%s: failed to setup events: %s", __func__, strerror(-rv));
@@ -338,7 +332,8 @@ remote_connected(struct remote *r)
 		return rv;
 	}
 
-	rv = sd_event_add_time_relative(r->event, &r->timer_source, CLOCK_MONOTONIC, 10*1000000, 0, remote_timer, r);
+	/* keepalive timer: first fire at 10s, then 60s */
+	rv = mbt_ev_timer_new(r->ev, &r->timer, 10*1000000ULL, remote_timer_cb, r);
 	if(rv < 0){
 		warnx("%s: failed to setup timer: %s", __func__, strerror(-rv));
 		remote_onerror(r, rv);
@@ -348,12 +343,15 @@ remote_connected(struct remote *r)
 	return 0;
 }
 
-static int
-remote_connect_cb(sd_event_source *s, int fd, uint32_t revents, void *v)
+static void
+remote_connect_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	socklen_t sasz;
 	int rv, error;
 	struct remote *r = v;
+
+	(void)fd;
+	(void)events;
 
 	sasz = sizeof(error);
 	rv = getsockopt(r->fd, SOL_SOCKET, SO_ERROR, &error, &sasz);
@@ -368,12 +366,14 @@ remote_connect_cb(sd_event_source *s, int fd, uint32_t revents, void *v)
 		goto err;
 	}
 
-	r->source = sd_event_source_unref(r->source);
+	/* Free connect watcher, remote_connected will set up read watcher */
+	mbt_ev_io_free(r->io);
+	r->io = NULL;
 
-	return remote_connected(r);
+	remote_connected(r);
+	return;
 err:
 	remote_onerror(r, -error);
-	return 0;
 }
 
 int
@@ -407,11 +407,7 @@ remote_connect(struct remote *r, const char *da, uint16_t port)
 	rv = connect(r->fd, (struct sockaddr*)&sa, sasz);
 	if(rv < 0){
 		if(errno == EINPROGRESS){
-			rv = sd_event_add_io(r->event, &r->source, r->fd, EPOLLOUT, remote_connect_cb, r);
-			if(rv < 0)
-				return rv;
-
-			rv = sd_event_source_set_enabled(r->source, SD_EVENT_ONESHOT);
+			rv = mbt_ev_io_new(r->ev, &r->io, r->fd, MBT_EV_WRITE, remote_connect_io_cb, r);
 			if(rv < 0)
 				return rv;
 
@@ -603,20 +599,6 @@ remote_utmetadata_rx(struct remote *r, size_t msglen)
 			return remote_metadata_complete(r);
 		}
 
-		/* on a short block, we reached the end */
-/*
-		if(sz != METADATA_BLOCKSIZE){
-			warnx("%s: metadata transfer complete", __func__);
-			return remote_metadata_complete(r);
-		}
-
-		if(!r->hechoking && r->bep9code){
-			rv = remote_send_utmetadata_request(r, r->metadata_need_block++);
-			if(rv < 0)
-				return rv;
-		}
-*/
-
 		return 0;
 	case 2:
 		warnx("%s: reject", __func__);
@@ -746,9 +728,6 @@ remote_extension_rx(struct remote *r, size_t sz)
 
 		if(!r->hechoking && r->bep9code){
 			rv = remote_request_all_metadata(r);
-/*
-			rv = remote_send_utmetadata_request(r, r->metadata_need_block++);
-*/
 			if(rv < 0)
 				return rv;
 		}
@@ -823,12 +802,19 @@ remote_read_handshake(struct remote *r)
 	return 0;
 }
 
-int
-remote_io(sd_event_source *s, int fd, uint32_t revents, void *v)
+static void
+remote_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	struct remote *r = v;
+	uint32_t revents = 0;
 
-	return sdbuf_io(r->buf, fd, revents);
+	(void)io;
+
+	/* translate to sdbuf's expected bits */
+	if(events & MBT_EV_READ)  revents |= 0x001; /* EPOLLIN */
+	if(events & MBT_EV_WRITE) revents |= 0x004; /* EPOLLOUT */
+
+	sdbuf_io(r->buf, fd, revents);
 }
 
 static int
@@ -999,4 +985,3 @@ remote_rx(struct remote *r)
 err:
 	return rv;
 }
-

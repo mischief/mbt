@@ -9,9 +9,9 @@
 #include <endian.h>
 #include <err.h>
 
-#include <systemd/sd-event.h>
 #include <sha1.h>
 
+#include "event.h"
 #include "infohash.h"
 #include <be.h>
 #include <bt.h>

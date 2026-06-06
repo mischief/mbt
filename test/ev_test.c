@@ -22,7 +22,6 @@ on_io(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
 	assert(memcmp(buf, "hello", 5) == 0);
 	io_fired = 1;
 
-	/* stop after both fire */
 	if (io_fired && timer_fired)
 		mbt_ev_stop(arg);
 }
@@ -51,18 +50,14 @@ test_backend(struct mbt_ev *ev, const char *name)
 	rv = pipe(pfd);
 	assert(rv == 0);
 
-	/* make read end non-blocking */
 	fcntl(pfd[0], F_SETFL, fcntl(pfd[0], F_GETFL) | O_NONBLOCK);
 
-	/* watch read end */
 	rv = mbt_ev_io_new(ev, &io, pfd[0], MBT_EV_READ, on_io, ev);
 	assert(rv == 0);
 
-	/* 10ms timer */
 	rv = mbt_ev_timer_new(ev, &tmr, 10000, on_timer, ev);
 	assert(rv == 0);
 
-	/* write to pipe to trigger io */
 	write(pfd[1], "hello", 5);
 
 	rv = mbt_ev_run(ev);
@@ -86,13 +81,17 @@ main(void)
 	struct mbt_ev *ev;
 	int rv;
 
+#ifdef HAVE_SD_EVENT
 	rv = mbt_ev_sd_new(&ev);
 	assert(rv == 0);
 	test_backend(ev, "sd-event");
+#endif
 
+#ifdef HAVE_LIBEVENT
 	rv = mbt_ev_libevent_new(&ev);
 	assert(rv == 0);
 	test_backend(ev, "libevent");
+#endif
 
 	return 0;
 }

@@ -1,6 +1,5 @@
 /*
 #include <stdint.h>
-#include <systemd/sd-event.h>
 */
 
 enum {
@@ -22,4 +21,3 @@ int sdbuf_io(struct sdbuf *b, int fd, uint32_t revents);
 size_t sdbuf_read_available(struct sdbuf *b);
 ssize_t sdbuf_discard(struct sdbuf *b, size_t sz);
 ssize_t sdbuf_read(struct sdbuf *b, void *buf, size_t sz);
-

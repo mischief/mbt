@@ -19,23 +19,32 @@ endforeach
 
 deps = []
 
-libsystemd_dep = dependency('libsystemd')
-deps += libsystemd_dep
-
 libbsd_dep = dependency('libbsd-overlay')
 deps += libbsd_dep
 
 libmd_dep = dependency('libmd')
 deps += libmd_dep
 
-# Optional libevent support
-libevent_dep = dependency('libevent', required: get_option('libevent'))
+# Event backend (one or the other)
+event_backend = get_option('event_backend')
+
+if event_backend == 'sd-event'
+  libsystemd_dep = dependency('libsystemd')
+  deps += libsystemd_dep
+  ev_src = 'ev_sd.c'
+  add_project_arguments('-DHAVE_SD_EVENT', language: 'c')
+elif event_backend == 'libevent'
+  libevent_dep = dependency('libevent')
+  deps += libevent_dep
+  ev_src = 'ev_libevent.c'
+  add_project_arguments('-DHAVE_LIBEVENT', language: 'c')
+endif
 
 # Core library
 bt_src = [
   'be.c',
   'bt.c',
-  'ev_sd.c',
+  ev_src,
   'hex.c',
   'infohash.c',
   'lsd.c',
@@ -45,14 +54,7 @@ bt_src = [
   'tbmap.c',
 ]
 
-bt_deps = deps
-
-if libevent_dep.found()
-  bt_src += 'ev_libevent.c'
-  bt_deps += libevent_dep
-endif
-
-libmbt = library('mbt', bt_src, dependencies: bt_deps, install: true)
+libmbt = library('mbt', bt_src, dependencies: deps, install: true)
 
 # Tests
 tbmap_test = executable('tbmap_test', 'test/tbmap_test.c', link_with: [libmbt])
@@ -74,15 +76,14 @@ foreach t : tfiles
     args: [meson.current_source_dir() / 'test' / 'testdata' / t])
 endforeach
 
-bt_test = executable('bt_test', 'test/bt_test.c', link_with: [libmbt], dependencies: bt_deps)
+bt_test = executable('bt_test', 'test/bt_test.c', link_with: [libmbt], dependencies: deps)
 
 # Event loop test
-ev_test_deps = bt_deps
-ev_test = executable('ev_test', 'test/ev_test.c', link_with: [libmbt], dependencies: ev_test_deps)
+ev_test = executable('ev_test', 'test/ev_test.c', link_with: [libmbt], dependencies: deps)
 test('ev', ev_test)
 
 # Tools
-executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], dependencies: bt_deps)
+executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], dependencies: deps)
 
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt])

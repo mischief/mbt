@@ -6,9 +6,9 @@
 #include <assert.h>
 #include <sysexits.h>
 #include <stdio.h>
+#include <signal.h>
 
-#include <systemd/sd-event.h>
-
+#include "event.h"
 #include "infohash.h"
 #include <be.h>
 #include <bt.h>
@@ -24,7 +24,7 @@ lsd_on_frame(struct lsd_frame_info *info, void *v)
 	struct remote *r;
 	struct torrent *t;
 	struct infohash *ih;
-	__attribute__((cleanup(sd_event_unrefp))) sd_event *event = node_event_ref(n);
+	struct mbt_ev *ev = node_event(n);
 
 	warnx("%s called", __func__);
 
@@ -40,7 +40,7 @@ lsd_on_frame(struct lsd_frame_info *info, void *v)
 			node_add_torrent(n, t);
 		}
 
-		rv = remote_new(t, &r, infohash_ref(ih), event);
+		rv = remote_new(t, &r, infohash_ref(ih), ev);
 		if(rv < 0){
 			warnx("remote_new4: %s", strerror(-rv));
 			continue;
@@ -56,32 +56,38 @@ lsd_on_frame(struct lsd_frame_info *info, void *v)
 	return 0;
 }
 
-static int
-lsd_handler(sd_event_source *s, int fd, uint32_t revents, void *v)
+struct lsd_ctx {
+	struct lsd *lsd;
+	struct mbt_ev *ev;
+};
+
+static void
+lsd_handler(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	int rv;
-	struct lsd *lsd = v;
+	struct lsd_ctx *ctx = v;
+	struct lsd *lsd = ctx->lsd;
 	__attribute__((cleanup(lsd_frame_freep))) struct lsd_frame *frame = NULL;
 	__attribute__((cleanup(lsd_frame_info_freep))) struct lsd_frame_info *info = NULL;
 	struct infohash *ih;
 	char hash[INFOHASH_SHA1HEXLEN+1];
 
-	(void)s;
+	(void)io;
 	(void)fd;
-	(void)revents;
+	(void)events;
 
 	rv = lsd_recv(lsd, &frame);
 	if(rv < 0){
 		warnx("lsd_recv: %s", strerror(-rv));
-		sd_event_exit(sd_event_source_get_event(s), rv);
-		return rv;
+		mbt_ev_stop(ctx->ev);
+		return;
 	}
 
 	rv = lsd_frame_parse(frame, &info);
 	if(rv < 0){
 		warnx("lsd_frame_parse: %s", strerror(-rv));
-		sd_event_exit(sd_event_source_get_event(s), rv);
-		return rv;
+		mbt_ev_stop(ctx->ev);
+		return;
 	}
 
 	printf("received LSD frame from %s\n", info->remote);
@@ -96,27 +102,26 @@ lsd_handler(sd_event_source *s, int fd, uint32_t revents, void *v)
 	}
 
 	if(lsd->on_frame)
-		return lsd->on_frame(info, lsd->on_frame_arg);
-
-	return 0;
+		lsd->on_frame(info, lsd->on_frame_arg);
 }
 
 int
 main(int argc, char *argv[])
 {
 	int rv;
-	__attribute__((cleanup(sd_event_unrefp))) sd_event *ev = NULL;
+	struct mbt_ev *ev = NULL;
 	__attribute__((cleanup(infohash_unrefp))) struct infohash *ih = NULL;
 	__attribute__((cleanup(lsd_freep))) struct lsd *lsdfd = NULL;
 	__attribute__((cleanup(node_freep))) struct node *node = NULL;
 	__attribute__((cleanup(torrent_unrefp))) struct torrent *torrent = NULL;
+	struct mbt_ev_io *lsd_io = NULL;
 
 	struct remote *remote;
 
 	(void)argc;
 	(void)argv;
 
-	const char hexstr[INFOHASH_SHA1HEXLEN+1] = "6F4370DF4304609A8793CE2B59178DCC8FEBF5E2";
+	const char hexstr[INFOHASH_SHA1HEXLEN+1] = "C8295CE630F2064F08440DB1534E4992CFE4862A";
 	char hash[INFOHASH_SHA1HEXLEN+1];
 
 	signal(SIGPIPE, SIG_IGN);
@@ -131,14 +136,15 @@ main(int argc, char *argv[])
 
 	assert(strcmp(hexstr, hash) == 0);
 
-	if((rv = sd_event_default(&ev)) < 0)
-		errx(EX_OSERR, "sd_event_default: %s", strerror(-rv));
-
-        if((rv = sd_event_add_signal(ev, NULL, SIGTERM|SD_EVENT_SIGNAL_PROCMASK, NULL, NULL)) < 0)
-                errx(EX_OSERR, "sd_event_add_signal: %s", strerror(-rv));
-
-        if((rv = sd_event_add_signal(ev, NULL, SIGINT|SD_EVENT_SIGNAL_PROCMASK, NULL, NULL)) < 0)
-                errx(EX_OSERR, "sd_event_add_signal: %s", strerror(-rv));
+#ifdef HAVE_SD_EVENT
+	rv = mbt_ev_sd_new(&ev);
+#elif defined(HAVE_LIBEVENT)
+	rv = mbt_ev_libevent_new(&ev);
+#else
+#error "No event backend configured"
+#endif
+	if(rv < 0)
+		errx(EX_OSERR, "mbt_ev_new: %s", strerror(-rv));
 
 	if((rv = node_new(&node, 51412, ev)) < 0)
 		errx(1, "node_new: %s", strerror(-rv));
@@ -151,8 +157,10 @@ main(int argc, char *argv[])
 	lsdfd->on_frame = lsd_on_frame;
 	lsdfd->on_frame_arg = node;
 
-	if((rv = sd_event_add_io(ev, NULL, lsdfd->fd, EPOLLIN, lsd_handler, lsdfd)) < 0)
-		errx(1, "sd_event_add_io: %s", strerror(-rv));
+	struct lsd_ctx lsd_ctx = { .lsd = lsdfd, .ev = ev };
+
+	if((rv = mbt_ev_io_new(ev, &lsd_io, lsdfd->fd, MBT_EV_READ, lsd_handler, &lsd_ctx)) < 0)
+		errx(1, "mbt_ev_io_new: %s", strerror(-rv));
 
 	if((rv = torrent_new(node, ih, &torrent)) < 0)
 		errx(1, "torrent_new: %s", strerror(-rv));
@@ -161,16 +169,19 @@ main(int argc, char *argv[])
 	if(rv < 0)
 		errx(1, "remote_new: %s", strerror(-rv));
 
-	rv = remote_connect(remote, "192.168.0.12", 59677);
+	rv = remote_connect(remote, "192.168.0.10", 28888);
 	if(rv < 0)
 		errx(1, "remote_connect: %s", strerror(-rv));
 
 	remote_unref(remote);
 	remote = NULL;
 
-	rv = sd_event_loop(ev);
+	rv = mbt_ev_run(ev);
 	if(rv < 0)
-		errx(1, "sd_event_loop: %s", strerror(-rv));
+		errx(1, "mbt_ev_run: %s", strerror(-rv));
+
+	mbt_ev_io_free(lsd_io);
+	mbt_ev_destroy(ev);
 
 	return 0;
 }

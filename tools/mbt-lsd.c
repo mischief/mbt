@@ -6,9 +6,9 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/wait.h>
 
-#include <systemd/sd-event.h>
-
+#include "event.h"
 #include "infohash.h"
 #include "lsd.h"
 
@@ -29,7 +29,6 @@ parse_cmd(const char *command)
 	if (cmd_copy == NULL)
 		err(1, "strdup");
 
-	/* Count number of arguments */
 	char *temp = strdup(command);
 	if (temp == NULL)
 		err(1, "strdup");
@@ -41,12 +40,10 @@ parse_cmd(const char *command)
 	}
 	free(temp);
 
-	/* Allocate argv array (argc + 1 for NULL terminator) */
 	cmd_argv = malloc((cmd_argc + 1) * sizeof(char *));
 	if (cmd_argv == NULL)
 		err(1, "malloc");
 
-	/* Populate argv array */
 	saveptr = NULL;
 	for (token = strtok_r(cmd_copy, " \t", &saveptr); token != NULL;
 	     token = strtok_r(NULL, " \t", &saveptr)) {
@@ -70,18 +67,15 @@ do_exec(char *s)
 	if (cmd_argv == NULL)
 		return;
 
-	/* Allocate a copy of argv to modify */
 	argv = malloc((cmd_argc + 1) * sizeof(char *));
 	if (argv == NULL)
 		err(1, "malloc");
 
-	/* Copy argv, replacing %H with hash in each argument */
 	for (i = 0; i < cmd_argc; i++) {
 		char *arg = cmd_argv[i];
 		char *pos = strstr(arg, "%H");
 
 		if (pos != NULL) {
-			/* Argument contains %H, expand it */
 			size_t before_len = pos - arg;
 			size_t hash_len = strlen(s);
 			size_t after_len = strlen(pos + 2);
@@ -95,7 +89,6 @@ do_exec(char *s)
 			strcpy(argv[i] + before_len, s);
 			strcpy(argv[i] + before_len + hash_len, pos + 2);
 		} else {
-			/* Argument doesn't contain %H, copy as-is */
 			argv[i] = strdup(arg);
 			if (argv[i] == NULL)
 				err(1, "strdup");
@@ -107,7 +100,6 @@ do_exec(char *s)
 	if (pid == -1) {
 		err(1, "fork");
 	} else if (pid == 0) {
-		/* Execute with argv */
 		execvp(argv[0], argv);
 		err(1, "execvp");
 	} else {
@@ -116,39 +108,44 @@ do_exec(char *s)
 		}
 	}
 
-	/* Free the argv copy */
 	for (i = 0; i < cmd_argc; i++) {
 		free(argv[i]);
 	}
 	free(argv);
 }
 
-static int
-lsd_handler(sd_event_source *s, int fd, uint32_t revents, void *v)
+struct lsd_tool_ctx {
+	struct lsd *lsd;
+	struct mbt_ev *ev;
+};
+
+static void
+lsd_handler(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	int rv;
-	struct lsd *lsd = v;
+	struct lsd_tool_ctx *ctx = v;
+	struct lsd *lsd = ctx->lsd;
 	__attribute__((cleanup(lsd_frame_freep))) struct lsd_frame *frame = NULL;
 	__attribute__((cleanup(lsd_frame_info_freep))) struct lsd_frame_info *info = NULL;
 	struct infohash *ih;
 	char hash[INFOHASH_SHA1HEXLEN+1];
 
-	(void)s;
+	(void)io;
 	(void)fd;
-	(void)revents;
+	(void)events;
 
 	rv = lsd_recv(lsd, &frame);
 	if (rv < 0) {
 		warnx("lsd_recv: %s", strerror(-rv));
-		sd_event_exit(sd_event_source_get_event(s), rv);
-		return rv;
+		mbt_ev_stop(ctx->ev);
+		return;
 	}
 
 	rv = lsd_frame_parse(frame, &info);
 	if (rv < 0) {
 		warnx("lsd_frame_parse: %s", strerror(-rv));
-		sd_event_exit(sd_event_source_get_event(s), rv);
-		return rv;
+		mbt_ev_stop(ctx->ev);
+		return;
 	}
 
 	printf("received LSD frame from %s\n", info->remote);
@@ -163,8 +160,6 @@ lsd_handler(sd_event_source *s, int fd, uint32_t revents, void *v)
 			do_exec(hash);
 		}
 	}
-
-	return 0;
 }
 
 int
@@ -172,10 +167,10 @@ main(int argc, char *argv[])
 {
 	int rv;
 	int c;
+	struct mbt_ev *ev = NULL;
+	struct mbt_ev_io *lsd_io = NULL;
 	__attribute__((cleanup(lsd_freep))) struct lsd *lsdfd = NULL;
-	__attribute__((cleanup(sd_event_unrefp))) sd_event *ev = NULL;
 
-	/* Parse command line arguments */
 	while ((c = getopt(argc, argv, "c:")) != -1) {
 		switch (c) {
 		case 'c':
@@ -190,15 +185,27 @@ main(int argc, char *argv[])
 	if ((rv = lsd_init(&lsdfd, O_NONBLOCK)) < 0)
 		errx(1, "lsd_init: %s", strerror(-rv));
 
-	if ((rv = sd_event_default(&ev)) < 0)
-		errx(1, "sd_event_default: %s", strerror(-rv));
-
-	if ((rv = sd_event_add_io(ev, NULL, lsdfd->fd, EPOLLIN, lsd_handler, lsdfd)) < 0)
-		errx(1, "sd_event_add_io: %s", strerror(-rv));
-
-	rv = sd_event_loop(ev);
+#ifdef HAVE_SD_EVENT
+	rv = mbt_ev_sd_new(&ev);
+#elif defined(HAVE_LIBEVENT)
+	rv = mbt_ev_libevent_new(&ev);
+#else
+#error "No event backend configured"
+#endif
 	if (rv < 0)
-		errx(1, "sd_event_loop: %s", strerror(-rv));
+		errx(1, "mbt_ev_new: %s", strerror(-rv));
+
+	struct lsd_tool_ctx ctx = { .lsd = lsdfd, .ev = ev };
+
+	if ((rv = mbt_ev_io_new(ev, &lsd_io, lsdfd->fd, MBT_EV_READ, lsd_handler, &ctx)) < 0)
+		errx(1, "mbt_ev_io_new: %s", strerror(-rv));
+
+	rv = mbt_ev_run(ev);
+	if (rv < 0)
+		errx(1, "mbt_ev_run: %s", strerror(-rv));
+
+	mbt_ev_io_free(lsd_io);
+	mbt_ev_destroy(ev);
 
 	return 0;
 }

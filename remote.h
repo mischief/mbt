@@ -2,7 +2,8 @@
 #include <sys/queue.h>
 #include <netinet/in.h>
 #include <stdint.h>
-#include <systemd/sd-event.h>
+
+#include "event.h"
 */
 
 struct remote;
@@ -22,10 +23,11 @@ struct remote {
 	unsigned char ext[8];
 	unsigned char id[20];
 
-	sd_event_source *source;
-	sd_event_source *timer_source;
+	struct mbt_ev_io *io;
+	struct mbt_ev_timer *timer;
+	struct mbt_ev_timer *defer;
 
-	sd_event *event;
+	struct mbt_ev *ev;
 
 	struct sdbuf *buf;
 
@@ -54,11 +56,10 @@ struct remote {
 	int metadata_have_block;
 };
 
-int remote_new(struct torrent *t, struct remote **r, struct infohash *ih, sd_event *event);
+int remote_new(struct torrent *t, struct remote **r, struct infohash *ih, struct mbt_ev *ev);
 struct remote *remote_ref(struct remote *r);
 void remote_unref(struct remote *r);
 void remote_unrefp(struct remote **r);
 int remote_connect(struct remote *r, const char *da, uint16_t port);
 
 int remote_request_blocks_for_piece(struct remote *r, size_t piece);
-
