@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <unistd.h>
 #include <err.h>
 
 #include <curl/curl.h>
@@ -85,27 +86,47 @@ on_complete(struct mbt_torrent *t, void *arg)
 	mbt_session_stop(session);
 }
 
+static void
+usage(const char *prog)
+{
+	fprintf(stderr, "usage: %s [-d] [-o dir] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "  -d        enable debug logging\n");
+	fprintf(stderr, "  -o dir    download directory (default: .)\n");
+	exit(1);
+}
+
 int
 main(int argc, char *argv[])
 {
-	int rv;
-	const char *torrent_file;
+	int rv, ch;
 	const char *download_dir = ".";
+	int debug = 0;
 
-	if (argc < 2) {
-		fprintf(stderr, "usage: %s <file.torrent> [download-dir]\n", argv[0]);
-		return 1;
+	while ((ch = getopt(argc, argv, "do:")) != -1) {
+		switch (ch) {
+		case 'd':
+			debug = 1;
+			break;
+		case 'o':
+			download_dir = optarg;
+			break;
+		default:
+			usage(argv[0]);
+		}
 	}
 
-	torrent_file = argv[1];
-	if (argc > 2)
-		download_dir = argv[2];
+	argc -= optind;
+	argv += optind;
+
+	if (argc < 1)
+		usage(argv[-optind]);
 
 	signal(SIGPIPE, SIG_IGN);
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 
 	mbt_log_set(mbt_log_stderr, NULL);
-	mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_TORRENT);
+	if (debug)
+		mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_TORRENT | MBT_LOG_PEER);
 
 	struct mbt_session_config cfg = {0};
 #ifdef HAVE_SD_EVENT
@@ -126,9 +147,16 @@ main(int argc, char *argv[])
 	if (rv < 0)
 		errx(1, "session: %s", strerror(-rv));
 
-	rv = mbt_session_add_torrent_file(session, torrent_file);
-	if (rv < 0)
-		errx(1, "add_torrent: %s", strerror(-rv));
+	/* Add torrent or magnet */
+	if (strncmp(argv[0], "magnet:", 7) == 0) {
+		rv = mbt_session_add_magnet(session, argv[0]);
+		if (rv < 0)
+			errx(1, "add_magnet: %s", strerror(-rv));
+	} else {
+		rv = mbt_session_add_torrent_file(session, argv[0]);
+		if (rv < 0)
+			errx(1, "add_torrent: %s", strerror(-rv));
+	}
 
 	/* Set callbacks on the torrent */
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
@@ -138,7 +166,7 @@ main(int argc, char *argv[])
 			.on_complete = on_complete,
 		};
 		mbt_torrent_set_callbacks(t, &cb, NULL);
-		fprintf(stderr, "downloading: %s\n", mbt_torrent_name(t) ? mbt_torrent_name(t) : "(unknown)");
+		fprintf(stderr, "downloading: %s\n", mbt_torrent_name(t) ? mbt_torrent_name(t) : "(metadata pending)");
 	}
 
 	mbt_session_enable_lsd(session);
