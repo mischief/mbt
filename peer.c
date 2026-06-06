@@ -1,4 +1,5 @@
 #include <sys/param.h>
+#include <arpa/inet.h>
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -30,6 +31,8 @@ struct mbt_peer {
 	uint8_t our_id[20];
 	uint8_t their_id[20];
 	uint8_t ext[8];
+	char addr[INET6_ADDRSTRLEN];
+	uint16_t port;
 
 	struct mbt_peer_callbacks cb;
 	void *cb_arg;
@@ -76,7 +79,8 @@ peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 static void
 peer_error(struct mbt_peer *p, int err)
 {
-	mbt_log_warn(MBT_LOG_PEER, "error %d", err);
+	mbt_log_warn(MBT_LOG_PEER, "%s:%hu: %s", p->addr, p->port,
+	             err == 0 ? "EOF" : strerror(-err));
 	p->state = MBT_PEER_CLOSED;
 	if (p->cb.on_error)
 		p->cb.on_error(p, err, p->cb_arg);
@@ -496,6 +500,8 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 	p->am_choking = 1;
 	p->piece_count = piece_count;
 	p->state = MBT_PEER_HANDSHAKE;
+
+	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->port);
 
 	/* Point conn callbacks to this peer */
 	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);

@@ -2,6 +2,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <systemd/sd-event.h>
 
@@ -110,6 +113,31 @@ mbt_conn_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
 	c->readcb = readcb;
 	c->eventcb = eventcb;
 	c->arg = arg;
+}
+
+int
+mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
+{
+	struct conn_sd *c = (struct conn_sd *)conn;
+	struct sockaddr_storage ss;
+	socklen_t len = sizeof(ss);
+
+	if (getpeername(c->fd, (struct sockaddr *)&ss, &len) < 0)
+		return -errno;
+
+	if (ss.ss_family == AF_INET) {
+		struct sockaddr_in *sa = (struct sockaddr_in *)&ss;
+		inet_ntop(AF_INET, &sa->sin_addr, buf, buflen);
+		if (port) *port = ntohs(sa->sin_port);
+	} else if (ss.ss_family == AF_INET6) {
+		struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&ss;
+		inet_ntop(AF_INET6, &sa6->sin6_addr, buf, buflen);
+		if (port) *port = ntohs(sa6->sin6_port);
+	} else {
+		return -EAFNOSUPPORT;
+	}
+
+	return 0;
 }
 
 /* Access the underlying sd_event* from our ev_sd backend */

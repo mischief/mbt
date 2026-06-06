@@ -58,8 +58,9 @@ main(int argc, char *argv[])
 	};
 	mbt_torrent_set_callbacks(t, &tcb, s);
 
-	/* Connect to known peer */
+	/* Connect to known peers */
 	mbt_session_add_peer(s, ih, "192.168.0.189", 51413);   /* megrez */
+	mbt_session_add_peer(s, ih, "192.168.0.10", 54444);    /* sokoban */
 
 	infohash_unref(ih);
 

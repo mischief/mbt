@@ -35,6 +35,9 @@ int mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
 void mbt_conn_set_callbacks(struct mbt_conn *c, mbt_conn_read_cb readcb,
                             mbt_conn_event_cb eventcb, void *arg);
 
+/* Get remote peer address (via getpeername). Returns 0 on success. */
+int mbt_conn_peer_addr(struct mbt_conn *c, char *buf, size_t buflen, uint16_t *port);
+
 /* Inline convenience wrappers */
 static inline void
 mbt_conn_set_watermark(struct mbt_conn *c, size_t low)

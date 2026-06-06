@@ -123,6 +123,32 @@ mbt_conn_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
 }
 
 int
+mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
+{
+	struct conn_lev *c = (struct conn_lev *)conn;
+	evutil_socket_t fd = bufferevent_getfd(c->bev);
+	struct sockaddr_storage ss;
+	socklen_t len = sizeof(ss);
+
+	if (getpeername(fd, (struct sockaddr *)&ss, &len) < 0)
+		return -errno;
+
+	if (ss.ss_family == AF_INET) {
+		struct sockaddr_in *sa = (struct sockaddr_in *)&ss;
+		evutil_inet_ntop(AF_INET, &sa->sin_addr, buf, buflen);
+		if (port) *port = ntohs(sa->sin_port);
+	} else if (ss.ss_family == AF_INET6) {
+		struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&ss;
+		evutil_inet_ntop(AF_INET6, &sa6->sin6_addr, buf, buflen);
+		if (port) *port = ntohs(sa6->sin6_port);
+	} else {
+		return -EAFNOSUPPORT;
+	}
+
+	return 0;
+}
+
+int
 mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
              mbt_conn_read_cb readcb, mbt_conn_event_cb eventcb, void *arg)
 {

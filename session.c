@@ -38,6 +38,8 @@ struct pending_connect {
 	struct mbt_torrent *torrent;
 	struct mbt_ev_io *io;
 	int fd;
+	char addr[INET6_ADDRSTRLEN];
+	uint16_t port;
 	STAILQ_ENTRY(pending_connect) next;
 };
 
@@ -94,7 +96,7 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		goto fail;
 	}
 
-	mbt_log_debug(MBT_LOG_SESSION, "connected to peer");
+	mbt_log_debug(MBT_LOG_SESSION, "connected to %s:%hu", pc->addr, pc->port);
 
 	/* Free connect watcher before creating conn (conn registers its own) */
 	mbt_ev_io_free(pc->io);
@@ -515,6 +517,8 @@ mbt_session_add_peer(struct mbt_session *s, struct infohash *ih,
 	pc->session = s;
 	pc->torrent = st->torrent;
 	pc->fd = fd;
+	snprintf(pc->addr, sizeof(pc->addr), "%s", addr);
+	pc->port = port;
 
 	rv = mbt_ev_io_new(s->ev, &pc->io, fd, MBT_EV_WRITE, pending_connect_cb, pc);
 	if (rv < 0) {
