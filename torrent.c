@@ -95,6 +95,16 @@ enum {
 static void torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
 
+static void
+torrent_deferred_peer_free(struct mbt_ev_timer *timer, void *v)
+{
+	struct torrent_peer *tp = v;
+	mbt_ev_timer_free(timer);
+	if (tp->peer)
+		mbt_peer_free(tp->peer);
+	free(tp);
+}
+
 static uint64_t
 now_usec(void)
 {
@@ -433,8 +443,17 @@ on_error(struct mbt_peer *p, int err, void *arg)
 		}
 	}
 
-	mbt_peer_free(tp->peer);
-	free(tp);
+	/* Don't free tp->peer here — we may be inside its callback chain.
+	 * The peer is already CLOSED and will not deliver more callbacks.
+	 * Free on next event loop iteration via deferred timer. */
+	tp->next = NULL;
+	if (!tp->banned)
+		tp->banned = 1; /* prevent re-use */
+
+	/* Schedule deferred free */
+	struct mbt_ev_timer *dtimer = NULL;
+	mbt_ev_timer_new(t->ev, &dtimer, 0, torrent_deferred_peer_free, tp);
+
 	t->peer_count--;
 }
 
