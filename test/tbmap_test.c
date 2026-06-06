@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <assert.h>
+#include <sys/types.h>
 
 #include <tbmap.h>
 
@@ -131,6 +132,84 @@ test_size_mismatch(void)
 }
 
 static void
+test_count(void)
+{
+	struct tbmap *tb = NULL;
+	tbmap_new(&tb, 2);
+
+	assert(tbmap_count(tb) == 0);
+
+	tbmap_set(tb, 0);
+	assert(tbmap_count(tb) == 1);
+
+	tbmap_set(tb, 7);
+	tbmap_set(tb, 8);
+	tbmap_set(tb, 15);
+	assert(tbmap_count(tb) == 4);
+
+	tbmap_unref(tb);
+}
+
+static void
+test_full(void)
+{
+	struct tbmap *tb = NULL;
+	tbmap_new(&tb, 1);
+
+	assert(!tbmap_full(tb));
+
+	for (int i = 0; i < 8; i++)
+		tbmap_set(tb, i);
+
+	assert(tbmap_full(tb));
+
+	tbmap_unref(tb);
+}
+
+static void
+test_first_clear(void)
+{
+	struct tbmap *tb = NULL;
+	tbmap_new(&tb, 2);
+
+	/* empty — first clear is bit 0 */
+	assert(tbmap_first_clear(tb) == 0);
+
+	tbmap_set(tb, 0);
+	assert(tbmap_first_clear(tb) == 1);
+
+	/* fill first byte */
+	for (int i = 0; i < 8; i++)
+		tbmap_set(tb, i);
+	assert(tbmap_first_clear(tb) == 8);
+
+	/* fill all */
+	for (int i = 8; i < 16; i++)
+		tbmap_set(tb, i);
+	assert(tbmap_first_clear(tb) == -1);
+
+	tbmap_unref(tb);
+}
+
+static void
+test_first_set(void)
+{
+	struct tbmap *tb = NULL;
+	tbmap_new(&tb, 2);
+
+	/* empty */
+	assert(tbmap_first_set(tb) == -1);
+
+	tbmap_set(tb, 5);
+	assert(tbmap_first_set(tb) == 5);
+
+	tbmap_set(tb, 1);
+	assert(tbmap_first_set(tb) == 1);
+
+	tbmap_unref(tb);
+}
+
+static void
 test_multi_byte(void)
 {
 	struct tbmap *tb = NULL;
@@ -163,6 +242,10 @@ main(void)
 	test_union();
 	test_intersection();
 	test_size_mismatch();
+	test_count();
+	test_full();
+	test_first_clear();
+	test_first_set();
 	test_multi_byte();
 	return 0;
 }

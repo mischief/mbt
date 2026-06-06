@@ -74,7 +74,8 @@ test_unrefp(void)
 	infohash_new(&ih, INFOHASH_SHA1, "611F70899D4E1D6A9C39CFC925F103DFEF630328");
 	infohash_unrefp(&ih);
 
-	/* NULL is safe */
+	/* ih is now dangling (unrefp doesn't NULL it), test NULL path */
+	ih = NULL;
 	infohash_unrefp(&ih);
 }
 

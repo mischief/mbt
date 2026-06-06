@@ -4,6 +4,7 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#include <sys/types.h>
 
 #include <tbmap.h>
 
@@ -113,6 +114,69 @@ void
 tbmap_clear(struct tbmap *tb)
 {
 	memset(tb->map, 0, tb->bytes);
+}
+
+size_t
+tbmap_count(struct tbmap *tb)
+{
+	size_t i, count = 0;
+
+	for (i = 0; i < tb->bytes; i++) {
+		uint8_t v = tb->map[i];
+		while (v) {
+			count += v & 1;
+			v >>= 1;
+		}
+	}
+
+	return count;
+}
+
+int
+tbmap_full(struct tbmap *tb)
+{
+	size_t i;
+
+	for (i = 0; i < tb->bytes; i++) {
+		if (tb->map[i] != 0xFF)
+			return 0;
+	}
+
+	return 1;
+}
+
+ssize_t
+tbmap_first_clear(struct tbmap *tb)
+{
+	size_t i, bit;
+
+	for (i = 0; i < tb->bytes; i++) {
+		if (tb->map[i] != 0xFF) {
+			for (bit = 0; bit < 8; bit++) {
+				if (!(tb->map[i] & (128 >> bit)))
+					return (ssize_t)(i * 8 + bit);
+			}
+		}
+	}
+
+	return -1;
+}
+
+ssize_t
+tbmap_first_set(struct tbmap *tb)
+{
+	size_t i, bit;
+
+	for (i = 0; i < tb->bytes; i++) {
+		if (tb->map[i] != 0) {
+			for (bit = 0; bit < 8; bit++) {
+				if (tb->map[i] & (128 >> bit))
+					return (ssize_t)(i * 8 + bit);
+			}
+		}
+	}
+
+	return -1;
 }
 
 int
