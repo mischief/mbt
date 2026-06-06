@@ -59,6 +59,8 @@ struct mbt_session {
 
 	uint16_t listen_port;
 	int request_timeout_sec;
+	mbt_http_fn http;
+	void *http_arg;
 	uint8_t peer_id[20];
 
 	struct mbt_session_callbacks cb;
@@ -171,6 +173,8 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->picker_ctx = cfg->picker_ctx;
 	s->listen_port = cfg->listen_port;
 	s->request_timeout_sec = cfg->request_timeout;
+	s->http = cfg->http;
+	s->http_arg = cfg->http_arg;
 
 	STAILQ_INIT(&s->torrents);
 	STAILQ_INIT(&s->pending);
@@ -446,20 +450,17 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	if (announce && announce->type == BE_STRING && t) {
 		char *url = strndup(announce->string.iov_base, announce->string.iov_len);
 		if (url) {
-			if (strncmp(url, "udp://", 6) == 0) {
-				struct mbt_tracker_request treq = {
-					.ev = s->ev,
-					.ih = ih,
-					.peer_id = s->peer_id,
-					.listen_port = s->listen_port,
-					.left = 0, /* TODO: compute from metadata */
-					.peer_cb = session_tracker_peer_cb,
-					.done_cb = session_tracker_done_cb,
-					.arg = s,
-				};
-				mbt_tracker_udp_announce(url, &treq);
-			}
-			/* TODO: http:// tracker */
+			struct mbt_tracker_request treq = {
+				.ev = s->ev,
+				.ih = ih,
+				.peer_id = s->peer_id,
+				.listen_port = s->listen_port,
+				.left = 0,
+				.peer_cb = session_tracker_peer_cb,
+				.done_cb = session_tracker_done_cb,
+				.arg = s,
+			};
+			mbt_tracker_announce(url, &treq, s->http, s->http_arg);
 			free(url);
 		}
 	}

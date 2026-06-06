@@ -58,6 +58,7 @@ bt_src = [
   'storage_file.c',
   'bitmap.c',
   'torrent.c',
+  'tracker_http.c',
   'tracker_udp.c',
 ] + ev_src
 
@@ -108,7 +109,11 @@ test('ev', ev_test)
 
 # Tools
 executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], dependencies: deps)
-executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], dependencies: deps)
+
+libcurl_dep = dependency('libcurl', required: false)
+if libcurl_dep.found()
+  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], dependencies: deps + [libcurl_dep])
+endif
 
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt])

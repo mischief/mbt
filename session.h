@@ -6,6 +6,7 @@
 
 #include "storage.h"
 #include "picker.h"
+#include "tracker.h"
 
 struct mbt_session;
 struct mbt_ev;
@@ -24,6 +25,8 @@ struct mbt_session_config {
 
 	uint16_t listen_port;  /* 0 = don't listen for incoming */
 	int request_timeout;   /* seconds before stale requests reset (0 = default 15s) */
+	mbt_http_fn http;      /* HTTP callback for HTTP/HTTPS trackers (NULL = disabled) */
+	void *http_arg;
 };
 
 /* Session lifecycle */
