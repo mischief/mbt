@@ -57,6 +57,7 @@ float mbt_torrent_progress(struct mbt_torrent *t);
 int mbt_torrent_complete(struct mbt_torrent *t);
 int mbt_torrent_has_metadata(struct mbt_torrent *t);
 uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
+uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);
 uint32_t mbt_torrent_have_count(struct mbt_torrent *t);
 int mbt_torrent_peer_count(struct mbt_torrent *t);
 int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);

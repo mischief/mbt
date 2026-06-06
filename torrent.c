@@ -770,6 +770,12 @@ mbt_torrent_piece_count(struct mbt_torrent *t)
 }
 
 uint32_t
+mbt_torrent_piece_length(struct mbt_torrent *t)
+{
+	return t->piece_length;
+}
+
+uint32_t
 mbt_torrent_have_count(struct mbt_torrent *t)
 {
 	return t->have_count;

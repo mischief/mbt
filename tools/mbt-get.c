@@ -88,7 +88,7 @@ on_piece(struct mbt_torrent *t, uint32_t piece, void *arg)
 	(void)arg;
 	(void)piece;
 
-	dl_bytes += 262144; /* approximate: piece_length */
+	dl_bytes += mbt_torrent_piece_length(t);
 
 	uint64_t elapsed = now_ms() - dl_start_time;
 	float rate = elapsed > 0 ? (float)dl_bytes / elapsed : 0; /* KB/s */
