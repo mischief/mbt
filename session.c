@@ -527,6 +527,36 @@ mbt_session_find_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 	return st ? st->torrent : NULL;
 }
 
+int
+mbt_session_torrent_count(struct mbt_session *s)
+{
+	int n = 0;
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next)
+		n++;
+	return n;
+}
+
+struct mbt_torrent *
+mbt_session_torrent_first(struct mbt_session *s)
+{
+	struct session_torrent *st = STAILQ_FIRST(&s->torrents);
+	return st ? st->torrent : NULL;
+}
+
+struct mbt_torrent *
+mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after)
+{
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (st->torrent == after) {
+			st = STAILQ_NEXT(st, next);
+			return st ? st->torrent : NULL;
+		}
+	}
+	return NULL;
+}
+
 /* --- Peer connection --- */
 
 int

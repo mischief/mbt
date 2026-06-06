@@ -48,6 +48,9 @@ int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih);
 /* Remove/query */
 int mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih);
 struct mbt_torrent *mbt_session_find_torrent(struct mbt_session *s, struct mbt_infohash *ih);
+int mbt_session_torrent_count(struct mbt_session *s);
+struct mbt_torrent *mbt_session_torrent_first(struct mbt_session *s);
+struct mbt_torrent *mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after);
 
 /* Peer discovery — enable/disable sources */
 int mbt_session_enable_lsd(struct mbt_session *s);
