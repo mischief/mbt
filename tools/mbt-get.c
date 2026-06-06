@@ -3,6 +3,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <time.h>
 #include <err.h>
 
 #include <curl/curl.h>
@@ -70,16 +71,34 @@ curl_http_fn(struct mbt_http_request *req, struct mbt_http_response *resp, void 
 
 /* --- Callbacks --- */
 
+static uint64_t dl_start_time;
+static uint64_t dl_bytes;
+
+static uint64_t
+now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 static void
 on_piece(struct mbt_torrent *t, uint32_t piece, void *arg)
 {
 	(void)arg;
 	(void)piece;
-	fprintf(stderr, "\r%.1f%% [%u/%u pieces, %d peers]",
+
+	dl_bytes += 262144; /* approximate: piece_length */
+
+	uint64_t elapsed = now_ms() - dl_start_time;
+	float rate = elapsed > 0 ? (float)dl_bytes / elapsed : 0; /* KB/s */
+
+	fprintf(stderr, "\r%.1f%% [%u/%u pieces, %d peers] %.0f KB/s   ",
 	        mbt_torrent_progress(t) * 100.0f,
 	        mbt_torrent_have_count(t),
 	        mbt_torrent_piece_count(t),
-	        mbt_torrent_peer_count(t));
+	        mbt_torrent_peer_count(t),
+	        rate);
 }
 
 static void
@@ -174,6 +193,8 @@ main(int argc, char *argv[])
 	}
 
 	mbt_session_enable_lsd(session);
+
+	dl_start_time = now_ms();
 
 	rv = mbt_session_run(session);
 
