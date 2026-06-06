@@ -20,6 +20,7 @@
 #include "session.h"
 #include "log.h"
 #include "lsd.h"
+#include "magnet.h"
 
 /* --- Torrent list entry --- */
 
@@ -430,10 +431,36 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 int
 mbt_session_add_magnet(struct mbt_session *s, const char *uri)
 {
-	(void)s;
-	(void)uri;
-	/* TODO: parse magnet URI, extract infohash, call add_infohash */
-	return -ENOTSUP;
+	struct mbt_magnet m;
+	struct infohash *ih = NULL;
+	int rv;
+
+	rv = mbt_magnet_parse(uri, &m);
+	if (rv < 0)
+		return rv;
+
+	rv = infohash_new(&ih, m.infohash_type, m.infohash_hex);
+	if (rv < 0) {
+		mbt_magnet_free(&m);
+		return rv;
+	}
+
+	rv = mbt_session_add_infohash(s, ih);
+	if (rv < 0) {
+		infohash_unref(ih);
+		mbt_magnet_free(&m);
+		return rv;
+	}
+
+	/* Connect peer hints */
+	for (int i = 0; i < m.peer_count; i++)
+		mbt_session_add_peer(s, ih, m.peers[i].addr, m.peers[i].port);
+
+	/* TODO: announce to trackers once tracker client is implemented */
+
+	infohash_unref(ih);
+	mbt_magnet_free(&m);
+	return 0;
 }
 
 int

@@ -48,6 +48,7 @@ bt_src = [
   'infohash.c',
   'log.c',
   'lsd.c',
+  'magnet.c',
   'node.c',
   'pack.c',
   'peer.c',
@@ -76,6 +77,9 @@ test('hex', hex_test)
 
 infohash_test = executable('infohash_test', 'test/infohash_test.c', link_with: [libmbt])
 test('infohash', infohash_test)
+
+magnet_test = executable('magnet_test', 'test/magnet_test.c', link_with: [libmbt])
+test('magnet', magnet_test)
 
 be_test_file = executable('be_test_file', 'test/test_file.c', link_with: [libmbt])
 
