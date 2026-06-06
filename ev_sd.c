@@ -148,7 +148,11 @@ sd_timer_mod(struct mbt_ev_timer *handle, uint64_t usec)
 	if (rv < 0)
 		return rv;
 
-	return sd_event_source_set_time(t->src, now + usec);
+	rv = sd_event_source_set_time(t->src, now + usec);
+	if (rv < 0)
+		return rv;
+
+	return sd_event_source_set_enabled(t->src, SD_EVENT_ONESHOT);
 }
 
 static void
