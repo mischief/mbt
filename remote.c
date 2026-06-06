@@ -40,6 +40,7 @@ static int remote_read_handshake(struct remote *r);
 static int remote_io(sd_event_source *s, int fd, uint32_t revents, void *v);
 static int remote_rx(struct remote *r);
 static int remote_extension_tx(struct remote *r);
+static int remote_send_interest(struct remote *r, int interested);
 
 static int
 remote_teardown_defer(sd_event_source *s, void *v)
@@ -734,6 +735,15 @@ remote_extension_rx(struct remote *r, size_t sz)
 			return rv;
 		}
 
+		/* Send interested after extension handshake */
+		rv = remote_send_interest(r, 1);
+		if(rv < 0){
+			warnx("%s: failed to send interest: %s", __func__, strerror(-rv));
+			remote_onerror(r, rv);
+			return rv;
+		}
+		r->meinterest = 1;
+
 		if(!r->hechoking && r->bep9code){
 			rv = remote_request_all_metadata(r);
 /*
@@ -917,16 +927,8 @@ remote_rx(struct remote *r)
 		warnx("%s: %s:%hu: unchoke", __func__, r->remote, r->port);
 		r->hechoking = 0;
 
-		if((rv = remote_send_interest(r, 1)) < 0){
-			warnx("%s: %s:%hu: sending interest failed: %s", __func__, r->remote, r->port, strerror(-rv));
-			goto err;
-		}
-
-		if(!r->hechoking && r->bep9code){
+		if(r->bep9code){
 			rv = remote_request_all_metadata(r);
-		/*
-			rv = remote_send_utmetadata_request(r, r->metadata_need_block++);
-		*/
 			if(rv < 0)
 				return rv;
 		}
