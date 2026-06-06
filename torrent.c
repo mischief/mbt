@@ -18,7 +18,7 @@ enum {
 	BLOCK_SIZE = 16384,
 	METADATA_BLOCK_SIZE = 16384,
 	MAX_PEERS = 50,
-	PIPELINE_DEPTH = 5,
+	PIPELINE_DEPTH = 128,
 };
 
 /* Per-piece tracking */
@@ -333,15 +333,13 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			pi->state = MBT_PIECE_ACTIVE;
 		}
 
-		/* Request all blocks for this piece */
+		/* Request all remaining blocks for this piece */
 		size_t off;
-		for (off = pi->received; off < pi->length; off += BLOCK_SIZE) {
+		for (off = pi->received; off < pi->length && tp->outstanding < PIPELINE_DEPTH; off += BLOCK_SIZE) {
 			uint32_t req_len = MIN(BLOCK_SIZE, pi->length - off);
 			mbt_peer_send_request(tp->peer, idx, off, req_len);
 			tp->outstanding++;
 		}
-
-		break; /* one piece at a time per drive call */
 	}
 }
 
