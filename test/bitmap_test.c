@@ -239,6 +239,37 @@ test_multi_byte(void)
 	mbt_bitmap_unref(tb);
 }
 
+static void
+test_non_round_bits(void)
+{
+	struct mbt_bitmap *tb = NULL;
+
+	/* 10 bits = 2 bytes, but only 10 valid bits */
+	mbt_bitmap_new_bits(&tb, 10);
+	assert(mbt_bitmap_bits(tb) == 10);
+	assert(mbt_bitmap_bytes(tb) == 2);
+
+	/* Set all 10 bits */
+	for (int i = 0; i < 10; i++)
+		mbt_bitmap_set(tb, i);
+
+	assert(mbt_bitmap_full(tb));
+	assert(mbt_bitmap_count(tb) == 10);
+	assert(mbt_bitmap_first_clear(tb) == -1);
+
+	/* Spare bits (10-15) should not be addressable */
+	assert(mbt_bitmap_set(tb, 10) < 0);
+	assert(mbt_bitmap_isset(tb, 10) < 0);
+
+	/* Clear one bit — no longer full */
+	mbt_bitmap_clear(tb);
+	assert(!mbt_bitmap_full(tb));
+	assert(mbt_bitmap_count(tb) == 0);
+	assert(mbt_bitmap_first_clear(tb) == 0);
+
+	mbt_bitmap_unref(tb);
+}
+
 int
 main(void)
 {
@@ -253,5 +284,6 @@ main(void)
 	test_first_clear();
 	test_first_set();
 	test_multi_byte();
+	test_non_round_bits();
 	return 0;
 }

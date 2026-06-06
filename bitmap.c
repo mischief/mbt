@@ -11,6 +11,7 @@
 struct mbt_bitmap
 {
 	int ref;
+	size_t bits;
 	size_t bytes;
 	uint8_t map[];
 };
@@ -26,10 +27,21 @@ mbt_bitmap_new(struct mbt_bitmap **out, size_t sz)
 
 	tb->ref = 1;
 	tb->bytes = sz;
+	tb->bits = sz * 8;
 
 	*out = tb;
 
 	return 0;
+}
+
+int
+mbt_bitmap_new_bits(struct mbt_bitmap **out, size_t nbits)
+{
+	size_t sz = (nbits + 7) / 8;
+	int rv = mbt_bitmap_new(out, sz);
+	if (rv == 0)
+		(*out)->bits = nbits;
+	return rv;
 }
 
 int
@@ -75,7 +87,7 @@ mbt_bitmap_unrefp(struct mbt_bitmap **tb)
 size_t
 mbt_bitmap_bits(struct mbt_bitmap *tb)
 {
-	return tb->bytes * 8;
+	return tb->bits;
 }
 
 size_t
@@ -90,7 +102,7 @@ mbt_bitmap_set(struct mbt_bitmap *tb, size_t bit)
 	uint8_t *p, setbit = 128 >> (bit & 7);
 	size_t byte = bit >> 3;
 
-	if (byte >= tb->bytes)
+	if (bit >= tb->bits)
 		return -EINVAL;
 
 	p = tb->map + byte;
@@ -104,7 +116,7 @@ mbt_bitmap_isset(struct mbt_bitmap *tb, size_t bit)
 	uint8_t *p, checkbit = 128 >> (bit & 7);
 	size_t byte = bit >> 3;
 
-	if (byte >= tb->bytes)
+	if (bit >= tb->bits)
 		return -EINVAL;
 
 	p = tb->map + byte;
@@ -122,12 +134,9 @@ mbt_bitmap_count(struct mbt_bitmap *tb)
 {
 	size_t i, count = 0;
 
-	for (i = 0; i < tb->bytes; i++) {
-		uint8_t v = tb->map[i];
-		while (v) {
-			count += v & 1;
-			v >>= 1;
-		}
+	for (i = 0; i < tb->bits; i++) {
+		if (mbt_bitmap_isset(tb, i) > 0)
+			count++;
 	}
 
 	return count;
@@ -136,47 +145,30 @@ mbt_bitmap_count(struct mbt_bitmap *tb)
 int
 mbt_bitmap_full(struct mbt_bitmap *tb)
 {
-	size_t i;
-
-	for (i = 0; i < tb->bytes; i++) {
-		if (tb->map[i] != 0xFF)
+	for (size_t i = 0; i < tb->bits; i++) {
+		if (mbt_bitmap_isset(tb, i) <= 0)
 			return 0;
 	}
-
 	return 1;
 }
 
 ssize_t
 mbt_bitmap_first_clear(struct mbt_bitmap *tb)
 {
-	size_t i, bit;
-
-	for (i = 0; i < tb->bytes; i++) {
-		if (tb->map[i] != 0xFF) {
-			for (bit = 0; bit < 8; bit++) {
-				if (!(tb->map[i] & (128 >> bit)))
-					return (ssize_t)(i * 8 + bit);
-			}
-		}
+	for (size_t i = 0; i < tb->bits; i++) {
+		if (mbt_bitmap_isset(tb, i) <= 0)
+			return (ssize_t)i;
 	}
-
 	return -1;
 }
 
 ssize_t
 mbt_bitmap_first_set(struct mbt_bitmap *tb)
 {
-	size_t i, bit;
-
-	for (i = 0; i < tb->bytes; i++) {
-		if (tb->map[i] != 0) {
-			for (bit = 0; bit < 8; bit++) {
-				if (tb->map[i] & (128 >> bit))
-					return (ssize_t)(i * 8 + bit);
-			}
-		}
+	for (size_t i = 0; i < tb->bits; i++) {
+		if (mbt_bitmap_isset(tb, i) > 0)
+			return (ssize_t)i;
 	}
-
 	return -1;
 }
 

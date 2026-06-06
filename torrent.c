@@ -464,8 +464,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	}
 
 	/* Allocate have bitmap */
-	size_t bitmap_bytes = (t->piece_count + 7) / 8;
-	mbt_bitmap_new(&t->have, bitmap_bytes);
+	mbt_bitmap_new_bits(&t->have, t->piece_count);
 
 	/* Check storage for existing pieces (resume) */
 	if (t->storage_ops && t->storage_ops->open)

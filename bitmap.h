@@ -9,6 +9,7 @@
 struct mbt_bitmap;
 
 int mbt_bitmap_new(struct mbt_bitmap **out, size_t sz);
+int mbt_bitmap_new_bits(struct mbt_bitmap **out, size_t nbits);
 int mbt_bitmap_fromarray(struct mbt_bitmap **out, uint8_t *buf, size_t len);
 void mbt_bitmap_unref(struct mbt_bitmap *tb);
 void mbt_bitmap_unrefp(struct mbt_bitmap **tb);
