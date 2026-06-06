@@ -214,6 +214,9 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			free(pi->data);
 			pi->data = NULL;
 
+			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu",
+			             piece, mbt_peer_addr(p), mbt_peer_port(p));
+
 			if (t->cb.on_piece_complete)
 				t->cb.on_piece_complete(t, piece, t->cb_arg);
 
