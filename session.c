@@ -552,8 +552,9 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 				struct be_value *url_val;
 				STAILQ_FOREACH(url_val, &tier->listhead, next) {
 					if (url_val->type == BE_STRING && sta->tracker_count < 16) {
-						sta->trackers[sta->tracker_count++] =
-							strndup(url_val->string.iov_base, url_val->string.iov_len);
+						char *u = strndup(url_val->string.iov_base, url_val->string.iov_len);
+						if (u)
+							sta->trackers[sta->tracker_count++] = u;
 					}
 				}
 			}
@@ -562,9 +563,11 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 		/* Fallback: single announce field */
 		if (sta->tracker_count == 0) {
 			struct be_value *announce = be_find(be, "announce");
-			if (announce && announce->type == BE_STRING)
-				sta->trackers[sta->tracker_count++] =
-					strndup(announce->string.iov_base, announce->string.iov_len);
+			if (announce && announce->type == BE_STRING) {
+				char *u = strndup(announce->string.iov_base, announce->string.iov_len);
+				if (u)
+					sta->trackers[sta->tracker_count++] = u;
+			}
 		}
 
 		if (sta->tracker_count > 0)
