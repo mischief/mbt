@@ -464,7 +464,7 @@ encode_getsize_cb(struct be_value *v, void *arg)
 		slen = snprintf(buf, sizeof(buf), "%lu", v->string.iov_len);
 		e->len += slen;
 		e->len += 1;
-		e->len += strlen((char*)v->string.iov_base);
+		e->len += v->string.iov_len;
 		break;
 
 	case BE_INTEGER:
@@ -502,8 +502,10 @@ encode_cb(struct be_value *v, void *arg)
 	switch(v->type){
 	case BE_STRING:
 		/* size:string */
-		slen = sprintf(e->ptr, "%zu:%s", v->string.iov_len, (char*)v->string.iov_base);
+		slen = sprintf(e->ptr, "%zu:", v->string.iov_len);
 		e->ptr += slen;
+		memcpy(e->ptr, v->string.iov_base, v->string.iov_len);
+		e->ptr += v->string.iov_len;
 		break;
 
 	case BE_INTEGER:
@@ -540,7 +542,7 @@ be_value_encode(struct be_value *v, unsigned char **out, size_t *len)
 
 	be_walk(v, encode_getsize_cb, &e);
 
-	buf = malloc(e.len);
+	buf = malloc(e.len + 1);
 	if(!buf)
 		return -ENOMEM;
 
