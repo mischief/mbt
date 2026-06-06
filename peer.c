@@ -393,8 +393,6 @@ peer_on_read(struct mbt_conn *c, void *v)
 
 	(void)c;
 
-	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: on_read state=%d avail=%zu",
-	              p->addr, p->port, p->state, mbt_conn_available(p->conn));
 
 	switch (p->state) {
 	case MBT_PEER_HANDSHAKE:
