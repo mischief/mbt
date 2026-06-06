@@ -97,7 +97,8 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	slen = sizeof(error);
 	rv = getsockopt(pc->fd, SOL_SOCKET, SO_ERROR, &error, &slen);
 	if (rv < 0 || error != 0) {
-		mbt_log_warn(MBT_LOG_SESSION, "connect failed: %s", strerror(error ? error : errno));
+		mbt_log_warn(MBT_LOG_SESSION, "connect to %s:%hu failed: %s",
+		             pc->addr, pc->port, strerror(error ? error : errno));
 		goto fail;
 	}
 

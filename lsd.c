@@ -211,7 +211,6 @@ lsd_frame_parse(struct lsd_frame *frame, struct lsd_frame_info **out)
 			if(ep - (p+10) != MBT_MBT_INFOHASH_SHA1HEXLEN)
 				goto next;
 
-			warnx("input: %.*s", MBT_MBT_INFOHASH_SHA1HEXLEN, p+10);
 			rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, p+10);
 			if(rv < 0){
 				warnx("mbt_infohash_new: %s", strerror(-rv));
