@@ -15,7 +15,7 @@ mbt_picker_sequential(struct mbt_torrent *t, void *peer, void *ctx)
 		return -1;
 
 	/* Find first piece we don't have that this peer does */
-	size_t bits = mbt_bitmap_bits(peer_bits);
+	uint32_t bits = mbt_torrent_piece_count(t); if (bits == 0) return -1;
 	for (size_t i = 0; i < bits; i++) {
 		if (mbt_bitmap_isset(peer_bits, i) > 0
 		    && !mbt_torrent_has_piece(t, i)
@@ -35,7 +35,7 @@ mbt_picker_random(struct mbt_torrent *t, void *peer, void *ctx)
 	if (!peer_bits)
 		return -1;
 
-	size_t bits = mbt_bitmap_bits(peer_bits);
+	uint32_t bits = mbt_torrent_piece_count(t); if (bits == 0) return -1;
 	if (bits == 0)
 		return -1;
 
