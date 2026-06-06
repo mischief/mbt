@@ -25,6 +25,13 @@
 
 /* --- Torrent list entry --- */
 
+struct peer_candidate {
+	char addr[INET6_ADDRSTRLEN];
+	uint16_t port;
+};
+
+#define MAX_PEER_POOL 200
+
 struct session_torrent {
 	struct mbt_session *session;     /* back-reference */
 	struct mbt_torrent *torrent;
@@ -33,6 +40,8 @@ struct session_torrent {
 	int tracker_count;
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
+	struct peer_candidate pool[MAX_PEER_POOL];
+	int pool_count;
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -75,6 +84,9 @@ struct mbt_session {
 	struct lsd *lsd;
 	struct mbt_ev_io *lsd_io;
 
+	/* Maintenance timer (refill peers from pool) */
+	struct mbt_ev_timer *maintain_timer;
+
 	/* Torrents */
 	struct session_torrent_list torrents;
 
@@ -83,6 +95,24 @@ struct mbt_session {
 };
 
 /* --- Forward declarations --- */
+static void
+session_maintain_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_session *s = v;
+	struct session_torrent *st;
+
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		/* Refill peers from pool if below cap */
+		while (mbt_torrent_peer_count(st->torrent) < s->max_peers && st->pool_count > 0) {
+			st->pool_count--;
+			struct peer_candidate *pc = &st->pool[st->pool_count];
+			mbt_session_add_peer(s, st->ih, pc->addr, pc->port);
+		}
+	}
+
+	mbt_ev_timer_mod(timer, 5 * 1000000ULL); /* check every 5s */
+}
+
 static void session_generate_peer_id(uint8_t *id);
 
 /* --- Pending connect handler --- */
@@ -189,6 +219,9 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 
 	session_generate_peer_id(s->peer_id);
 
+	/* Maintenance timer: refill peers from pool every 5s */
+	mbt_ev_timer_new(s->ev, &s->maintain_timer, 5 * 1000000ULL, session_maintain_cb, s);
+
 	*out = s;
 	return 0;
 }
@@ -223,6 +256,8 @@ mbt_session_free(struct mbt_session *s)
 
 	if (s->lsd_io)
 		mbt_ev_io_free(s->lsd_io);
+	if (s->maintain_timer)
+		mbt_ev_timer_free(s->maintain_timer);
 
 	free(s);
 }
@@ -337,6 +372,19 @@ static void
 session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port, void *arg)
 {
 	struct mbt_session *s = arg;
+	struct session_torrent *st = session_find(s, ih);
+
+	/* If at peer cap, store in pool for later */
+	if (st && mbt_torrent_peer_count(st->torrent) >= s->max_peers) {
+		if (st->pool_count < MAX_PEER_POOL) {
+			snprintf(st->pool[st->pool_count].addr,
+			         sizeof(st->pool[st->pool_count].addr), "%s", addr);
+			st->pool[st->pool_count].port = port;
+			st->pool_count++;
+		}
+		return;
+	}
+
 	mbt_session_add_peer(s, ih, addr, port);
 }
 
