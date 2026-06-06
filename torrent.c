@@ -145,17 +145,16 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 
 		/* Timed out — reset piece */
 		if (pi->owner && pi->owner->peer) {
-			mbt_log_warn(MBT_LOG_TORRENT, "piece %u timed out from %s:%hu, resetting",
-			             i, mbt_peer_addr(pi->owner->peer),
-			             mbt_peer_port(pi->owner->peer));
-			/* Track timeouts per peer — disconnect slow peers */
-			pi->owner->hash_failures++;
-			if (pi->owner->hash_failures >= MAX_HASH_FAILURES) {
-				mbt_log_warn(MBT_LOG_TORRENT, "disconnecting %s:%hu (too many timeouts)",
-				             mbt_peer_addr(pi->owner->peer),
-				             mbt_peer_port(pi->owner->peer));
-				pi->owner->banned = 1;
-				mbt_peer_disconnect(pi->owner->peer);
+			/* Only blame peer if still unchoked (should be delivering) */
+			if (!mbt_peer_choked(pi->owner->peer)) {
+				pi->owner->hash_failures++;
+				if (pi->owner->hash_failures >= MAX_HASH_FAILURES) {
+					mbt_log_warn(MBT_LOG_TORRENT, "disconnecting %s:%hu (unresponsive)",
+					             mbt_peer_addr(pi->owner->peer),
+					             mbt_peer_port(pi->owner->peer));
+					pi->owner->banned = 1;
+					mbt_peer_disconnect(pi->owner->peer);
+				}
 			}
 		}
 

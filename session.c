@@ -755,9 +755,15 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 			return -ENOMEM;
 	}
 
-	/* Check peer limit */
-	if (mbt_torrent_peer_count(st->torrent) >= s->max_peers)
-		return 0; /* silently skip, already at capacity */
+	/* Check peer limit (active + pending connects) */
+	int pending = 0;
+	struct pending_connect *pcc;
+	STAILQ_FOREACH(pcc, &s->pending, next) {
+		if (pcc->torrent == st->torrent)
+			pending++;
+	}
+	if (mbt_torrent_peer_count(st->torrent) + pending >= s->max_peers)
+		return 0;
 
 	/* Set up non-blocking connect */
 	sa.sin_family = AF_INET;
