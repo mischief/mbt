@@ -16,30 +16,32 @@ Steps to reach the architecture described in DESIGN.md.
 ## Phase 1: Clean layering
 
 ### 1.1 Split bt.c
-- [ ] Extract `tpack`/`tunpack` into `pack.c/h` (wire format helpers)
-- [ ] Remaining `bt.c` becomes `torrent.c` — piece state, peer set, hash verify
+- [x] Extract `tpack`/`tunpack` into `pack.c/h` (wire format helpers)
+- [x] New `torrent.c` — piece state, peer callbacks, hash verify, storage/picker
 
-### 1.2 Peer layer (rename remote.c → peer.c)
-- [ ] Define `mbt_peer_callbacks` (on_handshake, on_piece, on_bitfield, on_choke, on_have, on_extension, on_error)
-- [ ] Peer takes a connected `mbt_conn`, not an address — no TCP connect logic in peer
-- [ ] Peer does framing + callbacks only; remove all strategy (what to request, when)
-- [ ] Peer sends messages via explicit calls: `mbt_peer_send_request`, `mbt_peer_send_interested`, etc.
+### 1.2 Peer layer
+- [x] Define `mbt_peer_callbacks` (on_active, on_piece, on_bitfield, on_choke, on_have, on_metadata, on_error)
+- [x] `peer.c` takes a connected `mbt_conn`, state machine + callbacks only
 
-### 1.3 Torrent layer (from bt.c + strategy parts of remote.c)
-- [ ] Owns peer set (add/remove peers)
-- [ ] Piece state machine: pending → requested → received → verified
-- [ ] Drives piece requests using picker callback
-- [ ] Verifies SHA1 on piece completion
-- [ ] Calls storage backend to write verified pieces
-- [ ] Metadata fetch (BEP 9) as a sub-state before piece download
+### 1.3 Torrent layer
+- [x] Owns peer set (add/remove peers)
+- [x] Piece state machine: pending → active → complete
+- [x] Drives piece requests using picker callback
+- [x] Verifies SHA1 on piece completion
+- [x] Calls storage backend to write verified pieces
+- [x] Metadata fetch (BEP 9) as pre-download phase
 
-### 1.4 Session layer (rename node.c → session.c)
-- [ ] Torrent collection (add/remove by infohash)
-- [ ] Listen socket + accept incoming peers
-- [ ] Route incoming handshakes to correct torrent
-- [ ] Outgoing connect (async TCP → mbt_conn → hand to peer → route to torrent)
-- [ ] Integrate LSD listener (on announce → find/create torrent → connect)
-- [ ] Event loop ownership: run/stop
+### 1.4 Session layer
+- [x] Prototype session API (mbt_session_default, add_torrent, enable_lsd)
+- [ ] Implement `mbt_session_add_peer` — async TCP connect → mbt_conn → torrent
+
+### 1.5 Delete legacy code
+Blocked on: bt_test and mbt-lsd rewritten against new API.
+- [ ] Rewrite `bt_test` using session/torrent/peer stack
+- [ ] Rewrite `tools/mbt-lsd.c` using session with LSD
+- [ ] Delete `bt_legacy.c`, `bt_legacy.h`
+- [ ] Delete `remote.c`, `remote.h`
+- [ ] Delete `node.c`, `node.h`
 
 ## Phase 2: Pluggable backends
 
