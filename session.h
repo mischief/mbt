@@ -60,6 +60,9 @@ int mbt_session_enable_lsd(struct mbt_session *s);
 int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                          const char *addr, uint16_t port);
 
+/* Manually trigger re-announce to all trackers (or specific torrent if ih != NULL) */
+int mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih);
+
 /* Callbacks for session-level events (optional) */
 struct mbt_session_callbacks {
 	void (*on_torrent_complete)(struct mbt_session *s, struct mbt_torrent *t, void *arg);

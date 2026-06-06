@@ -26,8 +26,12 @@
 /* --- Torrent list entry --- */
 
 struct session_torrent {
+	struct mbt_session *session;     /* back-reference */
 	struct mbt_torrent *torrent;
 	struct mbt_infohash *ih;
+	char *tracker_url;
+	struct mbt_ev_timer *reannounce_timer;
+	int announce_interval;
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -207,6 +211,9 @@ mbt_session_free(struct mbt_session *s)
 		STAILQ_REMOVE_HEAD(&s->torrents, next);
 		mbt_torrent_free(st->torrent);
 		mbt_infohash_unref(st->ih);
+		if (st->reannounce_timer)
+			mbt_ev_timer_free(st->reannounce_timer);
+		free(st->tracker_url);
 		free(st);
 	}
 
@@ -329,14 +336,61 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 	mbt_session_add_peer(s, ih, addr, port);
 }
 
+static void session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v);
+
 static void
 session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *arg)
 {
-	(void)ih;
-	(void)interval;
-	(void)arg;
-	if (err < 0)
+	struct mbt_session *s = arg;
+
+	if (err < 0) {
 		mbt_log_warn(MBT_LOG_SESSION, "tracker announce failed: %s", strerror(-err));
+		return;
+	}
+
+	/* Schedule re-announce */
+	struct session_torrent *st = session_find(s, ih);
+	if (st && interval > 0) {
+		st->announce_interval = interval;
+		if (!st->reannounce_timer) {
+			mbt_ev_timer_new(s->ev, &st->reannounce_timer,
+			                 (uint64_t)interval * 1000000ULL,
+			                 session_reannounce_timer_cb, st);
+		} else {
+			mbt_ev_timer_mod(st->reannounce_timer,
+			                 (uint64_t)interval * 1000000ULL);
+		}
+		mbt_log_debug(MBT_LOG_SESSION, "next announce in %ds", interval);
+	}
+}
+
+static void
+session_do_announce(struct mbt_session *s, struct session_torrent *st)
+{
+	if (!st->tracker_url)
+		return;
+
+	struct mbt_tracker_request treq = {
+		.ev = s->ev,
+		.ih = st->ih,
+		.peer_id = s->peer_id,
+		.listen_port = s->listen_port,
+		.left = 0,
+		.peer_cb = session_tracker_peer_cb,
+		.done_cb = session_tracker_done_cb,
+		.arg = s,
+	};
+	mbt_tracker_announce(st->tracker_url, &treq, s->http, s->http_arg);
+}
+
+static void
+session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct session_torrent *st = v;
+	(void)timer;
+
+	mbt_log_info(MBT_LOG_SESSION, "re-announcing to tracker");
+	session_do_announce(st->session, st);
 }
 
 /* --- Torrent management --- */
@@ -369,6 +423,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 		return rv;
 	}
 
+	st->session = s;
 	st->ih = mbt_infohash_ref(ih);
 	STAILQ_INSERT_TAIL(&s->torrents, st, next);
 
@@ -481,20 +536,10 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	/* Announce to tracker if present */
 	struct be_value *announce = be_find(be, "announce");
 	if (announce && announce->type == BE_STRING && t) {
-		char *url = strndup(announce->string.iov_base, announce->string.iov_len);
-		if (url) {
-			struct mbt_tracker_request treq = {
-				.ev = s->ev,
-				.ih = ih,
-				.peer_id = s->peer_id,
-				.listen_port = s->listen_port,
-				.left = 0,
-				.peer_cb = session_tracker_peer_cb,
-				.done_cb = session_tracker_done_cb,
-				.arg = s,
-			};
-			mbt_tracker_announce(url, &treq, s->http, s->http_arg);
-			free(url);
+		struct session_torrent *sta = session_find(s, ih);
+		if (sta) {
+			sta->tracker_url = strndup(announce->string.iov_base, announce->string.iov_len);
+			session_do_announce(s, sta);
 		}
 	}
 
@@ -592,6 +637,22 @@ mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after)
 }
 
 /* --- Peer connection --- */
+
+int
+mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih)
+{
+	if (ih) {
+		struct session_torrent *st = session_find(s, ih);
+		if (!st)
+			return -ENOENT;
+		session_do_announce(s, st);
+	} else {
+		struct session_torrent *st;
+		STAILQ_FOREACH(st, &s->torrents, next)
+			session_do_announce(s, st);
+	}
+	return 0;
+}
 
 int
 mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
