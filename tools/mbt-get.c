@@ -71,8 +71,11 @@ curl_http_fn(struct mbt_http_request *req, struct mbt_http_response *resp, void 
 
 /* --- Callbacks --- */
 
-static uint64_t dl_start_time;
-static uint64_t dl_bytes;
+#define RATE_SLOTS 10  /* 1 slot per second, 10s window */
+
+static uint64_t rate_slots[RATE_SLOTS];
+static int rate_idx;
+static uint64_t rate_last_sec;
 
 static uint64_t
 now_ms(void)
@@ -82,23 +85,42 @@ now_ms(void)
 	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+static float
+rate_kbps(void)
+{
+	uint64_t total = 0;
+	for (int i = 0; i < RATE_SLOTS; i++)
+		total += rate_slots[i];
+	return (float)total / RATE_SLOTS / 1024.0f; /* KB/s */
+}
+
 static void
 on_piece(struct mbt_torrent *t, uint32_t piece, void *arg)
 {
 	(void)arg;
 	(void)piece;
 
-	dl_bytes += mbt_torrent_piece_length(t);
+	uint32_t plen = mbt_torrent_piece_length(t);
+	uint64_t now = now_ms();
+	uint64_t sec = now / 1000;
 
-	uint64_t elapsed = now_ms() - dl_start_time;
-	float rate = elapsed > 0 ? (float)dl_bytes / elapsed : 0; /* KB/s */
+	/* Advance slots if time moved forward */
+	while (rate_last_sec && sec > rate_last_sec) {
+		rate_last_sec++;
+		rate_idx = (rate_idx + 1) % RATE_SLOTS;
+		rate_slots[rate_idx] = 0;
+	}
+	if (!rate_last_sec)
+		rate_last_sec = sec;
+
+	rate_slots[rate_idx] += plen;
 
 	fprintf(stderr, "\r%.1f%% [%u/%u pieces, %d peers] %.0f KB/s   ",
 	        mbt_torrent_progress(t) * 100.0f,
 	        mbt_torrent_have_count(t),
 	        mbt_torrent_piece_count(t),
 	        mbt_torrent_peer_count(t),
-	        rate);
+	        rate_kbps());
 }
 
 static void
@@ -194,7 +216,6 @@ main(int argc, char *argv[])
 
 	mbt_session_enable_lsd(session);
 
-	dl_start_time = now_ms();
 
 	rv = mbt_session_run(session);
 
