@@ -343,6 +343,14 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 					t->cb.on_complete(t, t->cb_arg);
 				return;
 			}
+
+			/* Drive all unchoked peers — new pieces are now available */
+			struct torrent_peer *otp;
+			for (otp = t->peers; otp; otp = otp->next) {
+				if (otp->peer && !otp->banned && !mbt_peer_choked(otp->peer))
+					torrent_drive_peer(t, otp);
+			}
+			return; /* already drove all peers above */
 		}
 	}
 
