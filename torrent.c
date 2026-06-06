@@ -153,7 +153,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	struct piece_info *pi = &t->pieces[piece];
 
-	if (pi->state == MBT_PIECE_COMPLETE)
+	if (mbt_bitmap_isset(t->have, piece) > 0)
 		return; /* duplicate */
 
 	if (offset + len > pi->length)
@@ -190,9 +190,9 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			pi->data = NULL;
 		} else {
 			/* Verified — store */
-			pi->state = MBT_PIECE_COMPLETE;
 			mbt_bitmap_set(t->have, piece);
 			t->have_count++;
+			pi->state = MBT_PIECE_PENDING;
 
 			if (t->storage_ops && t->storage_ops->write_piece)
 				t->storage_ops->write_piece(t->storage_ctx, piece, pi->data, pi->length);
@@ -324,7 +324,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			break;
 
 		struct piece_info *pi = &t->pieces[idx];
-		if (pi->state == MBT_PIECE_COMPLETE)
+		if (mbt_bitmap_isset(t->have, idx) > 0)
 			continue;
 
 		if (!pi->data) {
@@ -474,7 +474,6 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	if (t->storage_ops && t->storage_ops->have_piece) {
 		for (uint32_t i = 0; i < t->piece_count; i++) {
 			if (t->storage_ops->have_piece(t->storage_ctx, i) > 0) {
-				t->pieces[i].state = MBT_PIECE_COMPLETE;
 				mbt_bitmap_set(t->have, i);
 				t->have_count++;
 			}
@@ -539,7 +538,15 @@ mbt_torrent_has_metadata(struct mbt_torrent *t)
 int
 mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece)
 {
+	if (!t->have || piece >= t->piece_count)
+		return 0;
+	return mbt_bitmap_isset(t->have, piece) > 0;
+}
+
+int
+mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece)
+{
 	if (!t->pieces || piece >= t->piece_count)
 		return 0;
-	return t->pieces[piece].state == MBT_PIECE_COMPLETE;
+	return t->pieces[piece].state == MBT_PIECE_ACTIVE;
 }
