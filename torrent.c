@@ -284,10 +284,9 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 				mbt_log_warn(MBT_LOG_TORRENT, "banning %s:%hu after %d hash failures",
 				             mbt_peer_addr(p), mbt_peer_port(p), tp->hash_failures);
 				tp->banned = 1;
-				mbt_peer_free(tp->peer);
-				tp->peer = NULL;
-				return; /* peer is dead, don't continue */
+				mbt_peer_disconnect(p); /* triggers deferred on_error → cleanup */
 			}
+			return;
 		} else {
 			/* Verified — store */
 			mbt_bitmap_set(t->have, piece);

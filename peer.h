@@ -69,6 +69,9 @@ int mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn
 /* Free peer (closes connection) */
 void mbt_peer_free(struct mbt_peer *p);
 
+/* Disconnect peer (triggers on_error callback asynchronously) */
+void mbt_peer_disconnect(struct mbt_peer *p);
+
 /* Query state */
 enum mbt_peer_state mbt_peer_state(struct mbt_peer *p);
 int mbt_peer_choked(struct mbt_peer *p);      /* are we choked by them? */

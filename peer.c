@@ -394,6 +394,9 @@ peer_on_read(struct mbt_conn *c, void *v)
 	(void)c;
 
 
+	if (p->state == MBT_PEER_CLOSED)
+		return;
+
 	switch (p->state) {
 	case MBT_PEER_HANDSHAKE:
 		rv = peer_recv_handshake(p);
@@ -533,6 +536,13 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 
 	*out = p;
 	return 0;
+}
+
+void
+mbt_peer_disconnect(struct mbt_peer *p)
+{
+	if (p && p->state != MBT_PEER_CLOSED)
+		peer_error(p, -ECONNABORTED);
 }
 
 void
