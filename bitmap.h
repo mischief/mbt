@@ -6,6 +6,10 @@
 #include "bitmap.h"
 */
 
+#include <sys/types.h>
+#include <stdint.h>
+#include <stddef.h>
+
 struct mbt_bitmap;
 
 int mbt_bitmap_new(struct mbt_bitmap **out, size_t sz);

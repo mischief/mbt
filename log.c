@@ -62,6 +62,7 @@ comp_str(enum mbt_log_component comp)
 	case MBT_LOG_CONN:    return "conn";
 	case MBT_LOG_LSD:     return "lsd";
 	case MBT_LOG_STORAGE: return "storage";
+	case MBT_LOG_PICKER:  return "picker";
 	}
 	return "mbt";
 }

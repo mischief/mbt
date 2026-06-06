@@ -18,6 +18,7 @@ enum mbt_log_component {
 	MBT_LOG_CONN     = 1 << 3,
 	MBT_LOG_LSD      = 1 << 4,
 	MBT_LOG_STORAGE  = 1 << 5,
+	MBT_LOG_PICKER   = 1 << 6,
 };
 
 typedef void (*mbt_log_fn)(enum mbt_log_level level, enum mbt_log_component comp,

@@ -85,6 +85,12 @@ test('magnet', magnet_test)
 
 tracker_test = executable('tracker_test', 'test/tracker_test.c', link_with: [libmbt], dependencies: deps)
 
+picker_test = executable('picker_test', 'test/picker_test.c', link_with: [libmbt])
+test('picker', picker_test)
+
+storage_test = executable('storage_test', 'test/storage_test.c', link_with: [libmbt])
+test('storage', storage_test)
+
 be_test_file = executable('be_test_file', 'test/test_file.c', link_with: [libmbt])
 
 tfiles = [
