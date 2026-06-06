@@ -66,6 +66,9 @@ test('tbmap', tbmap_test)
 be_test = executable('be_test', 'test/test.c', link_with: [libmbt])
 test('be', be_test)
 
+pack_test = executable('pack_test', 'test/pack_test.c', link_with: [libmbt])
+test('pack', pack_test)
+
 be_test_file = executable('be_test_file', 'test/test_file.c', link_with: [libmbt])
 
 tfiles = [
