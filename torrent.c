@@ -28,6 +28,7 @@ struct piece_info {
 	size_t received;       /* bytes received so far */
 	uint8_t hash[20];      /* expected SHA1 */
 	enum mbt_piece_state state;
+	struct torrent_peer *owner; /* peer downloading this piece, NULL if pending */
 };
 
 /* Per-peer entry in the torrent's peer list */
@@ -164,6 +165,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 		pi->data = malloc(pi->length);
 		if (!pi->data) return;
 		pi->state = MBT_PIECE_ACTIVE;
+		pi->owner = tp;
 	}
 
 	memcpy(pi->data + offset, data, len);
@@ -186,6 +188,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			warnx("piece %u: hash mismatch, re-requesting", piece);
 			pi->received = 0;
 			pi->state = MBT_PIECE_PENDING;
+			pi->owner = NULL;
 			free(pi->data);
 			pi->data = NULL;
 		} else {
@@ -193,6 +196,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			mbt_bitmap_set(t->have, piece);
 			t->have_count++;
 			pi->state = MBT_PIECE_PENDING;
+			pi->owner = NULL;
 
 			if (t->storage_ops && t->storage_ops->write_piece)
 				t->storage_ops->write_piece(t->storage_ctx, piece, pi->data, pi->length);
@@ -284,6 +288,19 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
+	/* Reset any pieces this peer was downloading */
+	if (t->pieces) {
+		for (uint32_t i = 0; i < t->piece_count; i++) {
+			if (t->pieces[i].owner == tp) {
+				t->pieces[i].state = MBT_PIECE_PENDING;
+				t->pieces[i].owner = NULL;
+				t->pieces[i].received = 0;
+				free(t->pieces[i].data);
+				t->pieces[i].data = NULL;
+			}
+		}
+	}
+
 	/* Remove peer from list */
 	struct torrent_peer **pp;
 	for (pp = &t->peers; *pp; pp = &(*pp)->next) {
@@ -331,6 +348,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			pi->data = malloc(pi->length);
 			if (!pi->data) return;
 			pi->state = MBT_PIECE_ACTIVE;
+			pi->owner = tp;
 		}
 
 		/* Request all remaining blocks for this piece */
