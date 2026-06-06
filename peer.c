@@ -43,6 +43,7 @@ struct mbt_peer {
 	/* extension protocol */
 	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
 	size_t metadata_size;
+	int reqq;              /* peer's max outstanding requests (0=unknown) */
 
 	/* bitfield */
 	struct mbt_bitmap *bitfield;
@@ -205,6 +206,10 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 	tmp = be_find(be, "metadata_size");
 	if (tmp && tmp->type == BE_INTEGER && tmp->integer > 0)
 		p->metadata_size = (size_t)tmp->integer;
+
+	tmp = be_find(be, "reqq");
+	if (tmp && tmp->type == BE_INTEGER && tmp->integer > 0)
+		p->reqq = (int)tmp->integer;
 
 	return 0;
 }
@@ -565,6 +570,12 @@ size_t
 mbt_peer_metadata_size(struct mbt_peer *p)
 {
 	return p->metadata_size;
+}
+
+int
+mbt_peer_reqq(struct mbt_peer *p)
+{
+	return p->reqq;
 }
 
 /* --- Send commands --- */

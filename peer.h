@@ -83,5 +83,6 @@ int mbt_peer_send_metadata_request(struct mbt_peer *p, int piece);
 /* Extension info (available after on_active) */
 int mbt_peer_has_extension(struct mbt_peer *p);       /* BEP 10 supported? */
 size_t mbt_peer_metadata_size(struct mbt_peer *p);    /* 0 if unknown */
+int mbt_peer_reqq(struct mbt_peer *p);                /* max outstanding, 0=unknown */
 
 #endif

@@ -341,7 +341,12 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (!t->pieces || mbt_peer_choked(tp->peer))
 		return;
 
-	while (tp->outstanding < PIPELINE_DEPTH) {
+	int limit = PIPELINE_DEPTH;
+	int peer_limit = mbt_peer_reqq(tp->peer);
+	if (peer_limit > 0 && peer_limit < limit)
+		limit = peer_limit;
+
+	while (tp->outstanding < limit) {
 		int idx = t->picker(t, tp->peer, t->picker_ctx);
 		if (idx < 0)
 			break;
@@ -363,7 +368,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 
 		/* Request unrequested blocks for this piece */
 		size_t off;
-		for (off = pi->requested; off < pi->length && tp->outstanding < PIPELINE_DEPTH; off += BLOCK_SIZE) {
+		for (off = pi->requested; off < pi->length && tp->outstanding < limit; off += BLOCK_SIZE) {
 			uint32_t req_len = MIN(BLOCK_SIZE, pi->length - off);
 			mbt_peer_send_request(tp->peer, idx, off, req_len);
 			tp->outstanding++;
