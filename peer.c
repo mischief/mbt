@@ -221,7 +221,8 @@ peer_rx_message(struct mbt_peer *p)
 
 	if (!p->msglen) {
 		sz = mbt_conn_read(p->conn, lenbuf, 4);
-		assert(sz == 4);
+		if (sz != 4)
+			return -EIO;
 		tunpack(lenbuf, "l", &length);
 
 		if (length == 0)
@@ -236,7 +237,8 @@ peer_rx_message(struct mbt_peer *p)
 	}
 
 	sz = mbt_conn_read(p->conn, &cmd, 1);
-	assert(sz == 1);
+	if (sz != 1)
+		return -EIO;
 	p->msglen -= 1;
 
 	switch (cmd) {
@@ -272,7 +274,8 @@ peer_rx_message(struct mbt_peer *p)
 		break;
 
 	case 5: /* bitfield */
-		assert(p->msglen <= sizeof(buf));
+		if (p->msglen > sizeof(buf))
+			return -ENOMSG;
 		sz = mbt_conn_read(p->conn, buf, p->msglen);
 		tbmap_unref(p->bitfield);
 		tbmap_fromarray(&p->bitfield, buf, sz);

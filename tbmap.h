@@ -16,8 +16,8 @@ void tbmap_unrefp(struct tbmap **tb);
 size_t tbmap_bits(struct tbmap *tb);
 size_t tbmap_bytes(struct tbmap *tb);
 
-void tbmap_set(struct tbmap *tb, size_t bit);
-int tbmap_isset(struct tbmap *tb, size_t bit);
+int tbmap_set(struct tbmap *tb, size_t bit);    /* 0=ok, <0=out of bounds */
+int tbmap_isset(struct tbmap *tb, size_t bit);  /* 1=set, 0=clear, <0=out of bounds */
 
 void tbmap_clear(struct tbmap *tb);
 

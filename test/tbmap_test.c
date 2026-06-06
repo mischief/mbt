@@ -230,6 +230,12 @@ test_multi_byte(void)
 	assert(!tbmap_isset(tb, 1));
 	assert(!tbmap_isset(tb, 30));
 
+	/* out of bounds returns error */
+	assert(tbmap_set(tb, 32) < 0);
+	assert(tbmap_set(tb, 100) < 0);
+	assert(tbmap_isset(tb, 32) < 0);
+	assert(tbmap_isset(tb, 100) < 0);
+
 	tbmap_unref(tb);
 }
 

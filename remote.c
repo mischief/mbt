@@ -635,7 +635,8 @@ remote_extension_rx(struct remote *r, size_t sz)
 		return -ENOMSG;
 
 	rd = mbt_conn_read(r->conn, &extcmd, 1);
-	assert(rd == 1);
+	if (rd != 1)
+		return -EIO;
 
 	sz -= 1;
 
@@ -645,7 +646,8 @@ remote_extension_rx(struct remote *r, size_t sz)
 	case 0:
 		// handshake
 		rd = mbt_conn_read(r->conn, buf, MIN(sizeof(buf), sz));
-		assert(rd >= 0);
+		if (rd <= 0)
+			return -EIO;
 
 		if((rv = be_value_parse(buf, rd, &be)) < 0){
 			warnx("%s: be_value_parse: %s", __func__, strerror(-rv));
@@ -832,9 +834,11 @@ remote_rx(struct remote *r)
 
 	if(!r->msglen){
 		sz = mbt_conn_read(r->conn, lengthprefix, sizeof(lengthprefix));
-		assert(sz == sizeof(lengthprefix));
+		if (sz != sizeof(lengthprefix))
+			return -EIO;
 		rv = tunpack(lengthprefix, "l", &length);
-		assert(rv > 0);
+		if (rv <= 0)
+			return -EIO;
 
 		if(length > (1<<18)){
 			warnx("%s: %s:%hu: bogus large frame size %u", __func__, r->remote, r->port, length);
@@ -858,7 +862,8 @@ remote_rx(struct remote *r)
 	}
 
 	sz = mbt_conn_read(r->conn, &cmd, 1);
-	assert(sz == 1);
+	if (sz != 1)
+		return -EIO;
 
 	r->msglen -= 1;
 
@@ -899,9 +904,15 @@ remote_rx(struct remote *r)
 	case 5:
 		warnx("%s: %s:%hu: bitfield", __func__, r->remote, r->port);
 
-		assert(r->msglen < sizeof(bitmaptmp));
+		if (r->msglen >= sizeof(bitmaptmp)) {
+			rv = -ENOMSG;
+			goto err;
+		}
 		sz = mbt_conn_read(r->conn, bitmaptmp, MIN(r->msglen, sizeof(bitmaptmp)));
-		assert(sz == (ssize_t)r->msglen);
+		if (sz != (ssize_t)r->msglen) {
+			rv = -EIO;
+			goto err;
+		}
 
 		if((rv = tbmap_fromarray(&r->bitmap, bitmaptmp, sz)) < 0)
 			goto err;

@@ -84,17 +84,18 @@ tbmap_bytes(struct tbmap *tb)
 	return tb->bytes;
 }
 
-void
+int
 tbmap_set(struct tbmap *tb, size_t bit)
 {
 	uint8_t *p, setbit = 128 >> (bit & 7);
 	size_t byte = bit >> 3;
 
-	assert(byte < tb->bytes);
+	if (byte >= tb->bytes)
+		return -EINVAL;
 
 	p = tb->map + byte;
-
 	*p |= setbit;
+	return 0;
 }
 
 int
@@ -103,10 +104,10 @@ tbmap_isset(struct tbmap *tb, size_t bit)
 	uint8_t *p, checkbit = 128 >> (bit & 7);
 	size_t byte = bit >> 3;
 
-	assert(byte < tb->bytes);
+	if (byte >= tb->bytes)
+		return -EINVAL;
 
 	p = tb->map + byte;
-
 	return (*p & checkbit) != 0;
 }
 
