@@ -128,21 +128,24 @@ be_value_parse_string(const unsigned char *buf, size_t sz, struct be_value **out
 	if(rv < 0)
 		return rv;
 
-	*out = v;
-
 	insz = strtoul((const char *)p, NULL, 10);
-	if(insz > sz)
+	if(insz > sz){
+		be_value_free(v);
 		return -ERANGE;
+	}
 
 	v->string.iov_base = malloc(insz+1);
-	if(!v->string.iov_base)
+	if(!v->string.iov_base){
+		be_value_free(v);
 		return -ENOMEM;
+	}
 
 	v->string.iov_len = insz;
 
 	memcpy(v->string.iov_base, cp+1, insz);
 	memset(((char*)v->string.iov_base)+insz, '\0', 1);
 
+	*out = v;
 	return (cp+1-p) + insz;
 }
 
@@ -201,8 +204,10 @@ be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct be_va
 
 	while(*p && *p != 'e'){
 		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
-		if(rv < 0)
+		if(rv < 0){
+			be_value_free(v);
 			return rv;
+		}
 
 		be_insert(v, inner);
 		p += rv;
@@ -239,20 +244,26 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 		case '4': case '5': case '6': case '7': 
 		case '8': case '9':
 			rv = be_value_parse_string(p, sz, &key);
-			if(rv < 0)
+			if(rv < 0){
+				be_value_free(v);
 				return rv;
+			}
 
 			p += rv;
 			chr += rv;
 
 			break;
 		default:
+			be_value_free(v);
 			return -EINVAL;
 		}
 
 		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
-		if(rv < 0)
+		if(rv < 0){
+			be_value_free(key);
+			be_value_free(v);
 			return rv;
+		}
 
 		/* kidnap key */
 		inner->key = key->string.iov_base;

@@ -39,6 +39,8 @@ main(int argc, char *argv[])
 	be_walk(be, be_pp, NULL);
 
 	be_value_free(be);
+	free(buf);
+	fclose(fp);
 
 	return 0;
 }
