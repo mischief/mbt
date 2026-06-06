@@ -286,6 +286,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 				tp->banned = 1;
 				mbt_peer_free(tp->peer);
 				tp->peer = NULL;
+				return; /* peer is dead, don't continue */
 			}
 		} else {
 			/* Verified — store */
