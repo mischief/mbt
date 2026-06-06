@@ -29,7 +29,8 @@ struct session_torrent {
 	struct mbt_session *session;     /* back-reference */
 	struct mbt_torrent *torrent;
 	struct mbt_infohash *ih;
-	char *tracker_url;
+	char *trackers[16];
+	int tracker_count;
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
 	STAILQ_ENTRY(session_torrent) next;
@@ -213,7 +214,8 @@ mbt_session_free(struct mbt_session *s)
 		mbt_infohash_unref(st->ih);
 		if (st->reannounce_timer)
 			mbt_ev_timer_free(st->reannounce_timer);
-		free(st->tracker_url);
+		for (int i = 0; i < st->tracker_count; i++)
+			free(st->trackers[i]);
 		free(st);
 	}
 
@@ -367,7 +369,7 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 static void
 session_do_announce(struct mbt_session *s, struct session_torrent *st)
 {
-	if (!st->tracker_url)
+	if (st->tracker_count == 0)
 		return;
 
 	struct mbt_tracker_request treq = {
@@ -380,7 +382,9 @@ session_do_announce(struct mbt_session *s, struct session_torrent *st)
 		.done_cb = session_tracker_done_cb,
 		.arg = s,
 	};
-	mbt_tracker_announce(st->tracker_url, &treq, s->http, s->http_arg);
+
+	for (int i = 0; i < st->tracker_count; i++)
+		mbt_tracker_announce(st->trackers[i], &treq, s->http, s->http_arg);
 }
 
 static void
@@ -533,14 +537,35 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	if (t)
 		mbt_torrent_set_metadata(t, info_start, info_len);
 
-	/* Announce to tracker if present */
-	struct be_value *announce = be_find(be, "announce");
-	if (announce && announce->type == BE_STRING && t) {
-		struct session_torrent *sta = session_find(s, ih);
-		if (sta) {
-			sta->tracker_url = strndup(announce->string.iov_base, announce->string.iov_len);
-			session_do_announce(s, sta);
+	/* Extract tracker URLs */
+	struct session_torrent *sta = session_find(s, ih);
+	if (sta && t) {
+		/* BEP 12: announce-list (list of lists of URLs) */
+		struct be_value *al = be_find(be, "announce-list");
+		if (al && al->type == BE_LIST) {
+			struct be_value *tier;
+			STAILQ_FOREACH(tier, &al->listhead, next) {
+				if (tier->type != BE_LIST) continue;
+				struct be_value *url_val;
+				STAILQ_FOREACH(url_val, &tier->listhead, next) {
+					if (url_val->type == BE_STRING && sta->tracker_count < 16) {
+						sta->trackers[sta->tracker_count++] =
+							strndup(url_val->string.iov_base, url_val->string.iov_len);
+					}
+				}
+			}
 		}
+
+		/* Fallback: single announce field */
+		if (sta->tracker_count == 0) {
+			struct be_value *announce = be_find(be, "announce");
+			if (announce && announce->type == BE_STRING)
+				sta->trackers[sta->tracker_count++] =
+					strndup(announce->string.iov_base, announce->string.iov_len);
+		}
+
+		if (sta->tracker_count > 0)
+			session_do_announce(s, sta);
 	}
 
 	mbt_infohash_unref(ih);
