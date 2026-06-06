@@ -64,6 +64,9 @@ int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 struct mbt_session_callbacks {
 	void (*on_torrent_complete)(struct mbt_session *s, struct mbt_torrent *t, void *arg);
 	void (*on_torrent_error)(struct mbt_session *s, struct mbt_torrent *t, int err, void *arg);
+	/* LSD: called for each discovered infohash. Return 1 to add torrent + connect, 0 to ignore. */
+	int (*on_lsd_announce)(struct mbt_session *s, struct mbt_infohash *ih,
+	                       const char *addr, uint16_t port, void *arg);
 	void *arg;
 };
 

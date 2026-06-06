@@ -285,9 +285,15 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		return;
 
 	STAILQ_FOREACH(ih, &info->infohashes, next) {
-		/* Only connect peers for torrents we're already tracking */
-		if (session_find(s, ih))
-			mbt_session_add_peer(s, ih, info->remote, info->port);
+		if (s->cb.on_lsd_announce) {
+			/* Caller decides policy */
+			if (s->cb.on_lsd_announce(s, ih, info->remote, info->port, s->cb.arg))
+				mbt_session_add_peer(s, ih, info->remote, info->port);
+		} else {
+			/* Default: only connect peers for torrents we already track */
+			if (session_find(s, ih))
+				mbt_session_add_peer(s, ih, info->remote, info->port);
+		}
 	}
 }
 
