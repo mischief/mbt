@@ -23,6 +23,7 @@ struct conn_lev {
 struct ev_lev {
 	struct mbt_ev base;
 	struct event_base *base_ev;
+	int owned;
 };
 
 static void

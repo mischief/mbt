@@ -8,6 +8,7 @@
 struct ev_lev {
 	struct mbt_ev base;
 	struct event_base *base_ev;
+	int owned; /* if true, free base_ev on destroy */
 };
 
 struct ev_lev_io {
@@ -199,7 +200,8 @@ static void
 lev_destroy(struct mbt_ev *ev)
 {
 	struct ev_lev *l = (struct ev_lev *)ev;
-	event_base_free(l->base_ev);
+	if (l->owned)
+		event_base_free(l->base_ev);
 	free(l);
 }
 
@@ -230,6 +232,22 @@ mbt_ev_libevent_new(struct mbt_ev **out)
 		return -ENOMEM;
 	}
 
+	l->owned = 1;
+	l->base.ops = &lev_ops;
+	*out = &l->base;
+	return 0;
+}
+
+int
+mbt_ev_libevent_new_from(struct mbt_ev **out, struct event_base *base)
+{
+	struct ev_lev *l;
+
+	l = calloc(1, sizeof(*l));
+	if (!l)
+		return -ENOMEM;
+
+	l->base_ev = base;
 	l->base.ops = &lev_ops;
 	*out = &l->base;
 	return 0;

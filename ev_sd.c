@@ -8,6 +8,7 @@
 struct ev_sd {
 	struct mbt_ev base;
 	sd_event *loop;
+	int owned;
 };
 
 struct ev_sd_io {
@@ -176,7 +177,8 @@ static void
 sd_destroy(struct mbt_ev *ev)
 {
 	struct ev_sd *s = (struct ev_sd *)ev;
-	sd_event_unref(s->loop);
+	if (s->owned)
+		sd_event_unref(s->loop);
 	free(s);
 }
 
@@ -208,6 +210,22 @@ mbt_ev_sd_new(struct mbt_ev **out)
 		return rv;
 	}
 
+	s->owned = 1;
+	s->base.ops = &sd_ops;
+	*out = &s->base;
+	return 0;
+}
+
+int
+mbt_ev_sd_new_from(struct mbt_ev **out, sd_event *loop)
+{
+	struct ev_sd *s;
+
+	s = calloc(1, sizeof(*s));
+	if (!s)
+		return -ENOMEM;
+
+	s->loop = sd_event_ref(loop);
 	s->base.ops = &sd_ops;
 	*out = &s->base;
 	return 0;

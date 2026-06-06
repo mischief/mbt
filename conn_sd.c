@@ -106,6 +106,7 @@ static const struct mbt_conn_ops conn_sd_ops = {
 struct ev_sd {
 	struct mbt_ev base;
 	sd_event *loop;
+	int owned;
 };
 
 int

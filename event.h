@@ -38,8 +38,16 @@ struct mbt_ev {
 /* sd-event backend */
 int mbt_ev_sd_new(struct mbt_ev **out);
 
+/* Wrap an existing sd_event loop (caller retains ownership) */
+struct sd_event;
+int mbt_ev_sd_new_from(struct mbt_ev **out, struct sd_event *loop);
+
 /* libevent backend */
 int mbt_ev_libevent_new(struct mbt_ev **out);
+
+/* Wrap an existing event_base (caller retains ownership) */
+struct event_base;
+int mbt_ev_libevent_new_from(struct mbt_ev **out, struct event_base *base);
 
 /* Inline convenience wrappers */
 static inline int
