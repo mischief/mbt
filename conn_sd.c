@@ -12,6 +12,13 @@
 #include "conn.h"
 #include "sdbuf.h"
 
+/* Access the underlying sd_event* from our ev_sd backend */
+struct ev_sd {
+	struct mbt_ev base;
+	sd_event *loop;
+	int owned;
+};
+
 struct conn_sd {
 	struct mbt_conn base;
 	struct mbt_ev *ev;
@@ -63,6 +70,13 @@ static void
 conn_sd_set_watermark(struct mbt_conn *conn, size_t low)
 {
 	struct conn_sd *c = (struct conn_sd *)conn;
+
+	/* Lazily register IO source on first watermark set */
+	if (!c->src) {
+		struct ev_sd *s = (struct ev_sd *)c->ev;
+		sd_event_add_io(s->loop, &c->src, c->fd, EPOLLIN, conn_sd_io, c);
+	}
+
 	sdbuf_set_watermark(c->buf, low, 0);
 }
 
@@ -139,13 +153,6 @@ mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *po
 
 	return 0;
 }
-
-/* Access the underlying sd_event* from our ev_sd backend */
-struct ev_sd {
-	struct mbt_ev base;
-	sd_event *loop;
-	int owned;
-};
 
 int
 mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
