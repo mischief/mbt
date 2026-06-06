@@ -32,8 +32,5 @@ int torrent_put_piece_block(struct torrent *t, size_t piece_index, size_t offset
 RB_HEAD(torrent_tree, torrent);
 RB_PROTOTYPE(torrent_tree, torrent, entry, torrent_cmp)
 
-int tpack(unsigned char *out, char *v, ...);
-int tunpack(unsigned char *in, char *v, ...);
-
 #endif
 

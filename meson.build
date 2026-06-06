@@ -48,6 +48,7 @@ bt_src = [
   'infohash.c',
   'lsd.c',
   'node.c',
+  'pack.c',
   'picker.c',
   'remote.c',
   'session.c',

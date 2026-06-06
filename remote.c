@@ -18,6 +18,7 @@
 #include <hex.h>
 #include "infohash.h"
 #include <be.h>
+#include "pack.h"
 #include <remote.h>
 #include <bt.h>
 #include <node.h>
