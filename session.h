@@ -25,6 +25,7 @@ struct mbt_session_config {
 
 	uint16_t listen_port;  /* 0 = don't listen for incoming */
 	int request_timeout;   /* seconds before stale requests reset (0 = default 15s) */
+	int max_peers;         /* max peers per torrent (0 = default 30) */
 	mbt_http_fn http;      /* HTTP callback for HTTP/HTTPS trackers (NULL = disabled) */
 	void *http_arg;
 };

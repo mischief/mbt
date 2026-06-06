@@ -64,6 +64,7 @@ struct mbt_session {
 
 	uint16_t listen_port;
 	int request_timeout_sec;
+	int max_peers;
 	mbt_http_fn http;
 	void *http_arg;
 	uint8_t peer_id[20];
@@ -179,6 +180,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->picker_ctx = cfg->picker_ctx;
 	s->listen_port = cfg->listen_port;
 	s->request_timeout_sec = cfg->request_timeout;
+	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
 
@@ -704,6 +706,10 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 		if (!st)
 			return -ENOMEM;
 	}
+
+	/* Check peer limit */
+	if (mbt_torrent_peer_count(st->torrent) >= s->max_peers)
+		return 0; /* silently skip, already at capacity */
 
 	/* Set up non-blocking connect */
 	sa.sin_family = AF_INET;
