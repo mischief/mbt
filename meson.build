@@ -43,7 +43,7 @@ endif
 # Core library
 bt_src = [
   'be.c',
-  'bt.c',
+  'bt_legacy.c',
   'hex.c',
   'infohash.c',
   'lsd.c',
@@ -55,7 +55,7 @@ bt_src = [
   'session.c',
   'storage_file.c',
   'tbmap.c',
-  'torrent2.c',
+  'torrent.c',
 ] + ev_src
 
 libmbt = library('mbt', bt_src, dependencies: deps, install: true)

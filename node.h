@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #include "event.h"
-#include <bt.h>
+#include "bt_legacy.h"
 #include <remote.h>
 */
 

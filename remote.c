@@ -20,7 +20,7 @@
 #include <be.h>
 #include "pack.h"
 #include <remote.h>
-#include <bt.h>
+#include "bt_legacy.h"
 #include <node.h>
 #include <tbmap.h>
 

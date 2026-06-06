@@ -12,7 +12,7 @@
 #include "event.h"
 #include "infohash.h"
 #include <be.h>
-#include <bt.h>
+#include "bt_legacy.h"
 #include <remote.h>
 #include <hex.h>
 #include <tbmap.h>
