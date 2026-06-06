@@ -373,20 +373,18 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	unsigned char *buf;
 	size_t len;
 	int rv;
-	struct be_value *be = NULL, *info;
+	struct be_value *be = NULL;
 	struct mbt_infohash *ih = NULL;
 	struct mbt_torrent *t;
 	SHA1_CTX ctx;
 	uint8_t digest[20];
 	char hexstr[41];
-	unsigned char *info_encoded = NULL;
-	size_t info_len;
 
 	fp = fopen(path, "rb");
 	if (!fp)
 		return -errno;
 
-	buf = malloc(4 * 1024 * 1024); /* 4MB max torrent file */
+	buf = malloc(4 * 1024 * 1024);
 	if (!buf) {
 		fclose(fp);
 		return -ENOMEM;
@@ -400,34 +398,56 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 		return -EIO;
 	}
 
-	rv = be_value_parse(buf, len, &be);
-	free(buf);
-	if (rv < 0)
-		return rv;
+	/* Find raw info dict in the buffer for correct SHA1 */
+	unsigned char *info_start = NULL;
+	size_t info_len = 0;
+	{
+		/* Search for "4:info" key in top-level dict */
+		unsigned char *p = memmem(buf, len, "4:infod", 7);
+		if (!p) p = memmem(buf, len, "4:info", 6);
+		if (p) {
+			info_start = p + 6; /* skip "4:info", point at value start */
+			/* Parse bencode value to find its end */
+			int depth = 0;
+			unsigned char *i = info_start;
+			unsigned char *end = buf + len;
+			while (i < end) {
+				if (*i == 'd' || *i == 'l') { depth++; i++; }
+				else if (*i == 'e') { depth--; i++; if (depth == 0) break; }
+				else if (*i == 'i') { i = memchr(i, 'e', end - i); if (i) i++; else break; }
+				else if (*i >= '0' && *i <= '9') {
+					unsigned char *colon = memchr(i, ':', end - i);
+					if (!colon) break;
+					size_t slen = strtoul((char *)i, NULL, 10);
+					i = colon + 1 + slen;
+				} else { break; }
+			}
+			info_len = (size_t)(i - info_start);
+		}
+	}
 
-	info = be_find(be, "info");
-	if (!info) {
-		be_value_free(be);
+	if (!info_start || info_len == 0) {
+		free(buf);
 		return -EINVAL;
 	}
 
-	/* Encode info dict to get its SHA1 (= infohash) */
-	rv = be_value_encode(info, &info_encoded, &info_len);
+	/* Compute infohash from raw bytes */
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, info_start, info_len);
+	SHA1Final(digest, &ctx);
+	mbintohex(digest, 20, hexstr, sizeof(hexstr));
+
+	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr);
 	if (rv < 0) {
-		be_value_free(be);
+		free(buf);
 		return rv;
 	}
 
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, info_encoded, info_len);
-	SHA1Final(digest, &ctx);
-
-	/* Create infohash from hex */
-	mbintohex(digest, 20, hexstr, sizeof(hexstr));
-	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr);
+	/* Parse the file for structure */
+	rv = be_value_parse(buf, len, &be);
 	if (rv < 0) {
-		free(info_encoded);
-		be_value_free(be);
+		free(buf);
+		mbt_infohash_unref(ih);
 		return rv;
 	}
 
@@ -435,15 +455,15 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	rv = mbt_session_add_infohash(s, ih);
 	if (rv < 0) {
 		mbt_infohash_unref(ih);
-		free(info_encoded);
+		free(buf);
 		be_value_free(be);
 		return rv;
 	}
 
-	/* Set metadata on it */
+	/* Set metadata from raw info bytes */
 	t = mbt_session_find_torrent(s, ih);
 	if (t)
-		mbt_torrent_set_metadata(t, info_encoded, info_len);
+		mbt_torrent_set_metadata(t, info_start, info_len);
 
 	/* Announce to tracker if present */
 	struct be_value *announce = be_find(be, "announce");
@@ -466,7 +486,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	}
 
 	mbt_infohash_unref(ih);
-	free(info_encoded);
+	free(buf);
 	be_value_free(be);
 
 	return 0;
