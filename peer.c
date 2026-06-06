@@ -31,6 +31,7 @@ struct mbt_peer {
 	uint8_t our_id[20];
 	uint8_t their_id[20];
 	uint8_t ext[8];
+	uint32_t flags;
 	char addr[INET6_ADDRSTRLEN];
 	uint16_t port;
 
@@ -143,6 +144,12 @@ peer_recv_handshake(struct mbt_peer *p)
 
 	rv = tunpack(buf + off, "*", 8, p->ext);
 	off += rv;
+
+	/* Parse reserved byte flags */
+	p->flags = 0;
+	if (p->ext[7] & 0x01) p->flags |= MBT_PEER_FLAG_DHT;
+	if (p->ext[7] & 0x04) p->flags |= MBT_PEER_FLAG_FAST;
+	if (p->ext[5] & 0x10) p->flags |= MBT_PEER_FLAG_EXTENSION;
 
 	rv = tunpack(buf + off, "*", 20, hash);
 	off += rv;
@@ -386,22 +393,29 @@ peer_on_read(struct mbt_conn *c, void *v)
 
 	(void)c;
 
-	mbt_log_debug(MBT_LOG_PEER, "on_read: state=%d avail=%zu", p->state, mbt_conn_available(p->conn));
+	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: on_read state=%d avail=%zu",
+	              p->addr, p->port, p->state, mbt_conn_available(p->conn));
 
 	switch (p->state) {
 	case MBT_PEER_HANDSHAKE:
 		rv = peer_recv_handshake(p);
 		if (rv < 0) {
+			mbt_log_debug(MBT_LOG_PEER, "%s:%hu: handshake failed: %s",
+			              p->addr, p->port, strerror(-rv));
 			peer_error(p, rv);
 			return;
 		}
 
+		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: handshake OK, flags=%s%s%s",
+		              p->addr, p->port,
+		              (p->flags & MBT_PEER_FLAG_DHT) ? "DHT " : "",
+		              (p->flags & MBT_PEER_FLAG_FAST) ? "FAST " : "",
+		              (p->flags & MBT_PEER_FLAG_EXTENSION) ? "EXT" : "");
+
 		if (p->ext[5] & 0x10) {
-			/* Peer supports BEP 10 — wait for their extension handshake */
 			p->state = MBT_PEER_EXTENSION;
 			mbt_conn_set_watermark(p->conn, 4);
 		} else {
-			/* No extensions, go active */
 			p->state = MBT_PEER_ACTIVE;
 			mbt_conn_set_watermark(p->conn, 4);
 			if (p->cb.on_active)
@@ -443,6 +457,8 @@ peer_on_read(struct mbt_conn *c, void *v)
 		peer_send_extension_handshake(p);
 
 		p->state = MBT_PEER_ACTIVE;
+		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: ACTIVE (metadata_size=%zu reqq=%d)",
+		              p->addr, p->port, p->metadata_size, p->reqq);
 		mbt_conn_set_watermark(p->conn, 4);
 		if (p->cb.on_active)
 			p->cb.on_active(p, p->cb_arg);
@@ -507,6 +523,8 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);
 	mbt_conn_set_watermark(p->conn, HANDSHAKE_SIZE);
 
+	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: sending handshake", p->addr, p->port);
+
 	rv = peer_send_handshake(p);
 	if (rv < 0) {
 		free(p);
@@ -569,7 +587,13 @@ mbt_peer_bitfield(struct mbt_peer *p)
 int
 mbt_peer_has_extension(struct mbt_peer *p)
 {
-	return p->ext[5] & 0x10;
+	return p->flags & MBT_PEER_FLAG_EXTENSION;
+}
+
+uint32_t
+mbt_peer_flags(struct mbt_peer *p)
+{
+	return p->flags;
 }
 
 size_t
@@ -582,6 +606,18 @@ int
 mbt_peer_reqq(struct mbt_peer *p)
 {
 	return p->reqq;
+}
+
+const char *
+mbt_peer_addr(struct mbt_peer *p)
+{
+	return p->addr;
+}
+
+uint16_t
+mbt_peer_port(struct mbt_peer *p)
+{
+	return p->port;
 }
 
 /* --- Send commands --- */

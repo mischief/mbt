@@ -20,6 +20,13 @@ enum mbt_peer_state {
 	MBT_PEER_CLOSED,
 };
 
+/* Reserved byte flags from handshake (BEP 3/4) */
+enum mbt_peer_flags {
+	MBT_PEER_FLAG_DHT       = 1 << 0, /* ext[7] & 0x01 — BEP 5 */
+	MBT_PEER_FLAG_FAST      = 1 << 1, /* ext[7] & 0x04 — BEP 6 */
+	MBT_PEER_FLAG_EXTENSION = 1 << 2, /* ext[5] & 0x10 — BEP 10 */
+};
+
 /* Events reported up to the torrent/owner */
 struct mbt_peer_callbacks {
 	/* Handshake complete — peer is now usable */
@@ -82,7 +89,10 @@ int mbt_peer_send_metadata_request(struct mbt_peer *p, int piece);
 
 /* Extension info (available after on_active) */
 int mbt_peer_has_extension(struct mbt_peer *p);       /* BEP 10 supported? */
+uint32_t mbt_peer_flags(struct mbt_peer *p);          /* mbt_peer_flags bitmask */
 size_t mbt_peer_metadata_size(struct mbt_peer *p);    /* 0 if unknown */
 int mbt_peer_reqq(struct mbt_peer *p);                /* max outstanding, 0=unknown */
+const char *mbt_peer_addr(struct mbt_peer *p);
+uint16_t mbt_peer_port(struct mbt_peer *p);
 
 #endif

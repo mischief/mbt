@@ -98,6 +98,9 @@ on_active(struct mbt_peer *p, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
+	mbt_log_debug(MBT_LOG_TORRENT, "on_active: metadata=%p metadata_size=%zu",
+	              (void *)t->metadata, mbt_peer_metadata_size(p));
+
 	/* Always express interest */
 	mbt_peer_send_interested(p, 1);
 
@@ -116,6 +119,8 @@ on_choke(struct mbt_peer *p, int choked, void *arg)
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
+
+	mbt_log_debug(MBT_LOG_TORRENT, "on_choke: choked=%d has_pieces=%d", choked, t->pieces != NULL);
 
 	if (!choked && t->pieces)
 		torrent_drive_peer(t, tp);
@@ -261,11 +266,20 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 		}
 
 		/* Parse and set metadata */
+		mbt_log_info(MBT_LOG_TORRENT, "metadata complete from %s:%hu (%zu bytes)",
+		             mbt_peer_addr(p), mbt_peer_port(p), t->metadata_len);
 		mbt_torrent_set_metadata(t, t->metadata, t->metadata_len);
+
+		if (t->pieces)
+			mbt_log_info(MBT_LOG_TORRENT, "name=\"%s\" pieces=%u piece_length=%u total=%llu",
+			             t->name ? t->name : "?", t->piece_count,
+			             t->piece_length, (unsigned long long)t->total_length);
 
 		/* Drive all peers now that we have metadata */
 		struct torrent_peer *tp;
 		for (tp = t->peers; tp; tp = tp->next) {
+			/* Re-send interested in case it was missed */
+			mbt_peer_send_interested(tp->peer, 1);
 			if (!mbt_peer_choked(tp->peer))
 				torrent_drive_peer(t, tp);
 		}
