@@ -141,8 +141,12 @@ sdbuf_handle_read(struct sdbuf *b, int fd)
 		buf->p += rv;
 
 		while(buf->p - buf->buf >= (ptrdiff_t)buf->lowat){
+			size_t before = (size_t)(buf->p - buf->buf);
 			if(b->readcb(b, b->cbarg) < 0)
 				return -EIO;
+			size_t after = (size_t)(buf->p - buf->buf);
+			if(after >= before)
+				break; /* readcb didn't consume data, stop */
 		}
 	}
 
