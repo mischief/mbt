@@ -53,6 +53,7 @@ struct pending_connect {
 	struct mbt_session *session;
 	struct mbt_torrent *torrent;
 	struct mbt_ev_io *io;
+	struct mbt_ev_timer *timeout;
 	int fd;
 	char addr[INET6_ADDRSTRLEN];
 	uint16_t port;
@@ -118,6 +119,23 @@ static void session_generate_peer_id(uint8_t *id);
 /* --- Pending connect handler --- */
 
 static void
+pending_connect_timeout(struct mbt_ev_timer *timer, void *v)
+{
+	struct pending_connect *pc = v;
+	struct mbt_session *s = pc->session;
+	(void)timer;
+
+	mbt_log_debug(MBT_LOG_SESSION, "connect to %s:%hu timed out", pc->addr, pc->port);
+	mbt_ev_io_free(pc->io);
+	pc->io = NULL;
+	mbt_ev_timer_free(pc->timeout);
+	pc->timeout = NULL;
+	close(pc->fd);
+	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
+	free(pc);
+}
+
+static void
 pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	struct pending_connect *pc = v;
@@ -159,6 +177,8 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	}
 
 	/* Clean up pending */
+	if (pc->timeout)
+		mbt_ev_timer_free(pc->timeout);
 	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
 	free(pc);
 	return;
@@ -167,6 +187,8 @@ fail:
 	close(pc->fd);
 	if (pc->io)
 		mbt_ev_io_free(pc->io);
+	if (pc->timeout)
+		mbt_ev_timer_free(pc->timeout);
 	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
 	free(pc);
 }
@@ -776,6 +798,10 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	if (fd < 0)
 		return -errno;
 
+	/* Enable TCP keepalive (detect dead connections faster) */
+	int yes = 1;
+	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
+
 	rv = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
 	if (rv < 0 && errno != EINPROGRESS) {
 		mbt_log_warn(MBT_LOG_SESSION, "connect to %s:%hu failed: %s", addr, port, strerror(errno));
@@ -818,6 +844,9 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	}
 
 	mbt_log_debug(MBT_LOG_SESSION, "pending connect registered for %s:%hu", addr, port);
+
+	/* 10s connect timeout */
+	mbt_ev_timer_new(s->ev, &pc->timeout, 10 * 1000000ULL, pending_connect_timeout, pc);
 
 	STAILQ_INSERT_TAIL(&s->pending, pc, next);
 	return 0;
