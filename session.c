@@ -431,13 +431,17 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 		return -EINVAL;
 	}
 
-	/* Compute infohash from raw bytes */
+	/* Compute infohash from raw info bytes.
+	 * v1 torrents use SHA1. v2 (BEP 52) will use SHA256 — detect via
+	 * "meta version" key in the info dict when we add v2 support. */
+	int hash_type = MBT_INFOHASH_SHA1;
+
 	SHA1Init(&ctx);
 	SHA1Update(&ctx, info_start, info_len);
 	SHA1Final(digest, &ctx);
 	mbintohex(digest, 20, hexstr, sizeof(hexstr));
 
-	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr);
+	rv = mbt_infohash_new(&ih, hash_type, hexstr);
 	if (rv < 0) {
 		free(buf);
 		return rv;
