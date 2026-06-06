@@ -9,17 +9,18 @@
 #include <string.h>
 #include <errno.h>
 #include <err.h>
+#include <fcntl.h>
 
 #include <sha1.h>
 
 #include "event.h"
+#include "conn.h"
 #include <hex.h>
 #include "infohash.h"
 #include <be.h>
 #include <remote.h>
 #include <bt.h>
 #include <node.h>
-#include <sdbuf.h>
 #include <tbmap.h>
 
 enum {
@@ -36,7 +37,6 @@ free_ucharp(unsigned char **p)
 }
 
 static int remote_read_handshake(struct remote *r);
-static void remote_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v);
 static int remote_rx(struct remote *r);
 static int remote_extension_tx(struct remote *r);
 static int remote_send_interest(struct remote *r, int interested);
@@ -45,6 +45,8 @@ static void
 remote_teardown_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct remote *r = v;
+
+	(void)timer;
 
 	warnx("%s: %s:%hu: removing peer", __func__, r->remote, r->port);
 
@@ -56,67 +58,50 @@ remote_onerror(struct remote *r, int err)
 {
 	assert(err <= 0);
 
-	/* Deferred teardown via zero-timeout timer */
 	if(!r->defer)
 		mbt_ev_timer_new(r->ev, &r->defer, 0, remote_teardown_cb, r);
 }
 
-static int
-remote_readcb(struct sdbuf *b, void *v)
+static void
+remote_conn_readcb(struct mbt_conn *c, void *v)
 {
 	int rv;
 	struct remote *r = v;
 
-	warnx("%s %zu", __func__, sdbuf_read_available(b));
+	warnx("%s %zu", __func__, mbt_conn_available(c));
 
 	if(!r->shook){
 		rv = remote_read_handshake(r);
 		if(rv < 0){
 			warnx("%s: %s:%hu: handshake: %s", __func__, r->remote, r->port, strerror(-rv));
 			remote_onerror(r, rv);
-			return -1;
+			return;
 		}
 
 		/* 4-byte big-endian message length prefixed messages */
-		sdbuf_set_watermark(b, 4, 0);
+		mbt_conn_set_watermark(r->conn, 4);
 
-		return 0;
+		return;
 	}
 
 	rv = remote_rx(r);
 	if(rv < 0){
 		warnx("%s: %s:%hu: rx: %s", __func__, r->remote, r->port, strerror(-rv));
 		remote_onerror(r, rv);
-		return -1;
+		return;
 	}
-
-	return 0;
-}
-
-static int
-remote_writecb(struct sdbuf *b, void *v)
-{
-	struct remote *r = v;
-	warnx("%s", __func__);
-	(void)r;
-	return 0;
 }
 
 static void
-remote_eventcb(struct sdbuf *b, int event, int err, void *v)
+remote_conn_eventcb(struct mbt_conn *c, int err, void *v)
 {
 	struct remote *r = v;
 
-	switch(event){
-	case SDBUF_EVENT_ERROR:
-		warnx("%s: %s:%hu: sdbuf error: %s", __func__, r->remote, r->port, err == 0 ? "EOF" : strerror(err));
-		remote_onerror(r, err);
-		break;
+	(void)c;
 
-	default:
-		warnx("%s: %s:%hu: unhandled sdbuf event %d", __func__, r->remote, r->port, event);
-		return;
-	}
+	warnx("%s: %s:%hu: conn error: %s", __func__, r->remote, r->port,
+	      err == 0 ? "EOF" : strerror(-err));
+	remote_onerror(r, err);
 }
 
 int
@@ -131,15 +116,8 @@ remote_new(struct torrent *t, struct remote **r, struct infohash *ih, struct mbt
 	remote->ref = 1;
 
 	remote->t = t;
-
 	remote->ev = ev;
-
-	if(sdbuf_new(&remote->buf, remote_readcb, remote_writecb, remote_eventcb, remote) < 0){
-		free(remote);
-		return -ENOMEM;
-	}
-
-	sdbuf_set_watermark(remote->buf, HANDSHAKE_SIZE, 0);
+	remote->fd = -1;
 
 	remote->ih = infohash_ref(ih);
 
@@ -177,19 +155,20 @@ remote_unref(struct remote *r)
 
 	warnx("%s: %s:%hu destroying", __func__, r->remote, r->port);
 
-	if(r->io)
-		mbt_ev_io_free(r->io);
+	if(r->conn)
+		mbt_conn_free(r->conn);
+	if(r->connect_io)
+		mbt_ev_io_free(r->connect_io);
 	if(r->timer)
 		mbt_ev_timer_free(r->timer);
 	if(r->defer)
 		mbt_ev_timer_free(r->defer);
 
-	sdbuf_free(r->buf);
-
 	infohash_unrefp(&r->ih);
 
 	tbmap_unref(r->bitmap);
 
+	free(r->metadata);
 	free(r);
 }
 
@@ -203,10 +182,10 @@ remote_unrefp(struct remote **r)
 }
 
 static ssize_t
-remote_write(struct remote *r, void *buf, size_t sz)
+remote_write(struct remote *r, const void *buf, size_t sz)
 {
 	warnx("%s: %s:%hu: send %lu", __func__, r->remote, r->port, sz);
-	return write(r->fd, buf, sz);
+	return mbt_conn_write(r->conn, buf, sz);
 }
 
 static ssize_t
@@ -220,11 +199,11 @@ remote_write_prefixed(struct remote *r, void *buf, size_t sz)
 	if(rv < 0)
 		return rv;
 
-	if(send(r->fd, lprefix, rv, MSG_MORE) < 0)
-		return -errno;
+	if(mbt_conn_write(r->conn, lprefix, rv) < 0)
+		return -EIO;
 
-	if(send(r->fd, buf, sz, 0) < 0)
-		return -errno;
+	if(mbt_conn_write(r->conn, buf, sz) < 0)
+		return -EIO;
 
 	return 0;
 }
@@ -233,7 +212,7 @@ static int
 remote_send_handshake(struct remote *r)
 {
 	int rv = 0;
-	ssize_t w, o = 0;
+	ssize_t o = 0;
 	unsigned char shit[HANDSHAKE_SIZE];
 	unsigned char ext[8];
 	uint8_t *nodeid;
@@ -267,8 +246,8 @@ remote_send_handshake(struct remote *r)
 
 	o += rv;
 
-	if((w = remote_write(r, shit, o)) < 0)
-		return -errno;
+	if(remote_write(r, shit, o) < 0)
+		return -EIO;
 
 	return 0;
 }
@@ -289,7 +268,7 @@ remote_send_interest(struct remote *r, int interested)
 		return rv;
 
 	if(remote_write(r, shit, rv) < 0)
-		return -errno;
+		return -EIO;
 
 	return 0;
 }
@@ -299,10 +278,8 @@ remote_timer_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct remote *r = v;
 
-	/* reschedule 60s keepalive */
 	mbt_ev_timer_mod(timer, 60*1000000ULL);
 
-	/* send keepalive */
 	remote_write(r, "\0\0\0\0", 4);
 }
 
@@ -313,17 +290,16 @@ remote_connected(struct remote *r)
 
 	warnx("%s: connected to %s:%hu", __func__, r->remote, r->port);
 
-	/* Switch IO to read mode */
-	if(r->io)
-		rv = mbt_ev_io_mod(r->io, MBT_EV_READ);
-	else
-		rv = mbt_ev_io_new(r->ev, &r->io, r->fd, MBT_EV_READ, remote_io_cb, r);
-
+	/* Create buffered connection from the connected fd */
+	rv = mbt_conn_new(r->ev, &r->conn, r->fd, remote_conn_readcb, remote_conn_eventcb, r);
 	if(rv < 0){
-		warnx("%s: failed to setup events: %s", __func__, strerror(-rv));
+		warnx("%s: mbt_conn_new: %s", __func__, strerror(-rv));
 		remote_onerror(r, rv);
 		return rv;
 	}
+
+	/* Wait for handshake */
+	mbt_conn_set_watermark(r->conn, HANDSHAKE_SIZE);
 
 	rv = remote_send_handshake(r);
 	if(rv < 0){
@@ -350,6 +326,7 @@ remote_connect_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	int rv, error;
 	struct remote *r = v;
 
+	(void)io;
 	(void)fd;
 	(void)events;
 
@@ -366,9 +343,9 @@ remote_connect_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		goto err;
 	}
 
-	/* Free connect watcher, remote_connected will set up read watcher */
-	mbt_ev_io_free(r->io);
-	r->io = NULL;
+	/* Done with connect watcher */
+	mbt_ev_io_free(r->connect_io);
+	r->connect_io = NULL;
 
 	remote_connected(r);
 	return;
@@ -407,7 +384,7 @@ remote_connect(struct remote *r, const char *da, uint16_t port)
 	rv = connect(r->fd, (struct sockaddr*)&sa, sasz);
 	if(rv < 0){
 		if(errno == EINPROGRESS){
-			rv = mbt_ev_io_new(r->ev, &r->io, r->fd, MBT_EV_WRITE, remote_connect_io_cb, r);
+			rv = mbt_ev_io_new(r->ev, &r->connect_io, r->fd, MBT_EV_WRITE, remote_connect_io_cb, r);
 			if(rv < 0)
 				return rv;
 
@@ -433,7 +410,6 @@ remote_send_utmetadata_request(struct remote *r, int piece)
 	if(rv < 0)
 		return rv;
 
-	/* request */
 	rv = be_dict_append_number(v, "msg_type", 0);
 	if(rv < 0)
 		return rv;
@@ -504,7 +480,6 @@ remote_request(struct remote *r, size_t piece, size_t block)
 	int rv;
 	unsigned char packed[1+4+4+4];
 
-	/* request */
 	rv = tpack(packed, "blll", 6, piece, block*BTBLOCKSIZE, BTBLOCKSIZE);
 	assert(rv > 0);
 
@@ -558,7 +533,7 @@ remote_utmetadata_rx(struct remote *r, size_t msglen)
 	if(!buf)
 		return -ENOMEM;
 
-	sz = sdbuf_read(r->buf, buf, msglen);
+	sz = mbt_conn_read(r->conn, buf, msglen);
 	if(sz != (ssize_t)msglen){
 		warnx("%s: short read", __func__);
 		return -ENOMSG;
@@ -658,7 +633,7 @@ remote_extension_rx(struct remote *r, size_t sz)
 	if(sz < 1)
 		return -ENOMSG;
 
-	rd = sdbuf_read(r->buf, &extcmd, 1);
+	rd = mbt_conn_read(r->conn, &extcmd, 1);
 	assert(rd == 1);
 
 	sz -= 1;
@@ -668,7 +643,7 @@ remote_extension_rx(struct remote *r, size_t sz)
 	switch(extcmd){
 	case 0:
 		// handshake
-		rd = sdbuf_read(r->buf, buf, MIN(sizeof(buf), sz));
+		rd = mbt_conn_read(r->conn, buf, MIN(sizeof(buf), sz));
 		assert(rd >= 0);
 
 		if((rv = be_value_parse(buf, rd, &be)) < 0){
@@ -753,7 +728,7 @@ remote_read_handshake(struct remote *r)
 	int rv, offset;
 	uint32_t length;
 
-	sz = sdbuf_read(r->buf, frame, HANDSHAKE_SIZE);
+	sz = mbt_conn_read(r->conn, frame, HANDSHAKE_SIZE);
 	if(sz != HANDSHAKE_SIZE){
 		warnx("%s: %s:%hu: short handshake: %ld", __func__, r->remote, r->port, sz);
 		return -ENOMSG;
@@ -802,21 +777,6 @@ remote_read_handshake(struct remote *r)
 	return 0;
 }
 
-static void
-remote_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
-{
-	struct remote *r = v;
-	uint32_t revents = 0;
-
-	(void)io;
-
-	/* translate to sdbuf's expected bits */
-	if(events & MBT_EV_READ)  revents |= 0x001; /* EPOLLIN */
-	if(events & MBT_EV_WRITE) revents |= 0x004; /* EPOLLOUT */
-
-	sdbuf_io(r->buf, fd, revents);
-}
-
 static int
 remote_rx_piece(struct remote *r, size_t msglen)
 {
@@ -825,9 +785,9 @@ remote_rx_piece(struct remote *r, size_t msglen)
 	unsigned char buf[4+4];
 	unsigned char block[BTBLOCKSIZE];
 
-	rv = sdbuf_read(r->buf, buf, sizeof(buf));
+	rv = mbt_conn_read(r->conn, buf, sizeof(buf));
 	if(rv != sizeof(buf)){
-		warnx("%s: sdbuf_read rv %d", __func__, rv);
+		warnx("%s: mbt_conn_read rv %d", __func__, rv);
 		return -EIO;
 	}
 
@@ -839,7 +799,7 @@ remote_rx_piece(struct remote *r, size_t msglen)
 
 	msglen -= sizeof(buf);
 
-	rv = sdbuf_read(r->buf, block, sizeof(block));
+	rv = mbt_conn_read(r->conn, block, sizeof(block));
 	if(rv < 0)
 		return rv;
 
@@ -867,10 +827,10 @@ remote_rx(struct remote *r)
 	int rv;
 	uint32_t length;
 	unsigned char lengthprefix[4];
-	unsigned char bitmaptmp[4096]; // good enough for a few hundred gb
+	unsigned char bitmaptmp[4096];
 
 	if(!r->msglen){
-		sz = sdbuf_read(r->buf, lengthprefix, sizeof(lengthprefix));
+		sz = mbt_conn_read(r->conn, lengthprefix, sizeof(lengthprefix));
 		assert(sz == sizeof(lengthprefix));
 		rv = tunpack(lengthprefix, "l", &length);
 		assert(rv > 0);
@@ -891,12 +851,12 @@ remote_rx(struct remote *r)
 			return 0;
 		}
 
-		sdbuf_set_watermark(r->buf, r->msglen, 0);
+		mbt_conn_set_watermark(r->conn, r->msglen);
 
 		return 0;
 	}
 
-	sz = sdbuf_read(r->buf, &cmd, 1);
+	sz = mbt_conn_read(r->conn, &cmd, 1);
 	assert(sz == 1);
 
 	r->msglen -= 1;
@@ -939,7 +899,7 @@ remote_rx(struct remote *r)
 		warnx("%s: %s:%hu: bitfield", __func__, r->remote, r->port);
 
 		assert(r->msglen < sizeof(bitmaptmp));
-		sz = sdbuf_read(r->buf, bitmaptmp, MIN(r->msglen, sizeof(bitmaptmp)));
+		sz = mbt_conn_read(r->conn, bitmaptmp, MIN(r->msglen, sizeof(bitmaptmp)));
 		assert(sz == (ssize_t)r->msglen);
 
 		if((rv = tbmap_fromarray(&r->bitmap, bitmaptmp, sz)) < 0)
@@ -978,7 +938,7 @@ remote_rx(struct remote *r)
 
 	r->msglen = 0;
 
-	sdbuf_set_watermark(r->buf, 4, 0);
+	mbt_conn_set_watermark(r->conn, 4);
 
 	return 0;
 

@@ -31,12 +31,12 @@ event_backend = get_option('event_backend')
 if event_backend == 'sd-event'
   libsystemd_dep = dependency('libsystemd')
   deps += libsystemd_dep
-  ev_src = 'ev_sd.c'
+  ev_src = ['ev_sd.c', 'conn_sd.c', 'sdbuf.c']
   add_project_arguments('-DHAVE_SD_EVENT', language: 'c')
 elif event_backend == 'libevent'
   libevent_dep = dependency('libevent')
   deps += libevent_dep
-  ev_src = 'ev_libevent.c'
+  ev_src = ['ev_libevent.c', 'conn_libevent.c']
   add_project_arguments('-DHAVE_LIBEVENT', language: 'c')
 endif
 
@@ -44,15 +44,13 @@ endif
 bt_src = [
   'be.c',
   'bt.c',
-  ev_src,
   'hex.c',
   'infohash.c',
   'lsd.c',
   'node.c',
   'remote.c',
-  'sdbuf.c',
   'tbmap.c',
-]
+] + ev_src
 
 libmbt = library('mbt', bt_src, dependencies: deps, install: true)
 

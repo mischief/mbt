@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "event.h"
+#include "conn.h"
 */
 
 struct remote;
@@ -23,13 +24,12 @@ struct remote {
 	unsigned char ext[8];
 	unsigned char id[20];
 
-	struct mbt_ev_io *io;
+	struct mbt_conn *conn;
+	struct mbt_ev_io *connect_io;
 	struct mbt_ev_timer *timer;
 	struct mbt_ev_timer *defer;
 
 	struct mbt_ev *ev;
-
-	struct sdbuf *buf;
 
 	/* expected next message size */
 	size_t msglen;
