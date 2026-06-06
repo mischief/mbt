@@ -684,9 +684,19 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	if (tmp && tmp->type == BE_INTEGER) {
 		t->total_length = (uint64_t)tmp->integer;
 	} else {
-		/* Multi-file: sum lengths */
-		/* TODO: proper multi-file support */
-		return -ENOTSUP;
+		/* Multi-file: sum lengths from files list */
+		struct be_value *files = be_find(be, "files");
+		if (!files || files->type != BE_LIST)
+			return -EINVAL;
+		struct be_value *f;
+		STAILQ_FOREACH(f, &files->listhead, next) {
+			if (f->type != BE_DICTIONARY) continue;
+			struct be_value *flen = be_find(f, "length");
+			if (flen && flen->type == BE_INTEGER)
+				t->total_length += (uint64_t)flen->integer;
+		}
+		if (t->total_length == 0)
+			return -EINVAL;
 	}
 
 	/* Extract piece hashes */
