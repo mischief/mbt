@@ -856,7 +856,7 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	mbt_log_debug(MBT_LOG_SESSION, "pending connect registered for %s:%hu", addr, port);
 
 	/* 10s connect timeout */
-	mbt_ev_timer_new(s->ev, &pc->timeout, 10 * 1000000ULL, pending_connect_timeout, pc);
+	mbt_ev_timer_new(s->ev, &pc->timeout, 20 * 1000000ULL, pending_connect_timeout, pc);
 
 	STAILQ_INSERT_TAIL(&s->pending, pc, next);
 	return 0;
