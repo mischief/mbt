@@ -1,0 +1,556 @@
+#include <sys/param.h> /* MIN */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <stddef.h>
+#include <errno.h>
+#include <assert.h>
+
+#include "be.h"
+
+enum {
+	/* 9,999,999 */
+	BE_MAX_STR_LEN = 7,
+
+	/* roughly int64 */
+	BE_MAX_INT_LEN = 20,
+};
+
+static int
+be_count_depth(struct be_value *be)
+{
+	int depth;
+
+	depth = 0;
+
+	if(!be)
+		return 0;
+
+	for(be = be->up; be; be = be->up)
+		depth++;
+
+	return depth;
+}
+
+void
+be_value_free(struct be_value *v)
+{
+	struct be_value *ov, *head;
+
+	for(; v;){
+		switch(v->type){
+		case BE_STRING:
+			free(v->string.iov_base);
+			break;
+		case BE_INTEGER:
+			break;
+
+		case BE_DICTIONARY:
+		case BE_LIST:
+			head = STAILQ_FIRST(&v->listhead);
+			if(head){
+				STAILQ_REMOVE_HEAD(&v->listhead, next);
+				v = head;
+				continue;
+			}
+
+			break;
+
+		default:
+			break;
+		}
+
+		free(v->key);
+
+		ov = v->up;
+		free(v);
+		v = ov;
+	}
+}
+
+void
+be_value_freep(struct be_value **v)
+{
+	if(*v)
+		be_value_free(*v);
+}
+
+static int
+be_alloc(int type, struct be_value *up, struct be_value **out)
+{
+	struct be_value *v;
+
+	v = calloc(1, sizeof(*v));
+	if(!v)
+		return -ENOMEM;
+
+	v->type = type;
+	v->up = up;
+
+	STAILQ_INIT(&v->listhead);
+
+	*out = v;
+
+	return 0;
+}
+
+enum {
+	IN_DICT_FALSE,
+	IN_DICT_KEY,
+	IN_DICT_VALUE,
+};
+
+static int
+be_value_parse_string(const unsigned char *buf, size_t sz, struct be_value **out)
+{
+	const unsigned char *p = buf, *cp;
+	size_t spn;
+	ptrdiff_t pdif;
+	int rv;
+	unsigned long insz;
+	struct be_value *v;
+
+	*out = NULL;
+
+	cp = memchr(p, ':', MIN(BE_MAX_STR_LEN, sz));
+	if(!cp)
+		return -EINVAL;
+
+	spn = strspn((const char *)p, "0123456789");
+	pdif = cp - p;
+
+	if(spn != (size_t)pdif)
+		return -EINVAL;
+
+	rv = be_alloc(BE_STRING, NULL, &v);
+	if(rv < 0)
+		return rv;
+
+	*out = v;
+
+	insz = strtoul((const char *)p, NULL, 10);
+	if(insz > sz)
+		return -ERANGE;
+
+	v->string.iov_base = malloc(insz+1);
+	if(!v->string.iov_base)
+		return -ENOMEM;
+
+	v->string.iov_len = insz;
+
+	memcpy(v->string.iov_base, cp+1, insz);
+	memset(((char*)v->string.iov_base)+insz, '\0', 1);
+
+	return (cp+1-p) + insz;
+}
+
+static int
+be_value_parse_number(const unsigned char *buf, size_t sz, struct be_value **out)
+{
+	const unsigned char *p = buf, *cp;
+	size_t spn;
+	ptrdiff_t pdif;
+	int rv;
+	struct be_value *v;
+
+	cp = memchr(p, 'e', MIN(BE_MAX_INT_LEN, sz));
+	if(!cp)
+		return -EINVAL;
+
+	spn = strspn((const char*)p+1, "-0123456789");
+	pdif = cp - (p + 1);
+
+	if(spn != (size_t)pdif)
+		return -EINVAL;
+
+	rv = be_alloc(BE_INTEGER, NULL, &v);
+	if(rv < 0)
+		return rv;
+
+	v->integer = strtol((const char*)p+1, NULL, 10);
+
+	*out = v;
+
+	return cp+1-p;
+}
+
+static int be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct be_value **out);
+
+static void
+be_insert(struct be_value *v, struct be_value *val)
+{
+	if(v->type == BE_LIST || v->type == BE_DICTIONARY)
+		STAILQ_INSERT_TAIL(&v->listhead, val, next);
+	val->up = v;
+}
+
+static int
+be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct be_value **out)
+{
+	const unsigned char *p = buf + 1;
+	struct be_value *v, *inner;
+	int rv, chr;
+
+	chr = 1;
+
+	rv = be_alloc(BE_LIST, NULL, &v);
+	if(rv < 0)
+		return rv;
+
+	while(*p && *p != 'e'){
+		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
+		if(rv < 0)
+			return rv;
+
+		be_insert(v, inner);
+		p += rv;
+		chr += rv;
+	}
+
+	*out = v;
+
+	// +1 for the e
+	chr++;
+
+	return chr;
+}
+
+static int
+be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct be_value **out)
+{
+	const unsigned char *p = buf;
+	struct be_value *v, *inner, *key;
+	int rv, chr;
+
+	if(sz < 2 || *p++ != 'd')
+		return -EINVAL;
+
+	chr = 1;
+
+	rv = be_alloc(BE_DICTIONARY, NULL, &v);
+	if(rv < 0)
+		return rv;
+
+	while(p < buf+sz && *p && *p != 'e'){
+		switch(p[0]){
+		case '0': case '1': case '2': case '3': 
+		case '4': case '5': case '6': case '7': 
+		case '8': case '9':
+			rv = be_value_parse_string(p, sz, &key);
+			if(rv < 0)
+				return rv;
+
+			p += rv;
+			chr += rv;
+
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
+		if(rv < 0)
+			return rv;
+
+		/* kidnap key */
+		inner->key = key->string.iov_base;
+		key->string.iov_base = NULL;
+		be_value_free(key);
+
+		be_insert(v, inner);
+		p += rv;
+		chr += rv;
+	}
+
+	// +1 for the e
+	chr++;
+
+	*out = v;
+
+	return chr;
+}
+
+static int
+be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct be_value **out)
+{
+	if(depth > 128)
+		return -EINVAL;
+
+	if(sz < 2)
+		return -ENOMSG;
+
+	depth++;
+
+	switch(buf[0]){
+	case '0': case '1': case '2': case '3': 
+	case '4': case '5': case '6': case '7': 
+	case '8': case '9':
+		return be_value_parse_string(buf, sz, out);
+	case 'i':
+		return be_value_parse_number(buf, sz, out);
+	case 'l':
+		return be_value_parse_list(depth, buf, sz, out);
+	case 'd':
+		return be_value_parse_dictionary(depth, buf, sz, out);
+	}
+
+	return -EINVAL;
+}
+
+int
+be_value_parse(const unsigned char *buf, size_t sz, struct be_value **out)
+{
+	return be_value_parse_inner(0, buf, sz, out);
+}
+
+int 
+be_pp(struct be_value *be, void *arg)
+{
+	int depth;
+
+	const char indent[] = "                    ";
+	const int nindent = sizeof(indent);
+
+	(void) arg;
+
+	depth = be_count_depth(be);
+
+	printf("%.*s", MIN(depth, nindent), indent);
+	if(be->key)
+		printf("%lu:%s = ", strlen(be->key), be->key);
+
+	switch (be->type) {
+	case BE_INTEGER:
+		printf("i%llde\n", be->integer);
+		break;
+	case BE_STRING:
+		printf("%lu:%s\n", be->string.iov_len, (char*)be->string.iov_base);
+		break;
+	case BE_LIST:
+		printf("l\n");
+		break;
+	case BE_LIST_END:
+		break;
+	case BE_DICTIONARY:
+		printf("d\n");
+		break;
+	case BE_DICTIONARY_END:
+		break;
+	default:
+		assert(0);
+	}
+
+	return 0;
+}
+
+void
+be_walk(struct be_value *be, int (*cb)(struct be_value *be, void *arg), void *arg)
+{
+	struct be_value *inner, fake = {0};
+
+	if(!be)
+		return;
+
+	cb(be, arg);
+
+	switch(be->type){
+	case BE_LIST:
+		[[fallthrough]];
+	case BE_DICTIONARY:
+		STAILQ_FOREACH(inner, &be->listhead, next){
+			be_walk(inner, cb, arg);
+		}
+		break;
+	}
+
+	switch(be->type){
+	case BE_LIST:
+		fake.type = BE_LIST_END;
+		cb(&fake, arg);
+		break;
+
+	case BE_DICTIONARY:
+		fake.type = BE_DICTIONARY_END;
+		cb(&fake, arg);
+		break;
+	}
+}
+
+struct be_value*
+be_find(struct be_value *be, const char *key)
+{
+	struct be_value *inner;
+
+	if(!be || !(be->type == BE_DICTIONARY))
+		return NULL;
+
+	STAILQ_FOREACH(inner, &be->listhead, next){
+		if(strcmp(key, inner->key) == 0)
+			return inner;
+	}
+
+	return NULL;
+}
+
+int
+be_dict_new(struct be_value **out)
+{
+	return be_alloc(BE_DICTIONARY, NULL, out);
+}
+
+int
+be_dict_append(struct be_value *dict, char *key, struct be_value *value)
+{
+	char *k;
+
+	k = strdup(key);
+	if(!k)
+		return -ENOMEM;
+
+	value->key = k;
+
+	be_insert(dict, value);
+
+	return 0;
+}
+
+int
+be_dict_append_number(struct be_value *dict, char *key, int64_t num)
+{
+	int rv;
+	struct be_value *v;
+
+	rv = be_alloc(BE_INTEGER, dict, &v);
+	if(rv < 0)
+		return rv;
+
+	v->integer = num;
+
+	rv = be_dict_append(dict, key, v);
+	if(rv < 0){
+		free(v);
+		return rv;
+	}
+
+	return 0;
+}
+
+struct encode_state
+{
+	char *ptr;
+	size_t len;
+};
+
+static int
+encode_getsize_cb(struct be_value *v, void *arg)
+{
+	struct encode_state *e = arg;
+	char buf[16];
+	int slen;
+
+	if(v->key){
+		/* size:string */
+		slen = snprintf(buf, sizeof(buf), "%lu", strlen(v->key));
+		e->len += slen;
+		e->len += 1;
+		e->len += strlen(v->key);
+	}
+
+	switch(v->type){
+	case BE_STRING:
+		/* size:string */
+		slen = snprintf(buf, sizeof(buf), "%lu", v->string.iov_len);
+		e->len += slen;
+		e->len += 1;
+		e->len += strlen((char*)v->string.iov_base);
+		break;
+
+	case BE_INTEGER:
+		/* i1234e */
+		slen = snprintf(buf, sizeof(buf), "%lld", v->integer);
+		e->len += 1;
+		e->len += slen;
+		e->len += 1;
+		break;
+
+	case BE_LIST:
+	case BE_LIST_END:
+	case BE_DICTIONARY:
+	case BE_DICTIONARY_END:
+		/* [dl]..e */
+		e->len += 1;
+		break;
+	}
+
+	return 0;
+}
+
+static int
+encode_cb(struct be_value *v, void *arg)
+{
+	struct encode_state *e = arg;
+	int slen;
+
+	if(v->key){
+		/* size:string */
+		slen = sprintf(e->ptr, "%lu:%s", strlen(v->key), v->key);
+		e->ptr += slen;
+	}
+
+	switch(v->type){
+	case BE_STRING:
+		/* size:string */
+		slen = sprintf(e->ptr, "%zu:%s", v->string.iov_len, (char*)v->string.iov_base);
+		e->ptr += slen;
+		break;
+
+	case BE_INTEGER:
+		/* i1234e */
+		slen = sprintf(e->ptr, "i%llde", v->integer);
+		e->ptr += slen;
+		break;
+
+	case BE_LIST:
+		*e->ptr++ = 'l';
+		break;
+
+	case BE_LIST_END:
+		*e->ptr++ = 'e';
+		break;
+
+	case BE_DICTIONARY:
+		*e->ptr++ = 'd';
+		break;
+
+	case BE_DICTIONARY_END:
+		*e->ptr++ = 'e';
+		break;
+	}
+
+	return 0;
+}
+
+int
+be_value_encode(struct be_value *v, unsigned char **out, size_t *len)
+{
+	struct encode_state e = {0};
+	unsigned char *buf;
+
+	be_walk(v, encode_getsize_cb, &e);
+
+	buf = malloc(e.len);
+	if(!buf)
+		return -ENOMEM;
+
+	e.ptr = (char*)buf;
+
+	be_walk(v, encode_cb, &e);
+
+	*out = buf;
+	*len = e.len;
+
+	return 0;
+}
+
