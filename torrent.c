@@ -63,6 +63,7 @@ struct mbt_torrent {
 	uint32_t piece_count;
 	uint32_t piece_length;
 	uint64_t total_length;
+	char *name;
 
 	/* Have bitmap */
 	struct mbt_bitmap *have;
@@ -416,6 +417,7 @@ mbt_torrent_free(struct mbt_torrent *t)
 
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);
+	free(t->name);
 	infohash_unref(t->ih);
 	free(t);
 }
@@ -437,6 +439,13 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	rv = be_value_parse(info, len, &be);
 	if (rv < 0)
 		return rv;
+
+	/* Extract name */
+	tmp = be_find(be, "name");
+	if (tmp && tmp->type == BE_STRING && tmp->string.iov_len > 0) {
+		free(t->name);
+		t->name = strndup(tmp->string.iov_base, tmp->string.iov_len);
+	}
 
 	/* Extract piece length */
 	tmp = be_find(be, "piece length");
@@ -529,6 +538,12 @@ struct infohash *
 mbt_torrent_infohash(struct mbt_torrent *t)
 {
 	return t->ih;
+}
+
+const char *
+mbt_torrent_name(struct mbt_torrent *t)
+{
+	return t->name;
 }
 
 float

@@ -2,7 +2,6 @@
 #include <signal.h>
 #include <string.h>
 #include <err.h>
-#include <sysexits.h>
 
 #include "event.h"
 #include "infohash.h"
@@ -28,56 +27,50 @@ int
 main(int argc, char *argv[])
 {
 	struct mbt_session *s = NULL;
-	struct infohash *ih = NULL;
 	struct mbt_torrent *t;
+	struct infohash *ih;
 	int rv;
 
 	const char *hexstr = "C8295CE630F2064F08440DB1534E4992CFE4862A";
-	const char *peer_addr = "192.168.0.10";
-	uint16_t peer_port = 28888;
 
 	signal(SIGPIPE, SIG_IGN);
 
-	/* Enable logging */
 	mbt_log_set(mbt_log_stderr, NULL);
-	mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_PEER | MBT_LOG_TORRENT);
+	mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_TORRENT);
 
 	rv = mbt_session_default(&s, ".");
 	if (rv < 0)
 		errx(1, "mbt_session_default: %s", strerror(-rv));
 
+	/* Add torrent by infohash (metadata will come from peer via BEP 9) */
 	rv = infohash_new(&ih, INFOHASH_SHA1, hexstr);
 	if (rv < 0)
 		errx(1, "infohash_new: %s", strerror(-rv));
 
 	rv = mbt_session_add_infohash(s, ih);
 	if (rv < 0)
-		errx(1, "mbt_session_add_infohash: %s", strerror(-rv));
+		errx(1, "add_infohash: %s", strerror(-rv));
 
 	t = mbt_session_find_torrent(s, ih);
-	if (!t)
-		errx(1, "torrent not found after add");
-
 	struct mbt_torrent_callbacks tcb = {
 		.on_piece_complete = on_piece_complete,
 		.on_complete = on_complete,
 	};
 	mbt_torrent_set_callbacks(t, &tcb, s);
 
-	/* Enable LSD so we also discover peers automatically */
+	/* Enable LSD for automatic peer discovery */
 	mbt_session_enable_lsd(s);
 
-	/* Connect directly to known peer */
-	rv = mbt_session_add_peer(s, ih, peer_addr, peer_port);
-	if (rv < 0)
-		errx(1, "mbt_session_add_peer: %s", strerror(-rv));
+	/* Connect to known peers */
+	mbt_session_add_peer(s, ih, "192.168.0.10", 28888);    /* sokoban */
+	mbt_session_add_peer(s, ih, "192.168.0.189", 51413);   /* megrez */
 
-	fprintf(stderr, "connecting to %s:%hu for %s\n", peer_addr, peer_port, hexstr);
+	infohash_unref(ih);
+
+	fprintf(stderr, "downloading %s from 2 peers...\n", hexstr);
 
 	rv = mbt_session_run(s);
 
-	infohash_unref(ih);
 	mbt_session_free(s);
-
 	return rv < 0 ? 1 : 0;
 }

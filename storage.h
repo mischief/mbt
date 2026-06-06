@@ -24,7 +24,7 @@ int mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, size_t len
 int mbt_storage_file_have_piece(void *ctx, uint32_t index);
 void mbt_storage_file_close(void *ctx);
 
-/* ctx for file storage: path to output directory (const char *) */
+/* ctx for file storage: (const char *) path to output file */
 
 /* --- Memory storage (testing, small torrents) --- */
 

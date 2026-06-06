@@ -51,6 +51,7 @@ int mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn);
 
 /* Query */
 struct infohash *mbt_torrent_infohash(struct mbt_torrent *t);
+const char *mbt_torrent_name(struct mbt_torrent *t);
 float mbt_torrent_progress(struct mbt_torrent *t);
 int mbt_torrent_complete(struct mbt_torrent *t);
 int mbt_torrent_has_metadata(struct mbt_torrent *t);

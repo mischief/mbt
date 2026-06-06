@@ -3,14 +3,19 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
 
+#include <sha1.h>
+
 #include "event.h"
 #include "conn.h"
 #include "infohash.h"
+#include "hex.h"
+#include "be.h"
 #include "torrent.h"
 #include "session.h"
 #include "log.h"
@@ -334,10 +339,87 @@ mbt_session_add_infohash(struct mbt_session *s, struct infohash *ih)
 int
 mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 {
-	(void)s;
-	(void)path;
-	/* TODO: parse .torrent, extract infohash + info dict, call add_infohash + set_metadata */
-	return -ENOTSUP;
+	FILE *fp;
+	unsigned char *buf;
+	size_t len;
+	int rv;
+	struct be_value *be = NULL, *info;
+	struct infohash *ih = NULL;
+	struct mbt_torrent *t;
+	SHA1_CTX ctx;
+	uint8_t digest[20];
+	char hexstr[41];
+	unsigned char *info_encoded = NULL;
+	size_t info_len;
+
+	fp = fopen(path, "rb");
+	if (!fp)
+		return -errno;
+
+	buf = malloc(4 * 1024 * 1024); /* 4MB max torrent file */
+	if (!buf) {
+		fclose(fp);
+		return -ENOMEM;
+	}
+
+	len = fread(buf, 1, 4 * 1024 * 1024, fp);
+	fclose(fp);
+
+	if (len == 0) {
+		free(buf);
+		return -EIO;
+	}
+
+	rv = be_value_parse(buf, len, &be);
+	free(buf);
+	if (rv < 0)
+		return rv;
+
+	info = be_find(be, "info");
+	if (!info) {
+		be_value_free(be);
+		return -EINVAL;
+	}
+
+	/* Encode info dict to get its SHA1 (= infohash) */
+	rv = be_value_encode(info, &info_encoded, &info_len);
+	if (rv < 0) {
+		be_value_free(be);
+		return rv;
+	}
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, info_encoded, info_len);
+	SHA1Final(digest, &ctx);
+
+	/* Create infohash from hex */
+	mbintohex(digest, 20, hexstr, sizeof(hexstr));
+	rv = infohash_new(&ih, INFOHASH_SHA1, hexstr);
+	if (rv < 0) {
+		free(info_encoded);
+		be_value_free(be);
+		return rv;
+	}
+
+	/* Add torrent */
+	rv = mbt_session_add_infohash(s, ih);
+	if (rv < 0) {
+		infohash_unref(ih);
+		free(info_encoded);
+		be_value_free(be);
+		return rv;
+	}
+
+	/* Set metadata on it */
+	t = mbt_session_find_torrent(s, ih);
+	if (t)
+		mbt_torrent_set_metadata(t, info_encoded, info_len);
+
+	infohash_unref(ih);
+	free(info_encoded);
+	be_value_free(be);
+
+	return 0;
 }
 
 int
