@@ -50,7 +50,7 @@ lsd_frame_info_freep(struct lsd_frame_info **v)
 	ih = STAILQ_FIRST(&lfi->infohashes);
 	while(ih){
 		next = STAILQ_NEXT(ih, next);
-		free(ih);
+		infohash_unref(ih);
 		ih = next;
 	}
 
