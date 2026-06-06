@@ -622,7 +622,7 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 		return -errno;
 	}
 
-	mbt_log_debug(MBT_LOG_SESSION, "connecting to %s:%hu (rv=%d errno=%d)", addr, port, rv, errno);
+	mbt_log_debug(MBT_LOG_SESSION, "connecting to %s:%hu", addr, port);
 
 	if (rv == 0) {
 		/* Connected immediately (localhost) */
