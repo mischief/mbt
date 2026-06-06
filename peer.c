@@ -441,10 +441,15 @@ peer_on_read(struct mbt_conn *c, void *v)
 	}
 
 	case MBT_PEER_ACTIVE:
-		rv = peer_rx_message(p);
-		if (rv < 0) {
-			peer_error(p, rv);
-			return;
+		while (mbt_conn_available(p->conn) >= 4) {
+			rv = peer_rx_message(p);
+			if (rv < 0) {
+				peer_error(p, rv);
+				return;
+			}
+			/* If watermark was raised (partial msg), wait for more data */
+			if (p->msglen > 0)
+				break;
 		}
 		break;
 

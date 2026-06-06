@@ -19,7 +19,7 @@ enum {
 	BLOCK_SIZE = 16384,
 	METADATA_BLOCK_SIZE = 16384,
 	MAX_PEERS = 50,
-	PIPELINE_DEPTH = 128,
+	PIPELINE_DEPTH = 512,
 };
 
 /* Per-piece tracking */
