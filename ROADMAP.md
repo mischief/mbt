@@ -43,11 +43,24 @@
 
 ## Phase 3: Seeding
 
+- [ ] Accept incoming peer connections (listen socket in session)
+- [ ] Route incoming handshake to correct torrent
 - [ ] Respond to request messages (read from storage, send piece)
-- [ ] Choking algorithm (unchoke top-4 + optimistic unchoke rotation)
-- [ ] Send have messages on piece completion
-- [ ] LSD announcement (outbound multicast)
-- [ ] Accept incoming peer connections (listen socket)
+- [ ] Choking algorithm (unchoke top-4 by upload rate + optimistic every 30s)
+- [ ] Send have messages on piece completion to all connected peers
+- [ ] LSD announcement (outbound multicast, BEP 14)
+- [ ] Announce `event=completed` to tracker when download finishes
+- [ ] Announce `event=stopped` on graceful shutdown
+
+## Phase 4: Peer database + connection management
+
+- [ ] `struct mbt_peer_db` — unified known-peer store (replaces fixed pool array)
+- [ ] Source tracking: tracker, DHT, PEX, LSD, incoming
+- [ ] State machine: known → connecting → active → disconnected → banned
+- [ ] Priority scoring: prefer recent, low-failure, low-latency peers
+- [ ] Dedup: don't connect to same addr:port twice
+- [ ] Persist across re-announces (don't lose peers on timer)
+- [ ] Integrate with session maintenance timer for smart refill
 
 ## Phase 4: Storage improvements
 
