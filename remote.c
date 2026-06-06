@@ -22,7 +22,7 @@
 #include <remote.h>
 #include "bt_legacy.h"
 #include <node.h>
-#include "mbt_bitmap.h"
+#include "bitmap.h"
 
 enum {
 	HANDSHAKE_SIZE = 20+4+4+20+20,

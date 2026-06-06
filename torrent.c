@@ -11,7 +11,7 @@
 #include "infohash.h"
 #include "peer.h"
 #include "torrent.h"
-#include "mbt_bitmap.h"
+#include "bitmap.h"
 #include "be.h"
 
 enum {

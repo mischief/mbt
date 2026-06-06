@@ -6,7 +6,7 @@
 #include <assert.h>
 #include <sys/types.h>
 
-#include "mbt_bitmap.h"
+#include "bitmap.h"
 
 struct mbt_bitmap
 {

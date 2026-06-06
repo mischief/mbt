@@ -54,14 +54,14 @@ bt_src = [
   'remote.c',
   'session.c',
   'storage_file.c',
-  'mbt_bitmap.c',
+  'bitmap.c',
   'torrent.c',
 ] + ev_src
 
 libmbt = library('mbt', bt_src, dependencies: deps, install: true)
 
 # Tests
-tbmap_test = executable('tbmap_test', 'test/mbt_bitmap_test.c', link_with: [libmbt])
+tbmap_test = executable('tbmap_test', 'test/bitmap_test.c', link_with: [libmbt])
 test('tbmap', tbmap_test)
 
 be_test = executable('be_test', 'test/test.c', link_with: [libmbt])

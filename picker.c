@@ -2,7 +2,7 @@
 
 #include "picker.h"
 #include "torrent.h"
-#include "mbt_bitmap.h"
+#include "bitmap.h"
 #include "peer.h"
 
 int

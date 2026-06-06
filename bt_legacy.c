@@ -15,7 +15,7 @@
 #include "bt_legacy.h"
 #include <remote.h>
 #include <hex.h>
-#include "mbt_bitmap.h"
+#include "bitmap.h"
 
 struct piece {
 	SPLAY_ENTRY(piece) next;
