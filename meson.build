@@ -55,6 +55,7 @@ bt_src = [
   'session.c',
   'storage_file.c',
   'tbmap.c',
+  'torrent2.c',
 ] + ev_src
 
 libmbt = library('mbt', bt_src, dependencies: deps, install: true)
