@@ -58,9 +58,35 @@ mbt_session_free(struct mbt_session *s)
 
 	if (s->lsd_io)
 		mbt_ev_io_free(s->lsd_io);
-	/* lsd_freep handles lsd */
 
 	free(s);
+}
+
+int
+mbt_session_default(struct mbt_session **out, const char *path)
+{
+	struct mbt_ev *ev;
+	int rv;
+
+#ifdef HAVE_SD_EVENT
+	rv = mbt_ev_sd_new(&ev);
+#elif defined(HAVE_LIBEVENT)
+	rv = mbt_ev_libevent_new(&ev);
+#else
+#error "No event backend configured"
+#endif
+	if (rv < 0)
+		return rv;
+
+	struct mbt_session_config cfg = {
+		.ev = ev,
+		.storage_ops = mbt_storage_file_ops(),
+		.storage_ctx = (void *)path,
+		.picker = mbt_picker_random,
+		.listen_port = 6881,
+	};
+
+	return mbt_session_new(out, &cfg);
 }
 
 int

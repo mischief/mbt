@@ -48,8 +48,10 @@ bt_src = [
   'infohash.c',
   'lsd.c',
   'node.c',
+  'picker.c',
   'remote.c',
   'session.c',
+  'storage_file.c',
   'tbmap.c',
 ] + ev_src
 

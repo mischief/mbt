@@ -29,6 +29,12 @@ struct mbt_session_config {
 int mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg);
 void mbt_session_free(struct mbt_session *s);
 
+/*
+ * Sensible defaults: platform event backend, file storage at `path`,
+ * random piece picker, listen on port 6881.
+ */
+int mbt_session_default(struct mbt_session **out, const char *path);
+
 /* Event loop — only needed if caller doesn't run their own */
 int mbt_session_run(struct mbt_session *s);
 void mbt_session_stop(struct mbt_session *s);
