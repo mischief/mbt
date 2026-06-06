@@ -233,6 +233,36 @@ test_walk(void)
 	be_value_free(be);
 }
 
+static void
+test_binary_string_roundtrip(void)
+{
+	/* bencode string with embedded null: "4:\x01\x00\x02\x03" */
+	const unsigned char input[] = { '4', ':', 0x01, 0x00, 0x02, 0x03 };
+	struct be_value *be = NULL;
+	unsigned char *out = NULL;
+	size_t len;
+	int rv;
+
+	rv = be_value_parse(input, sizeof(input), &be);
+	assert(rv == 6);
+	assert(be->type == BE_STRING);
+	assert(be->string.iov_len == 4);
+	/* verify the null byte is preserved */
+	assert(((unsigned char *)be->string.iov_base)[0] == 0x01);
+	assert(((unsigned char *)be->string.iov_base)[1] == 0x00);
+	assert(((unsigned char *)be->string.iov_base)[2] == 0x02);
+	assert(((unsigned char *)be->string.iov_base)[3] == 0x03);
+
+	/* encode it back */
+	rv = be_value_encode(be, &out, &len);
+	assert(rv == 0);
+	assert(len == 6);
+	assert(memcmp(out, input, 6) == 0);
+
+	free(out);
+	be_value_free(be);
+}
+
 int
 main(void)
 {
@@ -247,5 +277,6 @@ main(void)
 	test_encode_dict();
 	test_dict_build();
 	test_walk();
+	test_binary_string_roundtrip();
 	return 0;
 }
