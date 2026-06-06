@@ -134,9 +134,11 @@ on_complete(struct mbt_torrent *t, void *arg)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-d] [-o dir] <file.torrent | magnet:?...>\n", prog);
-	fprintf(stderr, "  -d        enable debug logging\n");
-	fprintf(stderr, "  -o dir    download directory (default: .)\n");
+	fprintf(stderr, "usage: %s [-d] [-o dir] [-p max_peers] [-s strategy] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "  -d            enable debug logging\n");
+	fprintf(stderr, "  -o dir        download directory (default: .)\n");
+	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
+	fprintf(stderr, "  -s strategy   piece picker: sequential (default) or random\n");
 	exit(1);
 }
 
@@ -147,8 +149,9 @@ main(int argc, char *argv[])
 	const char *download_dir = ".";
 	int debug = 0;
 	int max_peers = 0;
+	mbt_picker_fn picker = mbt_picker_sequential;
 
-	while ((ch = getopt(argc, argv, "do:p:")) != -1) {
+	while ((ch = getopt(argc, argv, "do:p:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -158,6 +161,16 @@ main(int argc, char *argv[])
 			break;
 		case 'p':
 			max_peers = atoi(optarg);
+			break;
+		case 's':
+			if (strcmp(optarg, "random") == 0)
+				picker = mbt_picker_random;
+			else if (strcmp(optarg, "sequential") == 0)
+				picker = mbt_picker_sequential;
+			else {
+				fprintf(stderr, "unknown picker: %s (use sequential or random)\n", optarg);
+				return 1;
+			}
 			break;
 		default:
 			usage(argv[0]);
@@ -188,7 +201,7 @@ main(int argc, char *argv[])
 
 	cfg.storage_ops = mbt_storage_file_ops();
 	cfg.storage_ctx = (void *)download_dir;
-	cfg.picker = mbt_picker_sequential;
+	cfg.picker = picker;
 	cfg.listen_port = 6881;
 	cfg.http = curl_http_fn;
 	if (max_peers)
