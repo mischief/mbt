@@ -1,115 +1,84 @@
 # libmbt Roadmap
 
-Steps to reach the architecture described in DESIGN.md.
-
-## Phase 0: Foundation (done)
+## Phase 0: Foundation (complete)
 
 - [x] Bencode parser (fuzz-tested, ASan-clean, leak-free)
-- [x] Bitmap (`mbt_bitmap` — bit-accurate sizing, bounds checked)
+- [x] Bitmap (`mbt_bitmap` — bit-accurate, bounds checked)
 - [x] Infohash type (refcounted)
-- [x] LSD multicast
-- [x] Event loop abstraction (sd-event + libevent, caller-owned loops supported)
+- [x] LSD multicast (BEP 14)
+- [x] Event loop abstraction (sd-event + libevent, caller-owned loops)
 - [x] Buffered connection abstraction (mbt_conn)
-- [x] Wire format helpers (pack.c — tpack/tunpack)
-- [x] Meson build with backend selection (`-Devent_backend=sd-event|libevent`)
-- [x] Logging subsystem (component mask, stderr/syslog/custom callbacks)
+- [x] Wire format helpers (pack.c)
+- [x] Meson build with backend selection
+- [x] Logging subsystem (component mask, stderr/syslog/custom)
 
-## Phase 1: Clean layering
+## Phase 1: Clean layering (complete)
 
-### 1.1 Split bt.c (done)
-- [x] Extract `tpack`/`tunpack` into `pack.c/h`
-- [x] New `torrent.c` — piece state, peer callbacks, hash verify, storage/picker
+- [x] Peer state machine (peer.c) — callbacks up, commands down
+- [x] Torrent coordinator (torrent.c) — piece state, SHA1, storage, picker
+- [x] Session (session.c) — torrent list, async connect, LSD integration
+- [x] Storage backend (storage_file.c) — download dir, filename from metadata
+- [x] Pickers — sequential + random (rarest stub)
+- [x] Request timeout (15s default, configurable)
+- [x] Peer banning (3 hash failures → disconnect)
+- [x] Endgame mode (<=10 pieces → request from all, cancel on receive)
+- [x] Multi-peer download verified (SHA1 correct, both peers contribute)
+- [x] Full end-to-end: connect → BEP 9 metadata → pieces → verify → disk
 
-### 1.2 Peer layer (done)
-- [x] `peer.c` — state machine (HANDSHAKE → EXTENSION → ACTIVE → CLOSED)
-- [x] Callbacks up: on_active, on_piece, on_bitfield, on_choke, on_have, on_metadata, on_error
-- [x] Commands down: send_request, send_interested, send_choke, send_cancel, send_have, send_piece
-- [x] Takes connected `mbt_conn`, no TCP logic
+## Phase 1.5: Delete legacy code
 
-### 1.3 Torrent layer (done)
-- [x] Owns peer set (add/remove, tracks ownership)
-- [x] Piece state: PENDING → ACTIVE (bitmap is authority for COMPLETE)
-- [x] Drives piece requests via picker, pipeline depth 128
-- [x] SHA1 verification on piece completion
-- [x] Calls storage backend to write verified pieces
-- [x] Metadata fetch (BEP 9) as pre-download phase
-- [x] Piece ownership tracking — reset on peer disconnect
-- [x] Multiple peers per torrent (parallel download)
+- [ ] Rewrite `tools/mbt-lsd.c` using session API
+- [ ] Delete `bt_legacy.c`, `bt_legacy.h`, `remote.c`, `remote.h`, `node.c`, `node.h`
+- [ ] Delete `test/bt_test.c` (replaced by session_test)
 
-### 1.4 Session layer (done)
-- [x] `mbt_session_default(path)` — zero-config constructor
-- [x] `mbt_session_add_infohash` — create torrent with session defaults
-- [x] `mbt_session_add_torrent_file` — parse .torrent, extract infohash + metadata
-- [x] `mbt_session_add_peer` — async TCP connect → mbt_conn → torrent
-- [x] LSD integration (auto-creates torrents on announce, connects peers)
-- [x] Torrent list management (find, remove)
+## Phase 2: Discovery (in progress)
 
-### 1.5 Delete legacy code
-Blocked on: bt_test and mbt-lsd rewritten against new API.
-- [ ] Rewrite `bt_test` using session/torrent/peer stack
-- [ ] Rewrite `tools/mbt-lsd.c` using session with LSD
-- [ ] Delete `bt_legacy.c`, `bt_legacy.h`
-- [ ] Delete `remote.c`, `remote.h`
-- [ ] Delete `node.c`, `node.h`
+- [ ] Magnet URI parser (`magnet.h` — infohash, display name, trackers, peer hints)
+- [ ] Wire `mbt_session_add_magnet` to parse URI + connect hints
+- [ ] HTTP tracker client (BEP 3) — announce, parse compact peer list
+- [ ] UDP tracker client (BEP 15) — connect, announce, scrape
+- [ ] Auto-announce to trackers from .torrent announce-list
+- [ ] DHT (BEP 5) — future
+- [ ] PEX (BEP 11) — future
 
-## Phase 2: Pluggable backends (mostly done)
-
-### 2.1 Storage interface
-- [x] Define `mbt_storage_ops` (open, write_piece, read_piece, have_piece, close)
-- [x] `storage_file.c` — download directory, filename from torrent name
-- [ ] `storage_file.c` — multi-file (piece spans across file boundaries)
-- [ ] `storage_memory.c` — for testing
-- [ ] Resume (check existing pieces via SHA1 on startup)
-
-### 2.2 Piece picker interface
-- [x] `mbt_picker_fn` typedef
-- [x] `mbt_picker_sequential` — in-order
-- [x] `mbt_picker_random` — random available, skips active
-- [ ] `mbt_picker_rarest` — rarest-first from peer bitfields (stub)
-
-## Phase 3: Complete download (in progress)
-
-- [x] End-to-end: connect → metadata → pieces → SHA1 verify → file on disk
-- [x] Handle last piece (shorter than piece_length)
-- [x] Pipeline requests (128 outstanding per peer, across multiple pieces)
-- [x] Multiple peers per torrent
-- [ ] Endgame mode (request remaining from all peers, cancel on receive)
-- [ ] Proper piece_length tracking in storage (currently inferred from first write)
-- [ ] Live tested: downloading real torrent from Transmission peers on LAN
-
-## Phase 4: Seeding
+## Phase 3: Seeding
 
 - [ ] Respond to request messages (read from storage, send piece)
-- [ ] Choking algorithm (unchoke top-4 by upload rate + optimistic)
+- [ ] Choking algorithm (unchoke top-4 + optimistic unchoke rotation)
 - [ ] Send have messages on piece completion
-- [ ] LSD announcement (not just listening)
+- [ ] LSD announcement (outbound multicast)
+- [ ] Accept incoming peer connections (listen socket)
 
-## Phase 5: Discovery
+## Phase 4: Storage improvements
 
-- [ ] Magnet URI parser → `struct mbt_magnet` (infohash, display name, trackers[], peer hints[])
-- [ ] `mbt_magnet_parse(uri, &magnet)` — extract fields from magnet:?xt=urn:btih:...
-- [ ] Wire `mbt_session_add_magnet` to parse URI, create torrent, connect peer hints
-- [ ] DHT (BEP 5) — bootstrap, routing table, get_peers, announce_peer
-- [ ] PEX (BEP 11) — exchange peer lists via extension messages
-- [ ] UDP tracker (BEP 15) — announce + scrape
-- [ ] HTTP tracker (BEP 3) — announce + scrape
+- [ ] Multi-file torrents (piece spans across file boundaries)
+- [ ] Resume (SHA1 verify existing pieces on startup)
+- [ ] `storage_memory.c` — for testing
+- [ ] `storage_blockdev.c` — write ISO directly to /dev/sdX
 
-## Phase 6: Tools
+## Phase 5: Tools
 
 - [ ] `mbt-get` — magnet/infohash one-shot downloader
 - [ ] `mbt-lsd` — LSD auto-replicate (watch + download + seed)
 - [ ] `mbt-seed` — seed a file given a .torrent
-- [ ] `mbt-daemon` — long-running multi-torrent daemon + control socket
+- [ ] `mbt-daemon` — long-running daemon + control socket
+
+## Phase 6: Tracker server (separate library)
+
+- [ ] `libmbt-tracker` — embeddable tracker in the same repo
+- [ ] HTTP announce endpoint (BEP 3)
+- [ ] UDP announce (BEP 15)
+- [ ] Scrape support
+- [ ] Use case: LAN auto-replication tracker, zero-config
 
 ## Phase 7: Advanced
 
 - [ ] µTP transport (BEP 29)
 - [ ] HTTP seeding (BEP 19)
-- [ ] Fast Extension (BEP 6) — have-all, have-none, reject, allowed-fast
+- [ ] Fast Extension (BEP 6)
 - [ ] Holepunch (BEP 55)
-- [ ] Private torrents (BEP 27) — disable DHT/PEX
-- [ ] `storage_blockdev.c` — write directly to block device
-- [ ] `storage_cas.c` — content-addressed dedup store
+- [ ] Private torrents (BEP 27)
+- [ ] Rarest-first picker with peer availability tracking
 
 ## Low Priority: Bencode cleanup
 
@@ -117,6 +86,6 @@ Working, fuzz-tested, ASan-clean. Ergonomic issues only:
 
 - [ ] Replace `struct iovec` with `struct { char *data; size_t len; }`
 - [ ] Add `be_dict_append_string(dict, key, buf, len)`
-- [ ] Switch encoder from fragile two-pass to single-pass growable buffer
-- [ ] Add list access by index helper
-- [ ] Consider path-based `be_find(be, "info.pieces")` or document shallow-only
+- [ ] Single-pass growable-buffer encoder
+- [ ] List access by index
+- [ ] Path-based `be_find`
