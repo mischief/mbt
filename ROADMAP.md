@@ -94,3 +94,13 @@ Steps to reach the architecture described in DESIGN.md.
 - [ ] Private torrents (BEP 27) — disable DHT/PEX
 - [ ] `storage_blockdev.c` — write directly to block device
 - [ ] `storage_cas.c` — content-addressed dedup store
+
+## Low Priority: Bencode cleanup
+
+Working, fuzz-tested, ASan-clean. Ergonomic issues only:
+
+- [ ] Replace `struct iovec` with `struct { char *data; size_t len; }`
+- [ ] Add `be_dict_append_string(dict, key, buf, len)`
+- [ ] Switch encoder from fragile two-pass to single-pass growable buffer
+- [ ] Add list access by index helper
+- [ ] Consider path-based `be_find(be, "info.pieces")` or document shallow-only
