@@ -308,6 +308,12 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 				tp->banned = 1;
 				mbt_peer_disconnect(p); /* triggers deferred on_error → cleanup */
 			}
+			/* Piece is now PENDING again — drive all peers to pick it up */
+			struct torrent_peer *rtp;
+			for (rtp = t->peers; rtp; rtp = rtp->next) {
+				if (rtp->peer && !rtp->banned && !mbt_peer_choked(rtp->peer))
+					torrent_drive_peer(t, rtp);
+			}
 			return;
 		} else {
 			/* Verified — store */
@@ -500,19 +506,10 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (!t->pieces || mbt_peer_choked(tp->peer))
 		return;
 
-	int limit = PIPELINE_DEPTH;
+	int limit = 128; /* per-peer: 128 blocks = 8 pieces of 256KB */
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0 && peer_limit < limit)
 		limit = peer_limit;
-
-	/* Spread work across peers — don't let one peer hog all pieces */
-	if (t->peer_count > 1) {
-		int per_peer = PIPELINE_DEPTH / t->peer_count;
-		if (per_peer < 64)
-			per_peer = 64;
-		if (per_peer < limit)
-			limit = per_peer;
-	}
 
 	while (tp->outstanding < limit) {
 		int idx = t->picker(t, tp->peer, t->picker_ctx);

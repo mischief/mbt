@@ -146,14 +146,18 @@ main(int argc, char *argv[])
 	int rv, ch;
 	const char *download_dir = ".";
 	int debug = 0;
+	int max_peers = 0;
 
-	while ((ch = getopt(argc, argv, "do:")) != -1) {
+	while ((ch = getopt(argc, argv, "do:p:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
 			break;
 		case 'o':
 			download_dir = optarg;
+			break;
+		case 'p':
+			max_peers = atoi(optarg);
 			break;
 		default:
 			usage(argv[0]);
@@ -187,6 +191,8 @@ main(int argc, char *argv[])
 	cfg.picker = mbt_picker_sequential;
 	cfg.listen_port = 6881;
 	cfg.http = curl_http_fn;
+	if (max_peers)
+		cfg.max_peers = max_peers;
 
 	rv = mbt_session_new(&session, &cfg);
 	if (rv < 0)
