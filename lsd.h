@@ -25,7 +25,7 @@ struct lsd_frame_info
 	char remote[INET6_ADDRSTRLEN];
 	uint16_t port;
 	char *cookie;
-	struct infohash_head infohashes;
+	struct mbt_infohash_head infohashes;
 };
 
 void lsd_freep(struct lsd **v);

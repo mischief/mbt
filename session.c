@@ -26,7 +26,7 @@
 
 struct session_torrent {
 	struct mbt_torrent *torrent;
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -142,11 +142,11 @@ session_generate_peer_id(uint8_t *id)
 }
 
 static struct session_torrent *
-session_find(struct mbt_session *s, struct infohash *ih)
+session_find(struct mbt_session *s, struct mbt_infohash *ih)
 {
 	struct session_torrent *st;
 	STAILQ_FOREACH(st, &s->torrents, next) {
-		if (infohash_cmp(st->ih, ih) == 0)
+		if (mbt_infohash_cmp(st->ih, ih) == 0)
 			return st;
 	}
 	return NULL;
@@ -200,7 +200,7 @@ mbt_session_free(struct mbt_session *s)
 	while ((st = STAILQ_FIRST(&s->torrents))) {
 		STAILQ_REMOVE_HEAD(&s->torrents, next);
 		mbt_torrent_free(st->torrent);
-		infohash_unref(st->ih);
+		mbt_infohash_unref(st->ih);
 		free(st);
 	}
 
@@ -265,7 +265,7 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	int rv;
 	__attribute__((cleanup(lsd_frame_freep))) struct lsd_frame *frame = NULL;
 	__attribute__((cleanup(lsd_frame_info_freep))) struct lsd_frame_info *info = NULL;
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 
 	(void)io;
 	(void)fd;
@@ -309,7 +309,7 @@ mbt_session_enable_lsd(struct mbt_session *s)
 /* --- Torrent management --- */
 
 int
-mbt_session_add_infohash(struct mbt_session *s, struct infohash *ih)
+mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 {
 	/* Already have it? */
 	if (session_find(s, ih))
@@ -336,7 +336,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct infohash *ih)
 		return rv;
 	}
 
-	st->ih = infohash_ref(ih);
+	st->ih = mbt_infohash_ref(ih);
 	STAILQ_INSERT_TAIL(&s->torrents, st, next);
 
 	return 0;
@@ -350,7 +350,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	size_t len;
 	int rv;
 	struct be_value *be = NULL, *info;
-	struct infohash *ih = NULL;
+	struct mbt_infohash *ih = NULL;
 	struct mbt_torrent *t;
 	SHA1_CTX ctx;
 	uint8_t digest[20];
@@ -400,7 +400,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 
 	/* Create infohash from hex */
 	mbintohex(digest, 20, hexstr, sizeof(hexstr));
-	rv = infohash_new(&ih, INFOHASH_SHA1, hexstr);
+	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr);
 	if (rv < 0) {
 		free(info_encoded);
 		be_value_free(be);
@@ -410,7 +410,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	/* Add torrent */
 	rv = mbt_session_add_infohash(s, ih);
 	if (rv < 0) {
-		infohash_unref(ih);
+		mbt_infohash_unref(ih);
 		free(info_encoded);
 		be_value_free(be);
 		return rv;
@@ -421,7 +421,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	if (t)
 		mbt_torrent_set_metadata(t, info_encoded, info_len);
 
-	infohash_unref(ih);
+	mbt_infohash_unref(ih);
 	free(info_encoded);
 	be_value_free(be);
 
@@ -432,14 +432,14 @@ int
 mbt_session_add_magnet(struct mbt_session *s, const char *uri)
 {
 	struct mbt_magnet m;
-	struct infohash *ih = NULL;
+	struct mbt_infohash *ih = NULL;
 	int rv;
 
 	rv = mbt_magnet_parse(uri, &m);
 	if (rv < 0)
 		return rv;
 
-	rv = infohash_new(&ih, m.infohash_type, m.infohash_hex);
+	rv = mbt_infohash_new(&ih, m.infohash_type, m.infohash_hex);
 	if (rv < 0) {
 		mbt_magnet_free(&m);
 		return rv;
@@ -447,7 +447,7 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri)
 
 	rv = mbt_session_add_infohash(s, ih);
 	if (rv < 0) {
-		infohash_unref(ih);
+		mbt_infohash_unref(ih);
 		mbt_magnet_free(&m);
 		return rv;
 	}
@@ -458,13 +458,13 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri)
 
 	/* TODO: announce to trackers once tracker client is implemented */
 
-	infohash_unref(ih);
+	mbt_infohash_unref(ih);
 	mbt_magnet_free(&m);
 	return 0;
 }
 
 int
-mbt_session_remove_torrent(struct mbt_session *s, struct infohash *ih)
+mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 {
 	struct session_torrent *st = session_find(s, ih);
 	if (!st)
@@ -472,13 +472,13 @@ mbt_session_remove_torrent(struct mbt_session *s, struct infohash *ih)
 
 	STAILQ_REMOVE(&s->torrents, st, session_torrent, next);
 	mbt_torrent_free(st->torrent);
-	infohash_unref(st->ih);
+	mbt_infohash_unref(st->ih);
 	free(st);
 	return 0;
 }
 
 struct mbt_torrent *
-mbt_session_find_torrent(struct mbt_session *s, struct infohash *ih)
+mbt_session_find_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 {
 	struct session_torrent *st = session_find(s, ih);
 	return st ? st->torrent : NULL;
@@ -487,7 +487,7 @@ mbt_session_find_torrent(struct mbt_session *s, struct infohash *ih)
 /* --- Peer connection --- */
 
 int
-mbt_session_add_peer(struct mbt_session *s, struct infohash *ih,
+mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                      const char *addr, uint16_t port)
 {
 	int rv, fd;

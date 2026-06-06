@@ -8,7 +8,7 @@ struct mbt_torrent;
 struct mbt_ev;
 struct mbt_conn;
 struct mbt_peer;
-struct infohash;
+struct mbt_infohash;
 struct mbt_bitmap;
 
 #include "storage.h"
@@ -23,7 +23,7 @@ enum mbt_piece_state {
 /* Torrent configuration */
 struct mbt_torrent_config {
 	struct mbt_ev *ev;
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 	const uint8_t *peer_id;            /* 20 bytes */
 	const struct mbt_storage_ops *storage_ops;
 	void *storage_ctx;
@@ -51,7 +51,7 @@ int mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len
 int mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn);
 
 /* Query */
-struct infohash *mbt_torrent_infohash(struct mbt_torrent *t);
+struct mbt_infohash *mbt_torrent_infohash(struct mbt_torrent *t);
 const char *mbt_torrent_name(struct mbt_torrent *t);
 float mbt_torrent_progress(struct mbt_torrent *t);
 int mbt_torrent_complete(struct mbt_torrent *t);

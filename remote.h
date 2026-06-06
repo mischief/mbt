@@ -35,7 +35,7 @@ struct remote {
 	size_t msglen;
 	int active_cmd;
 
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 
 	/* completed bittorrent v1 handshake? */
 	int shook;
@@ -56,7 +56,7 @@ struct remote {
 	int metadata_have_block;
 };
 
-int remote_new(struct torrent *t, struct remote **r, struct infohash *ih, struct mbt_ev *ev);
+int remote_new(struct torrent *t, struct remote **r, struct mbt_infohash *ih, struct mbt_ev *ev);
 struct remote *remote_ref(struct remote *r);
 void remote_unref(struct remote *r);
 void remote_unrefp(struct remote **r);

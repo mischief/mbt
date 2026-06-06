@@ -127,8 +127,8 @@ lsd_handler(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	struct lsd *lsd = ctx->lsd;
 	__attribute__((cleanup(lsd_frame_freep))) struct lsd_frame *frame = NULL;
 	__attribute__((cleanup(lsd_frame_info_freep))) struct lsd_frame_info *info = NULL;
-	struct infohash *ih;
-	char hash[INFOHASH_SHA1HEXLEN+1];
+	struct mbt_infohash *ih;
+	char hash[MBT_MBT_INFOHASH_SHA1HEXLEN+1];
 
 	(void)io;
 	(void)fd;
@@ -153,8 +153,8 @@ lsd_handler(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	printf("cookie: %s\n", info->cookie);
 	printf("hashes:\n");
 	STAILQ_FOREACH(ih, &info->infohashes, next) {
-		if ((rv = infohash_string(ih, hash, sizeof(hash))) < 0) {
-			warnx("infohash_string: %s", strerror(-rv));
+		if ((rv = mbt_infohash_string(ih, hash, sizeof(hash))) < 0) {
+			warnx("mbt_infohash_string: %s", strerror(-rv));
 		} else {
 			printf("%s\n", hash);
 			do_exec(hash);

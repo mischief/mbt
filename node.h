@@ -13,7 +13,7 @@ int node_new(struct node **p, uint16_t port, struct mbt_ev *ev);
 void node_freep(struct node **p);
 int node_send_remote(struct node *p, struct remote *r, unsigned char *buf, size_t sz);
 
-struct torrent *node_find_torrent(struct node*, struct infohash*);
+struct torrent *node_find_torrent(struct node*, struct mbt_infohash*);
 void node_add_torrent(struct node*, struct torrent*);
 
 uint8_t *node_id(struct node *n, size_t *len);

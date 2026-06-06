@@ -107,7 +107,7 @@ mbt_magnet_parse(const char *uri, struct mbt_magnet *out)
 					/* SHA1 hex */
 					memcpy(out->infohash_hex, hash, 40);
 					out->infohash_hex[40] = '\0';
-					out->infohash_type = INFOHASH_SHA1;
+					out->infohash_type = MBT_INFOHASH_SHA1;
 					/* Uppercase for consistency */
 					for (int i = 0; i < 40; i++)
 						out->infohash_hex[i] = toupper(out->infohash_hex[i]);

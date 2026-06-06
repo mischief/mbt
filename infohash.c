@@ -8,10 +8,10 @@
 #include "hex.h"
 
 int
-infohash_new(struct infohash **ih, int type, const char *str)
+mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str)
 {
 	int rv;
-	struct infohash *infohash;
+	struct mbt_infohash *infohash;
 
 	infohash = calloc(1, sizeof(*infohash));
 	if(!infohash)
@@ -32,15 +32,15 @@ infohash_new(struct infohash **ih, int type, const char *str)
 	return 0;
 }
 
-struct infohash*
-infohash_ref(struct infohash *ih)
+struct mbt_infohash*
+mbt_infohash_ref(struct mbt_infohash *ih)
 {
 	ih->ref++;
 	return ih;
 }
 
 void
-infohash_unref(struct infohash *ih)
+mbt_infohash_unref(struct mbt_infohash *ih)
 {
 	if(!ih)
 		return;
@@ -54,21 +54,21 @@ infohash_unref(struct infohash *ih)
 }
 
 void
-infohash_unrefp(struct infohash **ih)
+mbt_mbt_infohash_unrefp(struct mbt_infohash **ih)
 {
 	if(!*ih)
 		return;
 
-	infohash_unref(*ih);
+	mbt_infohash_unref(*ih);
 }
 
 int
-infohash_string(struct infohash *ih, char *buf, size_t sz)
+mbt_infohash_string(struct mbt_infohash *ih, char *buf, size_t sz)
 {
-	if(sz < INFOHASH_SHA1HEXLEN+1)
+	if(sz < MBT_MBT_INFOHASH_SHA1HEXLEN+1)
 		return -EINVAL;
 
-	if(ih->type != INFOHASH_SHA1)
+	if(ih->type != MBT_INFOHASH_SHA1)
 		return -EINVAL;
 
 	if(mbintohex(ih->hash_sha1, sizeof(ih->hash_sha1), buf, sz) < 0)
@@ -80,13 +80,13 @@ infohash_string(struct infohash *ih, char *buf, size_t sz)
 }
 
 int
-infohash_cmp(struct infohash *a, struct infohash *b)
+mbt_infohash_cmp(struct mbt_infohash *a, struct mbt_infohash *b)
 {
 	if(a->type != b->type)
 		return -1;
 
 	switch(a->type){
-	case INFOHASH_SHA1:
+	case MBT_INFOHASH_SHA1:
 		return memcmp(a->hash_sha1, b->hash_sha1, sizeof(a->hash_sha1));
 	}
 

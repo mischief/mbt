@@ -3,19 +3,19 @@
 #include <sys/queue.h>
 
 enum {
-	INFOHASH_SHA1 = 1,
-	INFOHASH_SHA1HEXLEN = 40,
+	MBT_INFOHASH_SHA1 = 1,
+	MBT_MBT_INFOHASH_SHA1HEXLEN = 40,
 };
 
-struct infohash;
+struct mbt_infohash;
 
-STAILQ_HEAD(infohash_head, infohash);
+STAILQ_HEAD(mbt_infohash_head, mbt_infohash);
 
-struct infohash
+struct mbt_infohash
 {
 	int ref;
 
-	STAILQ_ENTRY(infohash) next;
+	STAILQ_ENTRY(mbt_infohash) next;
 
 	int type;
 
@@ -24,10 +24,10 @@ struct infohash
 	};
 };
 
-int infohash_new(struct infohash **ih, int type, const char *str);
-struct infohash* infohash_ref(struct infohash *ih);
-void infohash_unref(struct infohash *ih);
-void infohash_unrefp(struct infohash **ih);
-int infohash_string(struct infohash *ih, char *buf, size_t sz);
-int infohash_cmp(struct infohash *a, struct infohash *b);
+int mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str);
+struct mbt_infohash* mbt_infohash_ref(struct mbt_infohash *ih);
+void mbt_infohash_unref(struct mbt_infohash *ih);
+void mbt_mbt_infohash_unrefp(struct mbt_infohash **ih);
+int mbt_infohash_string(struct mbt_infohash *ih, char *buf, size_t sz);
+int mbt_infohash_cmp(struct mbt_infohash *a, struct mbt_infohash *b);
 

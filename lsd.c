@@ -38,7 +38,7 @@ void
 lsd_frame_info_freep(struct lsd_frame_info **v)
 {
 	struct lsd_frame_info *lfi;
-	struct infohash *ih, *next;
+	struct mbt_infohash *ih, *next;
 
 	lfi = *v;
 
@@ -48,7 +48,7 @@ lsd_frame_info_freep(struct lsd_frame_info **v)
 	ih = STAILQ_FIRST(&lfi->infohashes);
 	while(ih){
 		next = STAILQ_NEXT(ih, next);
-		infohash_unref(ih);
+		mbt_infohash_unref(ih);
 		ih = next;
 	}
 
@@ -157,7 +157,7 @@ lsd_frame_parse(struct lsd_frame *frame, struct lsd_frame_info **out)
 	unsigned long port;
 	const char *p, *ep;
 	struct lsd_frame_info *info;
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 
 	p = frame->frame;
 
@@ -208,13 +208,13 @@ lsd_frame_parse(struct lsd_frame *frame, struct lsd_frame_info **out)
 			break;
 
 		if(strncmp(p, "Infohash: ", 10) == 0){
-			if(ep - (p+10) != INFOHASH_SHA1HEXLEN)
+			if(ep - (p+10) != MBT_MBT_INFOHASH_SHA1HEXLEN)
 				goto next;
 
-			warnx("input: %.*s", INFOHASH_SHA1HEXLEN, p+10);
-			rv = infohash_new(&ih, INFOHASH_SHA1, p+10);
+			warnx("input: %.*s", MBT_MBT_INFOHASH_SHA1HEXLEN, p+10);
+			rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, p+10);
 			if(rv < 0){
-				warnx("infohash_new: %s", strerror(-rv));
+				warnx("mbt_infohash_new: %s", strerror(-rv));
 				goto err;
 			}
 

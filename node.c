@@ -128,7 +128,7 @@ node_send_remote(struct node *p, struct remote *r, unsigned char *buf, size_t sz
 }
 
 struct torrent*
-node_find_torrent(struct node*, struct infohash*)
+node_find_torrent(struct node*, struct mbt_infohash*)
 {
 	return NULL;
 }

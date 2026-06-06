@@ -22,7 +22,7 @@
 #define MAX_TORRENTS 64
 
 struct file_entry {
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 	int fd;
 	uint32_t piece_length;
 };
@@ -33,9 +33,9 @@ static int entry_count;
 static struct file_entry *
 find_entry(struct mbt_torrent *t)
 {
-	struct infohash *ih = mbt_torrent_infohash(t);
+	struct mbt_infohash *ih = mbt_torrent_infohash(t);
 	for (int i = 0; i < entry_count; i++) {
-		if (infohash_cmp(entries[i].ih, ih) == 0)
+		if (mbt_infohash_cmp(entries[i].ih, ih) == 0)
 			return &entries[i];
 	}
 	return NULL;
@@ -66,7 +66,7 @@ mbt_storage_file_open(void *ctx, struct mbt_torrent *t)
 	if (fd < 0)
 		return -errno;
 
-	entries[entry_count].ih = infohash_ref(mbt_torrent_infohash(t));
+	entries[entry_count].ih = mbt_infohash_ref(mbt_torrent_infohash(t));
 	entries[entry_count].fd = fd;
 	entries[entry_count].piece_length = 0;
 	entry_count++;
@@ -136,7 +136,7 @@ mbt_storage_file_close(void *ctx)
 	(void)ctx;
 	for (int i = 0; i < entry_count; i++) {
 		close(entries[i].fd);
-		infohash_unref(entries[i].ih);
+		mbt_infohash_unref(entries[i].ih);
 	}
 	entry_count = 0;
 }

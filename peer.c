@@ -27,7 +27,7 @@ struct mbt_peer {
 	struct mbt_ev_timer *timer;
 	struct mbt_ev_timer *defer;
 
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 	uint8_t our_id[20];
 	uint8_t their_id[20];
 	uint8_t ext[8];
@@ -490,7 +490,7 @@ peer_on_event(struct mbt_conn *c, int err, void *v)
 
 int
 mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
-             struct infohash *ih, const uint8_t peer_id[20],
+             struct mbt_infohash *ih, const uint8_t peer_id[20],
              uint32_t piece_count,
              struct mbt_peer_callbacks *cb, void *arg)
 {
@@ -503,7 +503,7 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 
 	p->ev = ev;
 	p->conn = conn;
-	p->ih = infohash_ref(ih);
+	p->ih = mbt_infohash_ref(ih);
 	memcpy(p->our_id, peer_id, 20);
 	p->cb = *cb;
 	p->cb_arg = arg;
@@ -550,7 +550,7 @@ mbt_peer_free(struct mbt_peer *p)
 	if (p->conn)
 		mbt_conn_free(p->conn);
 
-	infohash_unref(p->ih);
+	mbt_infohash_unref(p->ih);
 	mbt_bitmap_unref(p->bitfield);
 	free(p);
 }

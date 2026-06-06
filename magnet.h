@@ -15,8 +15,8 @@ struct mbt_magnet_peer {
 };
 
 struct mbt_magnet {
-	char infohash_hex[INFOHASH_SHA1HEXLEN + 1]; /* hex string (supports future sha256 via longer buf) */
-	int infohash_type;                           /* INFOHASH_SHA1 etc */
+	char infohash_hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1]; /* hex string (supports future sha256 via longer buf) */
+	int infohash_type;                           /* MBT_INFOHASH_SHA1 etc */
 	char *display_name;                          /* dn= (malloc'd, may be NULL) */
 	char *trackers[MBT_MAGNET_MAX_TRACKERS];     /* tr= (malloc'd) */
 	int tracker_count;

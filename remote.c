@@ -106,7 +106,7 @@ remote_conn_eventcb(struct mbt_conn *c, int err, void *v)
 }
 
 int
-remote_new(struct torrent *t, struct remote **r, struct infohash *ih, struct mbt_ev *ev)
+remote_new(struct torrent *t, struct remote **r, struct mbt_infohash *ih, struct mbt_ev *ev)
 {
 	struct remote *remote;
 
@@ -120,7 +120,7 @@ remote_new(struct torrent *t, struct remote **r, struct infohash *ih, struct mbt
 	remote->ev = ev;
 	remote->fd = -1;
 
-	remote->ih = infohash_ref(ih);
+	remote->ih = mbt_infohash_ref(ih);
 
 	remote->hechoking = 1;
 	remote->mechoking = 1;
@@ -165,7 +165,7 @@ remote_unref(struct remote *r)
 	if(r->defer)
 		mbt_ev_timer_free(r->defer);
 
-	infohash_unrefp(&r->ih);
+	mbt_mbt_infohash_unrefp(&r->ih);
 
 	mbt_bitmap_unref(r->bitmap);
 
@@ -446,21 +446,21 @@ remote_metadata_complete(struct remote *r)
 	SHA1_CTX ctx;
 	char sha1str[SHA1_DIGEST_STRING_LENGTH];
 	__attribute__((cleanup(be_value_freep))) struct be_value *metadata = NULL;
-	__attribute__((cleanup(infohash_unrefp))) struct infohash *ih = NULL;
+	__attribute__((cleanup(mbt_mbt_infohash_unrefp))) struct mbt_infohash *ih = NULL;
 
 	SHA1Init(&ctx);
 	SHA1Update(&ctx, (uint8_t*) r->metadata, r->metadata_length);
 	SHA1End(&ctx, sha1str);
 
-	rv = infohash_new(&ih, INFOHASH_SHA1, sha1str);
+	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, sha1str);
 	if(rv < 0)
 		return rv;
 
 	warnx("%s: metadata complete, hash : %s", __func__, sha1str);
-	infohash_string(r->ih, sha1str, sizeof(sha1str));
+	mbt_infohash_string(r->ih, sha1str, sizeof(sha1str));
 	warnx("%s: original hash           : %s", __func__, sha1str);
 
-	if(infohash_cmp(r->ih, ih) != 0){
+	if(mbt_infohash_cmp(r->ih, ih) != 0){
 		warnx("%s: infohash mismatch", __func__);
 		return -EINVAL;
 	}

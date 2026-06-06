@@ -12,7 +12,7 @@ struct node;
 struct torrent;
 struct remote;
 
-int torrent_new(struct node *node, struct infohash *ih, struct torrent **out);
+int torrent_new(struct node *node, struct mbt_infohash *ih, struct torrent **out);
 struct torrent *torrent_ref(struct torrent*);
 void torrent_unref(struct torrent*);
 void torrent_unrefp(struct torrent**);

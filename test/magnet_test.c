@@ -12,7 +12,7 @@ test_basic(void)
 	rv = mbt_magnet_parse("magnet:?xt=urn:btih:6f4370df4304609a8793ce2b59178dcc8febf5e2&dn=debian-12.11.0-amd64-netinst.iso", &m);
 	assert(rv == 0);
 	assert(strcmp(m.infohash_hex, "6F4370DF4304609A8793CE2B59178DCC8FEBF5E2") == 0);
-	assert(m.infohash_type == INFOHASH_SHA1);
+	assert(m.infohash_type == MBT_INFOHASH_SHA1);
 	assert(strcmp(m.display_name, "debian-12.11.0-amd64-netinst.iso") == 0);
 	assert(m.tracker_count == 0);
 	assert(m.peer_count == 0);
@@ -104,7 +104,7 @@ test_full(void)
 		"&x.pe=192.168.0.10:28888"
 		"&x.pe=192.168.0.189:51413", &m);
 	assert(rv == 0);
-	assert(m.infohash_type == INFOHASH_SHA1);
+	assert(m.infohash_type == MBT_INFOHASH_SHA1);
 	assert(strcmp(m.display_name, "ubuntu-25.10-desktop-amd64.iso") == 0);
 	assert(m.tracker_count == 1);
 	assert(m.peer_count == 2);

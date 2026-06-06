@@ -80,6 +80,7 @@ A C library (`libmbt`) providing composable BitTorrent primitives. Programs buil
 4. **Testable in isolation.** Each component works standalone.
 5. **Silent by default.** No output unless caller sets a log callback.
 6. **Safe for release builds.** External input validated with error returns, not asserts.
+7. **`mbt_` namespace.** All public types and functions use the `mbt_` prefix.
 
 ## Build
 

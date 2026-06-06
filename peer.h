@@ -8,7 +8,7 @@
 struct mbt_peer;
 struct mbt_conn;
 struct mbt_ev;
-struct infohash;
+struct mbt_infohash;
 struct mbt_bitmap;
 
 /* Peer states */
@@ -62,7 +62,7 @@ struct mbt_peer_callbacks {
 
 /* Create peer from a connected mbt_conn (takes ownership of conn) */
 int mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
-                 struct infohash *ih, const uint8_t peer_id[20],
+                 struct mbt_infohash *ih, const uint8_t peer_id[20],
                  uint32_t piece_count,
                  struct mbt_peer_callbacks *cb, void *arg);
 

@@ -130,7 +130,7 @@ struct torrent
 
 	struct node *node;
 
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 
 	/* info part of torrent metadata */
 	struct be_value *info;
@@ -146,7 +146,7 @@ struct torrent
 };
 
 int
-torrent_new(struct node *node, struct infohash *ih, struct torrent **out)
+torrent_new(struct node *node, struct mbt_infohash *ih, struct torrent **out)
 {
 	struct torrent *t;
 
@@ -158,7 +158,7 @@ torrent_new(struct node *node, struct infohash *ih, struct torrent **out)
 
 	t->node = node;
 
-	t->ih = infohash_ref(ih);
+	t->ih = mbt_infohash_ref(ih);
 
 	LIST_INIT(&t->peers);
 
@@ -182,7 +182,7 @@ torrent_unref(struct torrent *t)
 	if(--t->ref > 0)
 		return;
 
-	infohash_unref(t->ih);
+	mbt_infohash_unref(t->ih);
 
 	r = LIST_FIRST(&t->peers);
 	while(r){
@@ -212,7 +212,7 @@ torrent_cmp(struct torrent *a, struct torrent *b)
 	assert(a->ih);
 	assert(b->ih);
 
-	return infohash_cmp(a->ih, b->ih);
+	return mbt_infohash_cmp(a->ih, b->ih);
 }
 
 struct node*

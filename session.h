@@ -10,7 +10,7 @@
 struct mbt_session;
 struct mbt_ev;
 struct mbt_torrent;
-struct infohash;
+struct mbt_infohash;
 
 /* Session configuration — caller's policy choices */
 struct mbt_session_config {
@@ -43,15 +43,15 @@ void mbt_session_stop(struct mbt_session *s);
 /* Add torrents */
 int mbt_session_add_torrent_file(struct mbt_session *s, const char *path);
 int mbt_session_add_magnet(struct mbt_session *s, const char *uri);
-int mbt_session_add_infohash(struct mbt_session *s, struct infohash *ih);
+int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih);
 
 /* Remove/query */
-int mbt_session_remove_torrent(struct mbt_session *s, struct infohash *ih);
-struct mbt_torrent *mbt_session_find_torrent(struct mbt_session *s, struct infohash *ih);
+int mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih);
+struct mbt_torrent *mbt_session_find_torrent(struct mbt_session *s, struct mbt_infohash *ih);
 
 /* Peer discovery — enable/disable sources */
 int mbt_session_enable_lsd(struct mbt_session *s);
-int mbt_session_add_peer(struct mbt_session *s, struct infohash *ih,
+int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                          const char *addr, uint16_t port);
 
 /* Callbacks for session-level events (optional) */

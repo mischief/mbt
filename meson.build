@@ -58,6 +58,7 @@ bt_src = [
   'storage_file.c',
   'bitmap.c',
   'torrent.c',
+  'tracker_udp.c',
 ] + ev_src
 
 libmbt = library('mbt', bt_src, dependencies: deps, install: true)

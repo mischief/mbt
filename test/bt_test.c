@@ -23,7 +23,7 @@ lsd_on_frame(struct lsd_frame_info *info, void *v)
 	struct node *n = v;
 	struct remote *r;
 	struct torrent *t;
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 	struct mbt_ev *ev = node_event(n);
 
 	warnx("%s called", __func__);
@@ -40,7 +40,7 @@ lsd_on_frame(struct lsd_frame_info *info, void *v)
 			node_add_torrent(n, t);
 		}
 
-		rv = remote_new(t, &r, infohash_ref(ih), ev);
+		rv = remote_new(t, &r, mbt_infohash_ref(ih), ev);
 		if(rv < 0){
 			warnx("remote_new4: %s", strerror(-rv));
 			continue;
@@ -69,8 +69,8 @@ lsd_handler(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	struct lsd *lsd = ctx->lsd;
 	__attribute__((cleanup(lsd_frame_freep))) struct lsd_frame *frame = NULL;
 	__attribute__((cleanup(lsd_frame_info_freep))) struct lsd_frame_info *info = NULL;
-	struct infohash *ih;
-	char hash[INFOHASH_SHA1HEXLEN+1];
+	struct mbt_infohash *ih;
+	char hash[MBT_MBT_INFOHASH_SHA1HEXLEN+1];
 
 	(void)io;
 	(void)fd;
@@ -95,8 +95,8 @@ lsd_handler(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	printf("cookie: %s\n", info->cookie);
 	printf("hashes:\n");
 	STAILQ_FOREACH(ih, &info->infohashes, next){
-		if((rv = infohash_string(ih, hash, sizeof(hash))) < 0)
-			warnx("infohash_string: %s", strerror(-rv));
+		if((rv = mbt_infohash_string(ih, hash, sizeof(hash))) < 0)
+			warnx("mbt_infohash_string: %s", strerror(-rv));
 		else
 			printf("> %lu %s\n", strlen(hash), hash);
 	}
@@ -110,7 +110,7 @@ main(int argc, char *argv[])
 {
 	int rv;
 	struct mbt_ev *ev = NULL;
-	__attribute__((cleanup(infohash_unrefp))) struct infohash *ih = NULL;
+	__attribute__((cleanup(mbt_mbt_infohash_unrefp))) struct mbt_infohash *ih = NULL;
 	__attribute__((cleanup(lsd_freep))) struct lsd *lsdfd = NULL;
 	__attribute__((cleanup(node_freep))) struct node *node = NULL;
 	__attribute__((cleanup(torrent_unrefp))) struct torrent *torrent = NULL;
@@ -121,16 +121,16 @@ main(int argc, char *argv[])
 	(void)argc;
 	(void)argv;
 
-	const char hexstr[INFOHASH_SHA1HEXLEN+1] = "C8295CE630F2064F08440DB1534E4992CFE4862A";
-	char hash[INFOHASH_SHA1HEXLEN+1];
+	const char hexstr[MBT_MBT_INFOHASH_SHA1HEXLEN+1] = "C8295CE630F2064F08440DB1534E4992CFE4862A";
+	char hash[MBT_MBT_INFOHASH_SHA1HEXLEN+1];
 
 	signal(SIGPIPE, SIG_IGN);
 
-	if((rv = infohash_new(&ih, INFOHASH_SHA1, hexstr)) < 0)
-		errx(1, "infohash_new: %s", strerror(-rv));
+	if((rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr)) < 0)
+		errx(1, "mbt_infohash_new: %s", strerror(-rv));
 
-	if((rv = infohash_string(ih, hash, sizeof(hash))) < 0)
-		warnx("infohash_string: %s", strerror(-rv));
+	if((rv = mbt_infohash_string(ih, hash, sizeof(hash))) < 0)
+		warnx("mbt_infohash_string: %s", strerror(-rv));
 	else
 		printf("%s\n", hash);
 

@@ -28,7 +28,7 @@ main(int argc, char *argv[])
 {
 	struct mbt_session *s = NULL;
 	struct mbt_torrent *t;
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 	int rv;
 
 	const char *hexstr = "6F4370DF4304609A8793CE2B59178DCC8FEBF5E2";
@@ -43,9 +43,9 @@ main(int argc, char *argv[])
 		errx(1, "mbt_session_default: %s", strerror(-rv));
 
 	/* Add torrent by infohash (metadata will come from peer via BEP 9) */
-	rv = infohash_new(&ih, INFOHASH_SHA1, hexstr);
+	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr);
 	if (rv < 0)
-		errx(1, "infohash_new: %s", strerror(-rv));
+		errx(1, "mbt_infohash_new: %s", strerror(-rv));
 
 	rv = mbt_session_add_infohash(s, ih);
 	if (rv < 0)
@@ -62,7 +62,7 @@ main(int argc, char *argv[])
 	mbt_session_add_peer(s, ih, "192.168.0.10", 28888);    /* sokoban */
 	mbt_session_add_peer(s, ih, "192.168.0.189", 51413);   /* megrez */
 
-	infohash_unref(ih);
+	mbt_infohash_unref(ih);
 
 	fprintf(stderr, "downloading %s from 2 peers...\n", hexstr);
 

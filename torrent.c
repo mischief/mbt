@@ -46,7 +46,7 @@ struct torrent_peer {
 
 struct mbt_torrent {
 	struct mbt_ev *ev;
-	struct infohash *ih;
+	struct mbt_infohash *ih;
 	uint8_t peer_id[20];
 
 	const struct mbt_storage_ops *storage_ops;
@@ -545,7 +545,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 		return -ENOMEM;
 
 	t->ev = cfg->ev;
-	t->ih = infohash_ref(cfg->ih);
+	t->ih = mbt_infohash_ref(cfg->ih);
 	memcpy(t->peer_id, cfg->peer_id, 20);
 	t->storage_ops = cfg->storage_ops;
 	t->storage_ctx = cfg->storage_ctx;
@@ -587,7 +587,7 @@ mbt_torrent_free(struct mbt_torrent *t)
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);
 	free(t->name);
-	infohash_unref(t->ih);
+	mbt_infohash_unref(t->ih);
 	free(t);
 }
 
@@ -703,7 +703,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn)
 	return 0;
 }
 
-struct infohash *
+struct mbt_infohash *
 mbt_torrent_infohash(struct mbt_torrent *t)
 {
 	return t->ih;
