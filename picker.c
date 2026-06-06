@@ -19,7 +19,7 @@ mbt_picker_sequential(struct mbt_torrent *t, void *peer, void *ctx)
 	for (size_t i = 0; i < bits; i++) {
 		if (mbt_bitmap_isset(peer_bits, i) > 0
 		    && !mbt_torrent_has_piece(t, i)
-		    && !mbt_torrent_piece_active(t, i))
+		    && !mbt_torrent_piece_fully_requested(t, i))
 			return (int)i;
 	}
 
@@ -45,7 +45,7 @@ mbt_picker_random(struct mbt_torrent *t, void *peer, void *ctx)
 		size_t idx = (start + i) % bits;
 		if (mbt_bitmap_isset(peer_bits, idx) > 0
 		    && !mbt_torrent_has_piece(t, idx)
-		    && !mbt_torrent_piece_active(t, idx))
+		    && !mbt_torrent_piece_fully_requested(t, idx))
 			return (int)idx;
 	}
 

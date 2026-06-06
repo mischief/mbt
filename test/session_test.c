@@ -31,7 +31,7 @@ main(int argc, char *argv[])
 	struct infohash *ih;
 	int rv;
 
-	const char *hexstr = "C8295CE630F2064F08440DB1534E4992CFE4862A";
+	const char *hexstr = "6F4370DF4304609A8793CE2B59178DCC8FEBF5E2";
 
 	signal(SIGPIPE, SIG_IGN);
 
@@ -58,11 +58,7 @@ main(int argc, char *argv[])
 	};
 	mbt_torrent_set_callbacks(t, &tcb, s);
 
-	/* Enable LSD for automatic peer discovery */
-	mbt_session_enable_lsd(s);
-
-	/* Connect to known peers */
-	mbt_session_add_peer(s, ih, "192.168.0.10", 28888);    /* sokoban */
+	/* Connect to known peer */
 	mbt_session_add_peer(s, ih, "192.168.0.189", 51413);   /* megrez */
 
 	infohash_unref(ih);

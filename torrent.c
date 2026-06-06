@@ -27,6 +27,7 @@ struct piece_info {
 	uint8_t *data;
 	size_t length;
 	size_t received;       /* bytes received so far */
+	size_t requested;      /* bytes requested so far (>= received) */
 	uint8_t hash[20];      /* expected SHA1 */
 	enum mbt_piece_state state;
 	struct torrent_peer *owner; /* peer downloading this piece, NULL if pending */
@@ -189,6 +190,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			/* Hash mismatch — reset piece */
 			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch, re-requesting", piece);
 			pi->received = 0;
+			pi->requested = 0;
 			pi->state = MBT_PIECE_PENDING;
 			pi->owner = NULL;
 			free(pi->data);
@@ -219,6 +221,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 		}
 	}
 
+	/* Keep requesting */
 	/* Keep requesting */
 	torrent_drive_peer(t, tp);
 }
@@ -297,6 +300,7 @@ on_error(struct mbt_peer *p, int err, void *arg)
 				t->pieces[i].state = MBT_PIECE_PENDING;
 				t->pieces[i].owner = NULL;
 				t->pieces[i].received = 0;
+				t->pieces[i].requested = 0;
 				free(t->pieces[i].data);
 				t->pieces[i].data = NULL;
 			}
@@ -346,6 +350,10 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		if (mbt_bitmap_isset(t->have, idx) > 0)
 			continue;
 
+		/* Already fully requested — skip */
+		if (pi->requested >= pi->length)
+			continue;
+
 		if (!pi->data) {
 			pi->data = malloc(pi->length);
 			if (!pi->data) return;
@@ -353,13 +361,14 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			pi->owner = tp;
 		}
 
-		/* Request all remaining blocks for this piece */
+		/* Request unrequested blocks for this piece */
 		size_t off;
-		for (off = pi->received; off < pi->length && tp->outstanding < PIPELINE_DEPTH; off += BLOCK_SIZE) {
+		for (off = pi->requested; off < pi->length && tp->outstanding < PIPELINE_DEPTH; off += BLOCK_SIZE) {
 			uint32_t req_len = MIN(BLOCK_SIZE, pi->length - off);
 			mbt_peer_send_request(tp->peer, idx, off, req_len);
 			tp->outstanding++;
 		}
+		pi->requested = off;
 	}
 }
 
@@ -580,4 +589,12 @@ mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece)
 	if (!t->pieces || piece >= t->piece_count)
 		return 0;
 	return t->pieces[piece].state == MBT_PIECE_ACTIVE;
+}
+
+int
+mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece)
+{
+	if (!t->pieces || piece >= t->piece_count)
+		return 0;
+	return t->pieces[piece].requested >= t->pieces[piece].length;
 }

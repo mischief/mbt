@@ -225,7 +225,7 @@ mbt_session_default(struct mbt_session **out, const char *path)
 		.ev = ev,
 		.storage_ops = mbt_storage_file_ops(),
 		.storage_ctx = (void *)path,
-		.picker = mbt_picker_random,
+		.picker = mbt_picker_sequential,
 		.listen_port = 6881,
 	};
 
@@ -487,9 +487,12 @@ mbt_session_add_peer(struct mbt_session *s, struct infohash *ih,
 
 	rv = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
 	if (rv < 0 && errno != EINPROGRESS) {
+		mbt_log_warn(MBT_LOG_SESSION, "connect to %s:%hu failed: %s", addr, port, strerror(errno));
 		close(fd);
 		return -errno;
 	}
+
+	mbt_log_debug(MBT_LOG_SESSION, "connecting to %s:%hu (rv=%d errno=%d)", addr, port, rv, errno);
 
 	if (rv == 0) {
 		/* Connected immediately (localhost) */
@@ -515,10 +518,13 @@ mbt_session_add_peer(struct mbt_session *s, struct infohash *ih,
 
 	rv = mbt_ev_io_new(s->ev, &pc->io, fd, MBT_EV_WRITE, pending_connect_cb, pc);
 	if (rv < 0) {
+		mbt_log_warn(MBT_LOG_SESSION, "mbt_ev_io_new failed: %s", strerror(-rv));
 		close(fd);
 		free(pc);
 		return rv;
 	}
+
+	mbt_log_debug(MBT_LOG_SESSION, "pending connect registered for %s:%hu", addr, port);
 
 	STAILQ_INSERT_TAIL(&s->pending, pc, next);
 	return 0;
