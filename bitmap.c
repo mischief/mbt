@@ -45,7 +45,7 @@ mbt_bitmap_new_bits(struct mbt_bitmap **out, size_t nbits)
 }
 
 int
-mbt_bitmap_fromarray(struct mbt_bitmap **out, uint8_t *buf, size_t len)
+mbt_bitmap_fromarray(struct mbt_bitmap **out, uint8_t *buf, size_t len, size_t nbits)
 {
 	int rv;
 	size_t i;
@@ -53,6 +53,8 @@ mbt_bitmap_fromarray(struct mbt_bitmap **out, uint8_t *buf, size_t len)
 
 	if((rv = mbt_bitmap_new(&tb, len)) < 0)
 		return rv;
+
+	tb->bits = nbits ? nbits : len * 8;
 
 	for(i = 0; i < len; i++){
 		tb->map[i] = buf[i];

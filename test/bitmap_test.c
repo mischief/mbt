@@ -52,7 +52,7 @@ test_fromarray(void)
 	struct mbt_bitmap *tb = NULL;
 	uint8_t data[] = { 0x80, 0x01 }; /* bit 0 and bit 15 set */
 
-	mbt_bitmap_fromarray(&tb, data, 2);
+	mbt_bitmap_fromarray(&tb, data, 2, 16);
 	assert(mbt_bitmap_bytes(tb) == 2);
 	assert(mbt_bitmap_bits(tb) == 16);
 	assert(mbt_bitmap_isset(tb, 0));

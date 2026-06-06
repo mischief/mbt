@@ -46,6 +46,7 @@ struct mbt_peer {
 
 	/* bitfield */
 	struct mbt_bitmap *bitfield;
+	uint32_t piece_count;
 
 	/* message framing */
 	size_t msglen;
@@ -279,7 +280,7 @@ peer_rx_message(struct mbt_peer *p)
 			return -ENOMSG;
 		sz = mbt_conn_read(p->conn, buf, p->msglen);
 		mbt_bitmap_unref(p->bitfield);
-		mbt_bitmap_fromarray(&p->bitfield, buf, sz);
+		mbt_bitmap_fromarray(&p->bitfield, buf, sz, p->piece_count);
 		if (p->cb.on_bitfield)
 			p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
 		break;
@@ -465,6 +466,7 @@ peer_on_event(struct mbt_conn *c, int err, void *v)
 int
 mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
              struct infohash *ih, const uint8_t peer_id[20],
+             uint32_t piece_count,
              struct mbt_peer_callbacks *cb, void *arg)
 {
 	struct mbt_peer *p;
@@ -482,6 +484,7 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 	p->cb_arg = arg;
 	p->peer_choking = 1;
 	p->am_choking = 1;
+	p->piece_count = piece_count;
 	p->state = MBT_PEER_HANDSHAKE;
 
 	/* Point conn callbacks to this peer */

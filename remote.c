@@ -914,7 +914,7 @@ remote_rx(struct remote *r)
 			goto err;
 		}
 
-		if((rv = mbt_bitmap_fromarray(&r->bitmap, bitmaptmp, sz)) < 0)
+		if((rv = mbt_bitmap_fromarray(&r->bitmap, bitmaptmp, sz, 0)) < 0)
 			goto err;
 
 		break;

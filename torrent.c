@@ -494,7 +494,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn)
 		return -ENOMEM;
 
 	rv = mbt_peer_new(&peer, t->ev, conn, t->ih, t->peer_id,
-	                  &torrent_peer_cbs, t);
+	                  t->piece_count, &torrent_peer_cbs, t);
 	if (rv < 0) {
 		free(tp);
 		return rv;
