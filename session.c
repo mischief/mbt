@@ -681,7 +681,17 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri)
 	for (int i = 0; i < m.peer_count; i++)
 		mbt_session_add_peer(s, ih, m.peers[i].addr, m.peers[i].port);
 
-	/* TODO: announce to trackers once tracker client is implemented */
+	/* Announce to trackers from magnet */
+	struct session_torrent *st = session_find(s, ih);
+	if (st) {
+		for (int i = 0; i < m.tracker_count && st->tracker_count < 16; i++) {
+			char *u = strdup(m.trackers[i]);
+			if (u)
+				st->trackers[st->tracker_count++] = u;
+		}
+		if (st->tracker_count > 0)
+			session_do_announce(s, st);
+	}
 
 	mbt_infohash_unref(ih);
 	mbt_magnet_free(&m);
