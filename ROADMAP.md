@@ -75,6 +75,9 @@ Blocked on: bt_test and mbt-lsd rewritten against new API.
 
 ## Phase 5: Discovery
 
+- [ ] Magnet URI parser → `struct mbt_magnet` (infohash, display name, trackers[], peer hints[])
+- [ ] `mbt_magnet_parse(uri, &magnet)` — extract fields from magnet:?xt=urn:btih:...
+- [ ] Wire `mbt_session_add_magnet` to parse URI, create torrent, connect peer hints
 - [ ] DHT (BEP 5) — bootstrap, routing table, get_peers, announce_peer
 - [ ] PEX (BEP 11) — exchange peer lists via extension messages
 - [ ] UDP tracker (BEP 15) — announce + scrape
