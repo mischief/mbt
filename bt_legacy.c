@@ -15,7 +15,7 @@
 #include "bt_legacy.h"
 #include <remote.h>
 #include <hex.h>
-#include <tbmap.h>
+#include "mbt_bitmap.h"
 
 struct piece {
 	SPLAY_ENTRY(piece) next;
@@ -25,7 +25,7 @@ struct piece {
 	uint8_t hash[SHA1_DIGEST_LENGTH];
 
 	/* piece size / BTBLOCKSIZE bits */
-	struct tbmap *blockbits;
+	struct mbt_bitmap *blockbits;
 	uint8_t data[];
 };
 
@@ -48,7 +48,7 @@ piece_new(struct piece **out, size_t index, size_t length, unsigned char *hash)
 	p->have = 0;
 	memcpy(p->hash, hash, sizeof(p->hash));
 
-	if((rv = tbmap_new(&p->blockbits, length / BTBLOCKSIZE)) < 0){
+	if((rv = mbt_bitmap_new(&p->blockbits, length / BTBLOCKSIZE)) < 0){
 		free(p);
 		return -ENOMEM;
 	}
@@ -104,7 +104,7 @@ piece_put_block(struct piece *p, size_t offset, unsigned char *buf, size_t sz)
 
 	memcpy(p->data + offset, buf, sz);
 
-	tbmap_set(p->blockbits, offset/BTBLOCKSIZE);
+	mbt_bitmap_set(p->blockbits, offset/BTBLOCKSIZE);
 
 	p->have++;
 
@@ -331,7 +331,7 @@ torrent_put_piece_block(struct torrent *t, size_t piece_index, size_t offset, un
 		rv = piece_verify(piece);
 		if(rv < 0){
 			warnx("%s: corrupt piece %zu", __func__, piece_index);
-			tbmap_clear(piece->blockbits);
+			mbt_bitmap_clear(piece->blockbits);
 		}
 
 		//torrent_request_random_piece(t);

@@ -11,7 +11,7 @@
 #include "infohash.h"
 #include "peer.h"
 #include "torrent.h"
-#include "tbmap.h"
+#include "mbt_bitmap.h"
 #include "be.h"
 
 enum {
@@ -63,7 +63,7 @@ struct mbt_torrent {
 	uint64_t total_length;
 
 	/* Have bitmap */
-	struct tbmap *have;
+	struct mbt_bitmap *have;
 	uint32_t have_count;
 
 	/* Peers */
@@ -130,7 +130,7 @@ on_have(struct mbt_peer *p, uint32_t piece, void *arg)
 }
 
 static void
-on_bitfield(struct mbt_peer *p, struct tbmap *bits, void *arg)
+on_bitfield(struct mbt_peer *p, struct mbt_bitmap *bits, void *arg)
 {
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
@@ -191,7 +191,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 		} else {
 			/* Verified — store */
 			pi->state = MBT_PIECE_COMPLETE;
-			tbmap_set(t->have, piece);
+			mbt_bitmap_set(t->have, piece);
 			t->have_count++;
 
 			if (t->storage_ops && t->storage_ops->write_piece)
@@ -397,7 +397,7 @@ mbt_torrent_free(struct mbt_torrent *t)
 		free(t->pieces);
 	}
 
-	tbmap_unref(t->have);
+	mbt_bitmap_unref(t->have);
 	free(t->metadata);
 	infohash_unref(t->ih);
 	free(t);
@@ -465,7 +465,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 
 	/* Allocate have bitmap */
 	size_t bitmap_bytes = (t->piece_count + 7) / 8;
-	tbmap_new(&t->have, bitmap_bytes);
+	mbt_bitmap_new(&t->have, bitmap_bytes);
 
 	/* Check storage for existing pieces (resume) */
 	if (t->storage_ops && t->storage_ops->open)
@@ -475,7 +475,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		for (uint32_t i = 0; i < t->piece_count; i++) {
 			if (t->storage_ops->have_piece(t->storage_ctx, i) > 0) {
 				t->pieces[i].state = MBT_PIECE_COMPLETE;
-				tbmap_set(t->have, i);
+				mbt_bitmap_set(t->have, i);
 				t->have_count++;
 			}
 		}

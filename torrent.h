@@ -9,7 +9,7 @@ struct mbt_ev;
 struct mbt_conn;
 struct mbt_peer;
 struct infohash;
-struct tbmap;
+struct mbt_bitmap;
 
 #include "storage.h"
 #include "picker.h"

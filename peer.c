@@ -11,7 +11,7 @@
 #include "infohash.h"
 #include "pack.h"
 #include "peer.h"
-#include "tbmap.h"
+#include "mbt_bitmap.h"
 #include "be.h"
 
 enum {
@@ -45,7 +45,7 @@ struct mbt_peer {
 	size_t metadata_size;
 
 	/* bitfield */
-	struct tbmap *bitfield;
+	struct mbt_bitmap *bitfield;
 
 	/* message framing */
 	size_t msglen;
@@ -278,8 +278,8 @@ peer_rx_message(struct mbt_peer *p)
 		if (p->msglen > sizeof(buf))
 			return -ENOMSG;
 		sz = mbt_conn_read(p->conn, buf, p->msglen);
-		tbmap_unref(p->bitfield);
-		tbmap_fromarray(&p->bitfield, buf, sz);
+		mbt_bitmap_unref(p->bitfield);
+		mbt_bitmap_fromarray(&p->bitfield, buf, sz);
 		if (p->cb.on_bitfield)
 			p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
 		break;
@@ -519,7 +519,7 @@ mbt_peer_free(struct mbt_peer *p)
 		mbt_conn_free(p->conn);
 
 	infohash_unref(p->ih);
-	tbmap_unref(p->bitfield);
+	mbt_bitmap_unref(p->bitfield);
 	free(p);
 }
 
@@ -541,7 +541,7 @@ mbt_peer_interested(struct mbt_peer *p)
 	return p->am_interested;
 }
 
-struct tbmap *
+struct mbt_bitmap *
 mbt_peer_bitfield(struct mbt_peer *p)
 {
 	return p->bitfield;

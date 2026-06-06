@@ -22,7 +22,7 @@
 #include <remote.h>
 #include "bt_legacy.h"
 #include <node.h>
-#include <tbmap.h>
+#include "mbt_bitmap.h"
 
 enum {
 	HANDSHAKE_SIZE = 20+4+4+20+20,
@@ -167,7 +167,7 @@ remote_unref(struct remote *r)
 
 	infohash_unrefp(&r->ih);
 
-	tbmap_unref(r->bitmap);
+	mbt_bitmap_unref(r->bitmap);
 
 	free(r->metadata);
 	free(r);
@@ -914,7 +914,7 @@ remote_rx(struct remote *r)
 			goto err;
 		}
 
-		if((rv = tbmap_fromarray(&r->bitmap, bitmaptmp, sz)) < 0)
+		if((rv = mbt_bitmap_fromarray(&r->bitmap, bitmaptmp, sz)) < 0)
 			goto err;
 
 		break;

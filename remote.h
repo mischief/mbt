@@ -47,7 +47,7 @@ struct remote {
 	uint8_t bep9code;
 
 	/* bitfield copy from peer */
-	struct tbmap *bitmap;
+	struct mbt_bitmap *bitmap;
 
 	/* metadata copy from peer */
 	unsigned char *metadata;

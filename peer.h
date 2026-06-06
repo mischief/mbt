@@ -9,7 +9,7 @@ struct mbt_peer;
 struct mbt_conn;
 struct mbt_ev;
 struct infohash;
-struct tbmap;
+struct mbt_bitmap;
 
 /* Peer states */
 enum mbt_peer_state {
@@ -35,7 +35,7 @@ struct mbt_peer_callbacks {
 	void (*on_have)(struct mbt_peer *p, uint32_t piece, void *arg);
 
 	/* Full bitfield received */
-	void (*on_bitfield)(struct mbt_peer *p, struct tbmap *bits, void *arg);
+	void (*on_bitfield)(struct mbt_peer *p, struct mbt_bitmap *bits, void *arg);
 
 	/* Piece block received */
 	void (*on_piece)(struct mbt_peer *p, uint32_t piece, uint32_t offset,
@@ -65,7 +65,7 @@ void mbt_peer_free(struct mbt_peer *p);
 enum mbt_peer_state mbt_peer_state(struct mbt_peer *p);
 int mbt_peer_choked(struct mbt_peer *p);      /* are we choked by them? */
 int mbt_peer_interested(struct mbt_peer *p);   /* are we interested? */
-struct tbmap *mbt_peer_bitfield(struct mbt_peer *p);
+struct mbt_bitmap *mbt_peer_bitfield(struct mbt_peer *p);
 
 /* Commands (call down from torrent) */
 int mbt_peer_send_interested(struct mbt_peer *p, int interested);

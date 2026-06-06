@@ -6,9 +6,9 @@
 #include <assert.h>
 #include <sys/types.h>
 
-#include <tbmap.h>
+#include "mbt_bitmap.h"
 
-struct tbmap
+struct mbt_bitmap
 {
 	int ref;
 	size_t bytes;
@@ -16,9 +16,9 @@ struct tbmap
 };
 
 int
-tbmap_new(struct tbmap **out, size_t sz)
+mbt_bitmap_new(struct mbt_bitmap **out, size_t sz)
 {
-	struct tbmap *tb;
+	struct mbt_bitmap *tb;
 
 	tb = calloc(1, sizeof(*tb) + sz);
 	if(!tb)
@@ -33,13 +33,13 @@ tbmap_new(struct tbmap **out, size_t sz)
 }
 
 int
-tbmap_fromarray(struct tbmap **out, uint8_t *buf, size_t len)
+mbt_bitmap_fromarray(struct mbt_bitmap **out, uint8_t *buf, size_t len)
 {
 	int rv;
 	size_t i;
-	struct tbmap *tb;
+	struct mbt_bitmap *tb;
 
-	if((rv = tbmap_new(&tb, len)) < 0)
+	if((rv = mbt_bitmap_new(&tb, len)) < 0)
 		return rv;
 
 	for(i = 0; i < len; i++){
@@ -52,7 +52,7 @@ tbmap_fromarray(struct tbmap **out, uint8_t *buf, size_t len)
 }
 
 void
-tbmap_unref(struct tbmap *tb)
+mbt_bitmap_unref(struct mbt_bitmap *tb)
 {
 	if(!tb)
 		return;
@@ -66,26 +66,26 @@ tbmap_unref(struct tbmap *tb)
 }
 
 void
-tbmap_unrefp(struct tbmap **tb)
+mbt_bitmap_unrefp(struct mbt_bitmap **tb)
 {
 	if(*tb)
-		tbmap_unref(*tb);
+		mbt_bitmap_unref(*tb);
 }
 
 size_t
-tbmap_bits(struct tbmap *tb)
+mbt_bitmap_bits(struct mbt_bitmap *tb)
 {
 	return tb->bytes * 8;
 }
 
 size_t
-tbmap_bytes(struct tbmap *tb)
+mbt_bitmap_bytes(struct mbt_bitmap *tb)
 {
 	return tb->bytes;
 }
 
 int
-tbmap_set(struct tbmap *tb, size_t bit)
+mbt_bitmap_set(struct mbt_bitmap *tb, size_t bit)
 {
 	uint8_t *p, setbit = 128 >> (bit & 7);
 	size_t byte = bit >> 3;
@@ -99,7 +99,7 @@ tbmap_set(struct tbmap *tb, size_t bit)
 }
 
 int
-tbmap_isset(struct tbmap *tb, size_t bit)
+mbt_bitmap_isset(struct mbt_bitmap *tb, size_t bit)
 {
 	uint8_t *p, checkbit = 128 >> (bit & 7);
 	size_t byte = bit >> 3;
@@ -112,13 +112,13 @@ tbmap_isset(struct tbmap *tb, size_t bit)
 }
 
 void
-tbmap_clear(struct tbmap *tb)
+mbt_bitmap_clear(struct mbt_bitmap *tb)
 {
 	memset(tb->map, 0, tb->bytes);
 }
 
 size_t
-tbmap_count(struct tbmap *tb)
+mbt_bitmap_count(struct mbt_bitmap *tb)
 {
 	size_t i, count = 0;
 
@@ -134,7 +134,7 @@ tbmap_count(struct tbmap *tb)
 }
 
 int
-tbmap_full(struct tbmap *tb)
+mbt_bitmap_full(struct mbt_bitmap *tb)
 {
 	size_t i;
 
@@ -147,7 +147,7 @@ tbmap_full(struct tbmap *tb)
 }
 
 ssize_t
-tbmap_first_clear(struct tbmap *tb)
+mbt_bitmap_first_clear(struct mbt_bitmap *tb)
 {
 	size_t i, bit;
 
@@ -164,7 +164,7 @@ tbmap_first_clear(struct tbmap *tb)
 }
 
 ssize_t
-tbmap_first_set(struct tbmap *tb)
+mbt_bitmap_first_set(struct mbt_bitmap *tb)
 {
 	size_t i, bit;
 
@@ -181,7 +181,7 @@ tbmap_first_set(struct tbmap *tb)
 }
 
 int
-tbmap_union(struct tbmap *a, struct tbmap *b, struct tbmap *out)
+mbt_bitmap_union(struct mbt_bitmap *a, struct mbt_bitmap *b, struct mbt_bitmap *out)
 {
 	size_t i, len;
 	register uint8_t *outp, *ap, *bp;
@@ -190,12 +190,12 @@ tbmap_union(struct tbmap *a, struct tbmap *b, struct tbmap *out)
 	assert(b);
 	assert(out);
 
-	len = tbmap_bytes(a);
+	len = mbt_bitmap_bytes(a);
 
-	if(len != tbmap_bytes(b))
+	if(len != mbt_bitmap_bytes(b))
 		return -EINVAL;
 
-	if(len != tbmap_bytes(out))
+	if(len != mbt_bitmap_bytes(out))
 		return -EINVAL;
 
 	outp = out->map;
@@ -210,7 +210,7 @@ tbmap_union(struct tbmap *a, struct tbmap *b, struct tbmap *out)
 }
 
 int
-tbmap_intersection(struct tbmap *a, struct tbmap *b, struct tbmap *out)
+mbt_bitmap_intersection(struct mbt_bitmap *a, struct mbt_bitmap *b, struct mbt_bitmap *out)
 {
 	size_t i, len;
 	register uint8_t *outp, *ap, *bp;
@@ -219,12 +219,12 @@ tbmap_intersection(struct tbmap *a, struct tbmap *b, struct tbmap *out)
 	assert(b);
 	assert(out);
 
-	len = tbmap_bytes(a);
+	len = mbt_bitmap_bytes(a);
 
-	if(len != tbmap_bytes(b))
+	if(len != mbt_bitmap_bytes(b))
 		return -EINVAL;
 
-	if(len != tbmap_bytes(out))
+	if(len != mbt_bitmap_bytes(out))
 		return -EINVAL;
 
 	outp = out->map;

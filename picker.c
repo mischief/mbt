@@ -2,22 +2,22 @@
 
 #include "picker.h"
 #include "torrent.h"
-#include "tbmap.h"
+#include "mbt_bitmap.h"
 #include "peer.h"
 
 int
 mbt_picker_sequential(struct mbt_torrent *t, void *peer, void *ctx)
 {
 	(void)ctx;
-	struct tbmap *peer_bits = mbt_peer_bitfield((struct mbt_peer *)peer);
+	struct mbt_bitmap *peer_bits = mbt_peer_bitfield((struct mbt_peer *)peer);
 
 	if (!peer_bits)
 		return -1;
 
 	/* Find first piece we don't have that this peer does */
-	size_t bits = tbmap_bits(peer_bits);
+	size_t bits = mbt_bitmap_bits(peer_bits);
 	for (size_t i = 0; i < bits; i++) {
-		if (tbmap_isset(peer_bits, i) > 0 && !mbt_torrent_has_piece(t, i))
+		if (mbt_bitmap_isset(peer_bits, i) > 0 && !mbt_torrent_has_piece(t, i))
 			return (int)i;
 	}
 
@@ -28,12 +28,12 @@ int
 mbt_picker_random(struct mbt_torrent *t, void *peer, void *ctx)
 {
 	(void)ctx;
-	struct tbmap *peer_bits = mbt_peer_bitfield((struct mbt_peer *)peer);
+	struct mbt_bitmap *peer_bits = mbt_peer_bitfield((struct mbt_peer *)peer);
 
 	if (!peer_bits)
 		return -1;
 
-	size_t bits = tbmap_bits(peer_bits);
+	size_t bits = mbt_bitmap_bits(peer_bits);
 	if (bits == 0)
 		return -1;
 
@@ -41,7 +41,7 @@ mbt_picker_random(struct mbt_torrent *t, void *peer, void *ctx)
 	size_t start = arc4random_uniform(bits);
 	for (size_t i = 0; i < bits; i++) {
 		size_t idx = (start + i) % bits;
-		if (tbmap_isset(peer_bits, idx) > 0 && !mbt_torrent_has_piece(t, idx))
+		if (mbt_bitmap_isset(peer_bits, idx) > 0 && !mbt_torrent_has_piece(t, idx))
 			return (int)idx;
 	}
 
