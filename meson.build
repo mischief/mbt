@@ -49,6 +49,7 @@ bt_src = [
   'lsd.c',
   'node.c',
   'remote.c',
+  'session.c',
   'tbmap.c',
 ] + ev_src
 
