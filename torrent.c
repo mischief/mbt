@@ -130,9 +130,17 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		struct piece_info *pi = &t->pieces[i];
 		if (pi->state != MBT_PIECE_ACTIVE)
 			continue;
-		if (pi->last_activity == 0)
-			continue;
-		if (now - pi->last_activity < deadline)
+
+		/* Reset if: owner is gone/banned/choked, or timed out */
+		int stale = 0;
+		if (!pi->owner || !pi->owner->peer || pi->owner->banned)
+			stale = 1;
+		else if (mbt_peer_choked(pi->owner->peer))
+			stale = 1;
+		else if (pi->last_activity && now - pi->last_activity >= deadline)
+			stale = 1;
+
+		if (!stale)
 			continue;
 
 		/* Timed out — reset piece */
