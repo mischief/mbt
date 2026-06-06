@@ -755,6 +755,24 @@ mbt_torrent_complete(struct mbt_torrent *t)
 	return t->piece_count > 0 && t->have_count == t->piece_count;
 }
 
+uint32_t
+mbt_torrent_piece_count(struct mbt_torrent *t)
+{
+	return t->piece_count;
+}
+
+uint32_t
+mbt_torrent_have_count(struct mbt_torrent *t)
+{
+	return t->have_count;
+}
+
+int
+mbt_torrent_peer_count(struct mbt_torrent *t)
+{
+	return t->peer_count;
+}
+
 int
 mbt_torrent_has_metadata(struct mbt_torrent *t)
 {

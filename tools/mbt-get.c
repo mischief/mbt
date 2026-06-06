@@ -75,7 +75,11 @@ on_piece(struct mbt_torrent *t, uint32_t piece, void *arg)
 {
 	(void)arg;
 	(void)piece;
-	fprintf(stderr, "\r%.1f%%", mbt_torrent_progress(t) * 100.0f);
+	fprintf(stderr, "\r%.1f%% [%u/%u pieces, %d peers]",
+	        mbt_torrent_progress(t) * 100.0f,
+	        mbt_torrent_have_count(t),
+	        mbt_torrent_piece_count(t),
+	        mbt_torrent_peer_count(t));
 }
 
 static void
