@@ -87,7 +87,7 @@ struct mbt_torrent {
 };
 
 enum {
-	MAX_HASH_FAILURES = 3,   /* ban after this many consecutive failures */
+	MAX_HASH_FAILURES = 5,   /* ban after this many consecutive failures */
 	ENDGAME_THRESHOLD = 10,  /* enter endgame with this many pieces remaining */
 };
 
@@ -252,6 +252,10 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	if (offset + len > pi->length)
 		return; /* out of bounds */
 
+	/* Ignore duplicate blocks (already have this offset) */
+	if (pi->data && offset < pi->received)
+		return;
+
 	/* Allocate piece buffer on first block */
 	if (!pi->data) {
 		pi->data = malloc(pi->length);
@@ -303,6 +307,9 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			t->have_count++;
 			pi->state = MBT_PIECE_PENDING;
 			pi->owner = NULL;
+
+			/* Reset failure count on success */
+			tp->hash_failures = 0;
 
 			if (t->storage_ops && t->storage_ops->write_piece)
 				t->storage_ops->write_piece(t->storage_ctx, piece, pi->data, pi->length);
