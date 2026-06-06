@@ -204,7 +204,11 @@ on_choke(struct mbt_peer *p, int choked, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
-	mbt_log_debug(MBT_LOG_TORRENT, "on_choke: choked=%d has_pieces=%d", choked, t->pieces != NULL);
+	struct mbt_bitmap *pb = mbt_peer_bitfield(p);
+	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: %s (peer has %zu/%u pieces)",
+	              mbt_peer_addr(p), mbt_peer_port(p),
+	              choked ? "choked us" : "unchoked us",
+	              pb ? mbt_bitmap_count(pb) : 0, t->piece_count);
 
 	if (!choked && t->pieces)
 		torrent_drive_peer(t, tp);
@@ -228,6 +232,10 @@ on_bitfield(struct mbt_peer *p, struct mbt_bitmap *bits, void *arg)
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
+
+	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: bitfield %zu/%u pieces",
+	              mbt_peer_addr(p), mbt_peer_port(p),
+	              mbt_bitmap_count(bits), t->piece_count);
 
 	if (!mbt_peer_choked(p) && t->pieces)
 		torrent_drive_peer(t, tp);
