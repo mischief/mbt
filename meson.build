@@ -82,6 +82,8 @@ test('infohash', infohash_test)
 magnet_test = executable('magnet_test', 'test/magnet_test.c', link_with: [libmbt])
 test('magnet', magnet_test)
 
+tracker_test = executable('tracker_test', 'test/tracker_test.c', link_with: [libmbt], dependencies: deps)
+
 be_test_file = executable('be_test_file', 'test/test_file.c', link_with: [libmbt])
 
 tfiles = [
