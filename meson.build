@@ -108,6 +108,7 @@ test('ev', ev_test)
 
 # Tools
 executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], dependencies: deps)
+executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], dependencies: deps)
 
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt])

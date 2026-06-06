@@ -21,6 +21,7 @@
 #include "log.h"
 #include "lsd.h"
 #include "magnet.h"
+#include "tracker.h"
 
 /* --- Torrent list entry --- */
 
@@ -306,6 +307,25 @@ mbt_session_enable_lsd(struct mbt_session *s)
 	return 0;
 }
 
+/* --- Tracker callbacks --- */
+
+static void
+session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port, void *arg)
+{
+	struct mbt_session *s = arg;
+	mbt_session_add_peer(s, ih, addr, port);
+}
+
+static void
+session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *arg)
+{
+	(void)ih;
+	(void)interval;
+	(void)arg;
+	if (err < 0)
+		mbt_log_warn(MBT_LOG_SESSION, "tracker announce failed: %s", strerror(-err));
+}
+
 /* --- Torrent management --- */
 
 int
@@ -420,6 +440,29 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	t = mbt_session_find_torrent(s, ih);
 	if (t)
 		mbt_torrent_set_metadata(t, info_encoded, info_len);
+
+	/* Announce to tracker if present */
+	struct be_value *announce = be_find(be, "announce");
+	if (announce && announce->type == BE_STRING && t) {
+		char *url = strndup(announce->string.iov_base, announce->string.iov_len);
+		if (url) {
+			if (strncmp(url, "udp://", 6) == 0) {
+				struct mbt_tracker_request treq = {
+					.ev = s->ev,
+					.ih = ih,
+					.peer_id = s->peer_id,
+					.listen_port = s->listen_port,
+					.left = 0, /* TODO: compute from metadata */
+					.peer_cb = session_tracker_peer_cb,
+					.done_cb = session_tracker_done_cb,
+					.arg = s,
+				};
+				mbt_tracker_udp_announce(url, &treq);
+			}
+			/* TODO: http:// tracker */
+			free(url);
+		}
+	}
 
 	mbt_infohash_unref(ih);
 	free(info_encoded);
