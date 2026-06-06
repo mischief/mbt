@@ -143,20 +143,9 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		if (!stale)
 			continue;
 
-		/* Timed out — reset piece */
-		if (pi->owner && pi->owner->peer) {
-			/* Only blame peer if still unchoked (should be delivering) */
-			if (!mbt_peer_choked(pi->owner->peer)) {
-				pi->owner->hash_failures++;
-				if (pi->owner->hash_failures >= MAX_HASH_FAILURES) {
-					mbt_log_warn(MBT_LOG_TORRENT, "disconnecting %s:%hu (unresponsive)",
-					             mbt_peer_addr(pi->owner->peer),
-					             mbt_peer_port(pi->owner->peer));
-					pi->owner->banned = 1;
-					mbt_peer_disconnect(pi->owner->peer);
-				}
-			}
-		}
+		/* Timed out — just reset the piece, don't blame the peer.
+		 * Timeouts happen naturally during choke/unchoke rotation.
+		 * Only hash mismatches should lead to banning. */
 
 		pi->state = MBT_PIECE_PENDING;
 		pi->owner = NULL;
@@ -529,6 +518,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (peer_limit > 0 && peer_limit < limit)
 		limit = peer_limit;
 
+	int sent = 0;
 	while (tp->outstanding < limit) {
 		int idx = t->picker(t, tp->peer, t->picker_ctx);
 		if (idx < 0) {
@@ -580,7 +570,12 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			tp->outstanding++;
 		}
 		pi->requested = off;
+		sent++;
 	}
+
+	if (sent == 0 && tp->outstanding == 0)
+		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer %s:%hu: picker returned -1, nothing to request",
+		              mbt_peer_addr(tp->peer), mbt_peer_port(tp->peer));
 }
 
 static void
