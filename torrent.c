@@ -363,6 +363,15 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (peer_limit > 0 && peer_limit < limit)
 		limit = peer_limit;
 
+	/* Spread work across peers — don't let one peer hog all pieces */
+	if (t->peer_count > 1) {
+		int per_peer = PIPELINE_DEPTH / t->peer_count;
+		if (per_peer < 64)
+			per_peer = 64;
+		if (per_peer < limit)
+			limit = per_peer;
+	}
+
 	while (tp->outstanding < limit) {
 		int idx = t->picker(t, tp->peer, t->picker_ctx);
 		if (idx < 0)
