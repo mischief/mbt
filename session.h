@@ -4,29 +4,20 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "storage.h"
+#include "picker.h"
+
 struct mbt_session;
 struct mbt_ev;
 struct mbt_torrent;
 struct infohash;
-
-/* Storage backend */
-struct mbt_storage_ops {
-	int (*open)(void *ctx, struct mbt_torrent *t);
-	int (*write_piece)(void *ctx, uint32_t index, const void *data, size_t len);
-	int (*read_piece)(void *ctx, uint32_t index, void *buf, size_t len);
-	int (*have_piece)(void *ctx, uint32_t index);
-	void (*close)(void *ctx);
-};
-
-/* Piece picker: returns piece index to request, or -1 */
-typedef int (*mbt_picker_fn)(struct mbt_torrent *t, void *peer, void *ctx);
 
 /* Session configuration — caller's policy choices */
 struct mbt_session_config {
 	struct mbt_ev *ev;
 
 	/* defaults inherited by all torrents (can override per-torrent) */
-	struct mbt_storage_ops *storage_ops;
+	const struct mbt_storage_ops *storage_ops;
 	void *storage_ctx;
 	mbt_picker_fn picker;
 	void *picker_ctx;

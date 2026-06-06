@@ -14,7 +14,7 @@
 struct mbt_session {
 	struct mbt_ev *ev;
 
-	struct mbt_storage_ops *storage_ops;
+	const struct mbt_storage_ops *storage_ops;
 	void *storage_ctx;
 	mbt_picker_fn picker;
 	void *picker_ctx;
