@@ -84,8 +84,9 @@
 
 Working, fuzz-tested, ASan-clean. Ergonomic issues only:
 
+- [ ] Namespace rename: `be_*` → `mbt_be_*`, `struct be_value` → `struct mbt_be_value`
 - [ ] Replace `struct iovec` with `struct { char *data; size_t len; }`
-- [ ] Add `be_dict_append_string(dict, key, buf, len)`
+- [ ] Add `mbt_be_dict_append_string(dict, key, buf, len)`
 - [ ] Single-pass growable-buffer encoder
 - [ ] List access by index
-- [ ] Path-based `be_find`
+- [ ] Path-based `mbt_be_find`
