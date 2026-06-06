@@ -4,36 +4,45 @@ Steps to reach the architecture described in DESIGN.md.
 
 ## Phase 0: Foundation (done)
 
-- [x] Bencode parser (fuzz-tested)
-- [x] Bitmap (tbmap)
-- [x] Infohash type
+- [x] Bencode parser (fuzz-tested, ASan-clean, leak-free)
+- [x] Bitmap (`mbt_bitmap` — bit-accurate sizing, bounds checked)
+- [x] Infohash type (refcounted)
 - [x] LSD multicast
-- [x] Event loop abstraction (sd-event + libevent)
+- [x] Event loop abstraction (sd-event + libevent, caller-owned loops supported)
 - [x] Buffered connection abstraction (mbt_conn)
-- [x] Basic peer wire protocol working end-to-end
-- [x] Meson build with backend selection
+- [x] Wire format helpers (pack.c — tpack/tunpack)
+- [x] Meson build with backend selection (`-Devent_backend=sd-event|libevent`)
+- [x] Logging subsystem (component mask, stderr/syslog/custom callbacks)
 
 ## Phase 1: Clean layering
 
-### 1.1 Split bt.c
-- [x] Extract `tpack`/`tunpack` into `pack.c/h` (wire format helpers)
+### 1.1 Split bt.c (done)
+- [x] Extract `tpack`/`tunpack` into `pack.c/h`
 - [x] New `torrent.c` — piece state, peer callbacks, hash verify, storage/picker
 
-### 1.2 Peer layer
-- [x] Define `mbt_peer_callbacks` (on_active, on_piece, on_bitfield, on_choke, on_have, on_metadata, on_error)
-- [x] `peer.c` takes a connected `mbt_conn`, state machine + callbacks only
+### 1.2 Peer layer (done)
+- [x] `peer.c` — state machine (HANDSHAKE → EXTENSION → ACTIVE → CLOSED)
+- [x] Callbacks up: on_active, on_piece, on_bitfield, on_choke, on_have, on_metadata, on_error
+- [x] Commands down: send_request, send_interested, send_choke, send_cancel, send_have, send_piece
+- [x] Takes connected `mbt_conn`, no TCP logic
 
-### 1.3 Torrent layer
-- [x] Owns peer set (add/remove peers)
-- [x] Piece state machine: pending → active → complete
-- [x] Drives piece requests using picker callback
-- [x] Verifies SHA1 on piece completion
+### 1.3 Torrent layer (done)
+- [x] Owns peer set (add/remove, tracks ownership)
+- [x] Piece state: PENDING → ACTIVE (bitmap is authority for COMPLETE)
+- [x] Drives piece requests via picker, pipeline depth 128
+- [x] SHA1 verification on piece completion
 - [x] Calls storage backend to write verified pieces
 - [x] Metadata fetch (BEP 9) as pre-download phase
+- [x] Piece ownership tracking — reset on peer disconnect
+- [x] Multiple peers per torrent (parallel download)
 
-### 1.4 Session layer
-- [x] Prototype session API (mbt_session_default, add_torrent, enable_lsd)
-- [ ] Implement `mbt_session_add_peer` — async TCP connect → mbt_conn → torrent
+### 1.4 Session layer (done)
+- [x] `mbt_session_default(path)` — zero-config constructor
+- [x] `mbt_session_add_infohash` — create torrent with session defaults
+- [x] `mbt_session_add_torrent_file` — parse .torrent, extract infohash + metadata
+- [x] `mbt_session_add_peer` — async TCP connect → mbt_conn → torrent
+- [x] LSD integration (auto-creates torrents on announce, connects peers)
+- [x] Torrent list management (find, remove)
 
 ### 1.5 Delete legacy code
 Blocked on: bt_test and mbt-lsd rewritten against new API.
@@ -43,28 +52,30 @@ Blocked on: bt_test and mbt-lsd rewritten against new API.
 - [ ] Delete `remote.c`, `remote.h`
 - [ ] Delete `node.c`, `node.h`
 
-## Phase 2: Pluggable backends
+## Phase 2: Pluggable backends (mostly done)
 
 ### 2.1 Storage interface
-- [ ] Define `mbt_storage_ops` (open, write_piece, read_piece, have_piece, close)
-- [ ] `storage_file.c` — single-file (piece_index × piece_length → file offset)
+- [x] Define `mbt_storage_ops` (open, write_piece, read_piece, have_piece, close)
+- [x] `storage_file.c` — download directory, filename from torrent name
 - [ ] `storage_file.c` — multi-file (piece spans across file boundaries)
 - [ ] `storage_memory.c` — for testing
+- [ ] Resume (check existing pieces via SHA1 on startup)
 
 ### 2.2 Piece picker interface
-- [ ] `int (*pick)(torrent, peer, ctx)` → piece index or -1
-- [ ] `picker_sequential.c` — in-order
-- [ ] `picker_random.c` — random available
-- [ ] `picker_rarest.c` — rarest-first from peer bitfields
+- [x] `mbt_picker_fn` typedef
+- [x] `mbt_picker_sequential` — in-order
+- [x] `mbt_picker_random` — random available, skips active
+- [ ] `mbt_picker_rarest` — rarest-first from peer bitfields (stub)
 
-## Phase 3: Complete download
+## Phase 3: Complete download (in progress)
 
-- [ ] End-to-end: LSD announce → connect → metadata → pieces → file on disk
-- [ ] Handle last piece (shorter than piece_length)
-- [ ] Pipeline requests (keep N outstanding per peer)
-- [ ] Multiple peers per torrent (parallel download)
+- [x] End-to-end: connect → metadata → pieces → SHA1 verify → file on disk
+- [x] Handle last piece (shorter than piece_length)
+- [x] Pipeline requests (128 outstanding per peer, across multiple pieces)
+- [x] Multiple peers per torrent
 - [ ] Endgame mode (request remaining from all peers, cancel on receive)
-- [ ] Resume (check existing pieces via storage.have_piece on startup)
+- [ ] Proper piece_length tracking in storage (currently inferred from first write)
+- [ ] Live tested: downloading real torrent from Transmission peers on LAN
 
 ## Phase 4: Seeding
 
