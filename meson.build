@@ -28,10 +28,14 @@ deps += libbsd_dep
 libmd_dep = dependency('libmd')
 deps += libmd_dep
 
+# Optional libevent support
+libevent_dep = dependency('libevent', required: get_option('libevent'))
+
 # Core library
 bt_src = [
   'be.c',
   'bt.c',
+  'ev_sd.c',
   'hex.c',
   'infohash.c',
   'lsd.c',
@@ -41,7 +45,14 @@ bt_src = [
   'tbmap.c',
 ]
 
-libmbt = library('mbt', bt_src, dependencies: deps, install: true)
+bt_deps = deps
+
+if libevent_dep.found()
+  bt_src += 'ev_libevent.c'
+  bt_deps += libevent_dep
+endif
+
+libmbt = library('mbt', bt_src, dependencies: bt_deps, install: true)
 
 # Tests
 tbmap_test = executable('tbmap_test', 'test/tbmap_test.c', link_with: [libmbt])
@@ -63,10 +74,15 @@ foreach t : tfiles
     args: [meson.current_source_dir() / 'test' / 'testdata' / t])
 endforeach
 
-bt_test = executable('bt_test', 'test/bt_test.c', link_with: [libmbt], dependencies: deps)
+bt_test = executable('bt_test', 'test/bt_test.c', link_with: [libmbt], dependencies: bt_deps)
+
+# Event loop test
+ev_test_deps = bt_deps
+ev_test = executable('ev_test', 'test/ev_test.c', link_with: [libmbt], dependencies: ev_test_deps)
+test('ev', ev_test)
 
 # Tools
-executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], dependencies: deps)
+executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], dependencies: bt_deps)
 
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt])

@@ -1,0 +1,1 @@
+option('libevent', type: 'feature', value: 'auto', description: 'libevent2 event loop backend')
