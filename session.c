@@ -353,6 +353,9 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 	/* Schedule re-announce */
 	struct session_torrent *st = session_find(s, ih);
 	if (st && interval > 0) {
+		/* Clamp interval: min 30s, max 15min */
+		if (interval < 30) interval = 30;
+		if (interval > 900) interval = 900;
 		st->announce_interval = interval;
 		if (!st->reannounce_timer) {
 			mbt_ev_timer_new(s->ev, &st->reannounce_timer,
