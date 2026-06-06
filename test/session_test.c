@@ -8,6 +8,7 @@
 #include "infohash.h"
 #include "session.h"
 #include "torrent.h"
+#include "log.h"
 
 static void
 on_piece_complete(struct mbt_torrent *t, uint32_t piece, void *arg)
@@ -36,6 +37,10 @@ main(int argc, char *argv[])
 	uint16_t peer_port = 28888;
 
 	signal(SIGPIPE, SIG_IGN);
+
+	/* Enable logging */
+	mbt_log_set(mbt_log_stderr, NULL);
+	mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_PEER | MBT_LOG_TORRENT);
 
 	rv = mbt_session_default(&s, ".");
 	if (rv < 0)

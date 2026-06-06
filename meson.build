@@ -46,6 +46,7 @@ bt_src = [
   'bt_legacy.c',
   'hex.c',
   'infohash.c',
+  'log.c',
   'lsd.c',
   'node.c',
   'pack.c',

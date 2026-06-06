@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <err.h>
 
 #include <sha1.h>
+
+#include "log.h"
 
 #include "event.h"
 #include "conn.h"
@@ -185,7 +186,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 		if (memcmp(digest, pi->hash, 20) != 0) {
 			/* Hash mismatch — reset piece */
-			warnx("piece %u: hash mismatch, re-requesting", piece);
+			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch, re-requesting", piece);
 			pi->received = 0;
 			pi->state = MBT_PIECE_PENDING;
 			pi->owner = NULL;
@@ -249,7 +250,7 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 
 		/* Compare with our infohash */
 		if (memcmp(digest, t->ih->hash_sha1, 20) != 0) {
-			warnx("metadata hash mismatch, discarding");
+			mbt_log_warn(MBT_LOG_TORRENT, "metadata hash mismatch, discarding");
 			t->metadata_have = 0;
 			memset(t->metadata, 0, t->metadata_len);
 			return;

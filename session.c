@@ -6,7 +6,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <err.h>
 #include <fcntl.h>
 
 #include "event.h"
@@ -14,6 +13,7 @@
 #include "infohash.h"
 #include "torrent.h"
 #include "session.h"
+#include "log.h"
 #include "lsd.h"
 
 /* --- Torrent list entry --- */
@@ -85,11 +85,11 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	slen = sizeof(error);
 	rv = getsockopt(pc->fd, SOL_SOCKET, SO_ERROR, &error, &slen);
 	if (rv < 0 || error != 0) {
-		warnx("connect failed: %s", strerror(error ? error : errno));
+		mbt_log_warn(MBT_LOG_SESSION, "connect failed: %s", strerror(error ? error : errno));
 		goto fail;
 	}
 
-	warnx("connected to peer, creating conn");
+	mbt_log_debug(MBT_LOG_SESSION, "connected to peer");
 
 	/* Free connect watcher before creating conn (conn registers its own) */
 	mbt_ev_io_free(pc->io);
@@ -98,7 +98,7 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	/* Connection succeeded — create mbt_conn */
 	rv = mbt_conn_new(s->ev, &conn, pc->fd, NULL, NULL, NULL);
 	if (rv < 0) {
-		warnx("mbt_conn_new failed: %s", strerror(-rv));
+		mbt_log_warn(MBT_LOG_SESSION, "mbt_conn_new failed: %s", strerror(-rv));
 		goto fail;
 	}
 
