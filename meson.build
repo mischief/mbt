@@ -49,6 +49,7 @@ bt_src = [
   'lsd.c',
   'node.c',
   'pack.c',
+  'peer.c',
   'picker.c',
   'remote.c',
   'session.c',

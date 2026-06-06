@@ -1,0 +1,642 @@
+#include <sys/param.h>
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <err.h>
+
+#include "event.h"
+#include "conn.h"
+#include "infohash.h"
+#include "pack.h"
+#include "peer.h"
+#include "tbmap.h"
+#include "be.h"
+
+enum {
+	HANDSHAKE_SIZE = 1 + 19 + 8 + 20 + 20, /* 68 */
+	METADATA_BLOCKSIZE = 1 << 14,
+};
+
+struct mbt_peer {
+	enum mbt_peer_state state;
+	struct mbt_ev *ev;
+	struct mbt_conn *conn;
+	struct mbt_ev_timer *timer;
+	struct mbt_ev_timer *defer;
+
+	struct infohash *ih;
+	uint8_t our_id[20];
+	uint8_t their_id[20];
+	uint8_t ext[8];
+
+	struct mbt_peer_callbacks cb;
+	void *cb_arg;
+
+	/* choke/interest state */
+	int peer_choking;   /* they are choking us */
+	int peer_interested;
+	int am_interested;
+	int am_choking;
+
+	/* extension protocol */
+	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
+	size_t metadata_size;
+
+	/* bitfield */
+	struct tbmap *bitfield;
+
+	/* message framing */
+	size_t msglen;
+};
+
+/* --- Internal helpers --- */
+
+static ssize_t
+peer_write(struct mbt_peer *p, const void *buf, size_t len)
+{
+	return mbt_conn_write(p->conn, buf, len);
+}
+
+static ssize_t
+peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
+{
+	unsigned char prefix[4];
+	tpack(prefix, "l", (uint32_t)len);
+	if (mbt_conn_write(p->conn, prefix, 4) < 0)
+		return -EIO;
+	if (mbt_conn_write(p->conn, buf, len) < 0)
+		return -EIO;
+	return 0;
+}
+
+static void
+peer_error(struct mbt_peer *p, int err)
+{
+	p->state = MBT_PEER_CLOSED;
+	if (p->cb.on_error)
+		p->cb.on_error(p, err, p->cb_arg);
+}
+
+/* --- Keepalive timer --- */
+
+static void
+peer_keepalive_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_peer *p = v;
+	mbt_ev_timer_mod(timer, 60 * 1000000ULL);
+	peer_write(p, "\0\0\0\0", 4);
+}
+
+/* --- Handshake --- */
+
+static int
+peer_send_handshake(struct mbt_peer *p)
+{
+	unsigned char buf[HANDSHAKE_SIZE];
+	unsigned char ext[8] = {0};
+	int o = 0, rv;
+
+	/* BEP 10 */
+	ext[5] |= 0x10;
+
+	rv = tpack(buf, "b*", 19, (size_t)19, "BitTorrent protocol");
+	o += rv;
+	rv = tpack(buf + o, "*", (size_t)8, ext);
+	o += rv;
+	rv = tpack(buf + o, "*", (size_t)20, p->ih->hash_sha1);
+	o += rv;
+	rv = tpack(buf + o, "*", (size_t)20, p->our_id);
+	o += rv;
+
+	if (peer_write(p, buf, o) < 0)
+		return -EIO;
+
+	return 0;
+}
+
+static int
+peer_recv_handshake(struct mbt_peer *p)
+{
+	unsigned char buf[HANDSHAKE_SIZE];
+	unsigned char proto[19], hash[20];
+	uint32_t pstrlen;
+	int off = 0, rv;
+
+	rv = mbt_conn_read(p->conn, buf, HANDSHAKE_SIZE);
+	if (rv != HANDSHAKE_SIZE)
+		return -ENOMSG;
+
+	rv = tunpack(buf, "b*", &pstrlen, 19, proto);
+	off += rv;
+
+	if (pstrlen != 19 || memcmp(proto, "BitTorrent protocol", 19) != 0)
+		return -ENOMSG;
+
+	rv = tunpack(buf + off, "*", 8, p->ext);
+	off += rv;
+
+	rv = tunpack(buf + off, "*", 20, hash);
+	off += rv;
+
+	if (memcmp(hash, p->ih->hash_sha1, 20) != 0)
+		return -ENOMSG; /* wrong infohash */
+
+	rv = tunpack(buf + off, "*", 20, p->their_id);
+	off += rv;
+
+	return 0;
+}
+
+static int
+peer_send_extension_handshake(struct mbt_peer *p)
+{
+	__attribute__((cleanup(be_value_freep))) struct be_value *be = NULL;
+	struct be_value *m = NULL;
+	unsigned char *encoded;
+	unsigned char packed[64];
+	size_t sz;
+	int rv;
+
+	be_dict_new(&be);
+	be_dict_new(&m);
+	be_dict_append(be, "m", m);
+	be_dict_append_number(m, "ut_metadata", 3);
+
+	rv = be_value_encode(be, &encoded, &sz);
+	if (rv < 0)
+		return rv;
+
+	rv = tpack(packed, "bb*", (int)20, (int)0, sz, encoded);
+	free(encoded);
+	if (rv < 0)
+		return rv;
+
+	return peer_write_msg(p, packed, rv);
+}
+
+static int
+peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
+{
+	unsigned char buf[1024];
+	__attribute__((cleanup(be_value_freep))) struct be_value *be = NULL;
+	struct be_value *tmp;
+	ssize_t rd;
+	int rv;
+
+	rd = mbt_conn_read(p->conn, buf, MIN(sizeof(buf), len));
+	if (rd <= 0)
+		return -ENOMSG;
+
+	rv = be_value_parse(buf, rd, &be);
+	if (rv < 0)
+		return rv;
+
+	tmp = be_find(be, "m");
+	if (tmp) {
+		struct be_value *utm = be_find(tmp, "ut_metadata");
+		if (utm && utm->type == BE_INTEGER)
+			p->ut_metadata_id = (uint8_t)utm->integer;
+	}
+
+	tmp = be_find(be, "metadata_size");
+	if (tmp && tmp->type == BE_INTEGER && tmp->integer > 0)
+		p->metadata_size = (size_t)tmp->integer;
+
+	return 0;
+}
+
+/* --- Message dispatch (ACTIVE state) --- */
+
+static int
+peer_rx_message(struct mbt_peer *p)
+{
+	uint8_t cmd;
+	ssize_t sz;
+	uint32_t length, piece, offset, req_len;
+	unsigned char lenbuf[4];
+	unsigned char buf[4096];
+	int rv;
+
+	if (!p->msglen) {
+		sz = mbt_conn_read(p->conn, lenbuf, 4);
+		assert(sz == 4);
+		tunpack(lenbuf, "l", &length);
+
+		if (length == 0)
+			return 0; /* keepalive */
+
+		if (length > (1 << 18))
+			return -ENOMSG;
+
+		p->msglen = length;
+		mbt_conn_set_watermark(p->conn, p->msglen);
+		return 0;
+	}
+
+	sz = mbt_conn_read(p->conn, &cmd, 1);
+	assert(sz == 1);
+	p->msglen -= 1;
+
+	switch (cmd) {
+	case 0: /* choke */
+		p->peer_choking = 1;
+		if (p->cb.on_choke)
+			p->cb.on_choke(p, 1, p->cb_arg);
+		break;
+
+	case 1: /* unchoke */
+		p->peer_choking = 0;
+		if (p->cb.on_choke)
+			p->cb.on_choke(p, 0, p->cb_arg);
+		break;
+
+	case 2: /* interested */
+		p->peer_interested = 1;
+		if (p->cb.on_interest)
+			p->cb.on_interest(p, 1, p->cb_arg);
+		break;
+
+	case 3: /* not interested */
+		p->peer_interested = 0;
+		if (p->cb.on_interest)
+			p->cb.on_interest(p, 0, p->cb_arg);
+		break;
+
+	case 4: /* have */
+		sz = mbt_conn_read(p->conn, buf, 4);
+		tunpack(buf, "l", &piece);
+		if (p->cb.on_have)
+			p->cb.on_have(p, piece, p->cb_arg);
+		break;
+
+	case 5: /* bitfield */
+		assert(p->msglen <= sizeof(buf));
+		sz = mbt_conn_read(p->conn, buf, p->msglen);
+		tbmap_unref(p->bitfield);
+		tbmap_fromarray(&p->bitfield, buf, sz);
+		if (p->cb.on_bitfield)
+			p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
+		break;
+
+	case 6: /* request */
+		sz = mbt_conn_read(p->conn, buf, 12);
+		tunpack(buf, "lll", &piece, &offset, &req_len);
+		if (p->cb.on_request)
+			p->cb.on_request(p, piece, offset, req_len, p->cb_arg);
+		break;
+
+	case 7: { /* piece */
+		unsigned char hdr[8];
+		sz = mbt_conn_read(p->conn, hdr, 8);
+		tunpack(hdr, "ll", &piece, &offset);
+		size_t data_len = p->msglen - 8;
+		unsigned char *data = malloc(data_len);
+		if (!data) return -ENOMEM;
+		sz = mbt_conn_read(p->conn, data, data_len);
+		if (p->cb.on_piece)
+			p->cb.on_piece(p, piece, offset, data, data_len, p->cb_arg);
+		free(data);
+		break;
+	}
+
+	case 20: { /* extension */
+		uint8_t extcmd;
+		sz = mbt_conn_read(p->conn, &extcmd, 1);
+		p->msglen -= 1;
+
+		if (extcmd == 0) {
+			/* extension handshake (can arrive again) */
+			peer_recv_extension_handshake(p, p->msglen);
+		} else if (p->ut_metadata_id && extcmd == 3) {
+			/* ut_metadata data for us */
+			unsigned char *mbuf = malloc(p->msglen);
+			if (!mbuf) return -ENOMEM;
+			sz = mbt_conn_read(p->conn, mbuf, p->msglen);
+
+			/* Parse bencode prefix to find piece number, data follows */
+			__attribute__((cleanup(be_value_freep))) struct be_value *be = NULL;
+			rv = be_value_parse(mbuf, sz, &be);
+			if (rv > 0) {
+				struct be_value *pt = be_find(be, "piece");
+				if (pt && pt->type == BE_INTEGER) {
+					size_t data_off = rv;
+					if (p->cb.on_metadata)
+						p->cb.on_metadata(p, (int)pt->integer,
+						                  mbuf + data_off, sz - data_off, p->cb_arg);
+				}
+			}
+			free(mbuf);
+		} else {
+			/* unknown extension, discard */
+			if (p->msglen > 0) {
+				unsigned char discard[1024];
+				size_t rem = p->msglen;
+				while (rem > 0) {
+					size_t chunk = rem < sizeof(discard) ? rem : sizeof(discard);
+					mbt_conn_read(p->conn, discard, chunk);
+					rem -= chunk;
+				}
+			}
+		}
+		break;
+	}
+
+	default:
+		/* unknown message, discard payload */
+		if (p->msglen > 0) {
+			unsigned char discard[1024];
+			size_t rem = p->msglen;
+			while (rem > 0) {
+				size_t chunk = rem < sizeof(discard) ? rem : sizeof(discard);
+				mbt_conn_read(p->conn, discard, chunk);
+				rem -= chunk;
+			}
+		}
+		break;
+	}
+
+	p->msglen = 0;
+	mbt_conn_set_watermark(p->conn, 4);
+	return 0;
+}
+
+/* --- Connection callbacks --- */
+
+static void
+peer_on_read(struct mbt_conn *c, void *v)
+{
+	struct mbt_peer *p = v;
+	int rv;
+
+	(void)c;
+
+	switch (p->state) {
+	case MBT_PEER_HANDSHAKE:
+		rv = peer_recv_handshake(p);
+		if (rv < 0) {
+			peer_error(p, rv);
+			return;
+		}
+
+		if (p->ext[5] & 0x10) {
+			/* Peer supports BEP 10 — wait for their extension handshake */
+			p->state = MBT_PEER_EXTENSION;
+			mbt_conn_set_watermark(p->conn, 4);
+		} else {
+			/* No extensions, go active */
+			p->state = MBT_PEER_ACTIVE;
+			mbt_conn_set_watermark(p->conn, 4);
+			if (p->cb.on_active)
+				p->cb.on_active(p, p->cb_arg);
+		}
+		break;
+
+	case MBT_PEER_EXTENSION: {
+		/* Read the message, check if it's extension handshake */
+		uint32_t length;
+		uint8_t cmd, extcmd;
+		unsigned char lenbuf[4];
+		ssize_t sz;
+
+		sz = mbt_conn_read(p->conn, lenbuf, 4);
+		if (sz != 4) { peer_error(p, -EIO); return; }
+		tunpack(lenbuf, "l", &length);
+
+		if (length < 2) { peer_error(p, -ENOMSG); return; }
+
+		sz = mbt_conn_read(p->conn, &cmd, 1);
+		if (cmd != 20) {
+			/* Not extension — might be bitfield etc. Buffer for later? For now skip */
+			/* Actually we should handle it. Simplification: go active, replay. */
+			/* TODO: handle pre-active messages properly */
+			p->state = MBT_PEER_ACTIVE;
+			mbt_conn_set_watermark(p->conn, 4);
+			if (p->cb.on_active)
+				p->cb.on_active(p, p->cb_arg);
+			break;
+		}
+
+		sz = mbt_conn_read(p->conn, &extcmd, 1);
+		if (extcmd == 0) {
+			peer_recv_extension_handshake(p, length - 2);
+		}
+
+		/* Send our extension handshake + interested */
+		peer_send_extension_handshake(p);
+
+		p->state = MBT_PEER_ACTIVE;
+		mbt_conn_set_watermark(p->conn, 4);
+		if (p->cb.on_active)
+			p->cb.on_active(p, p->cb_arg);
+		break;
+	}
+
+	case MBT_PEER_ACTIVE:
+		rv = peer_rx_message(p);
+		if (rv < 0) {
+			peer_error(p, rv);
+			return;
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+
+static void
+peer_on_event(struct mbt_conn *c, int err, void *v)
+{
+	struct mbt_peer *p = v;
+	(void)c;
+	peer_error(p, err);
+}
+
+/* --- Public API --- */
+
+int
+mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
+             struct infohash *ih, const uint8_t peer_id[20],
+             struct mbt_peer_callbacks *cb, void *arg)
+{
+	struct mbt_peer *p;
+	int rv;
+
+	p = calloc(1, sizeof(*p));
+	if (!p)
+		return -ENOMEM;
+
+	p->ev = ev;
+	p->conn = conn;
+	p->ih = infohash_ref(ih);
+	memcpy(p->our_id, peer_id, 20);
+	p->cb = *cb;
+	p->cb_arg = arg;
+	p->peer_choking = 1;
+	p->am_choking = 1;
+	p->state = MBT_PEER_HANDSHAKE;
+
+	/* Point conn callbacks to this peer */
+	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);
+	mbt_conn_set_watermark(p->conn, HANDSHAKE_SIZE);
+
+	rv = peer_send_handshake(p);
+	if (rv < 0) {
+		free(p);
+		return rv;
+	}
+
+	/* Keepalive timer */
+	rv = mbt_ev_timer_new(ev, &p->timer, 120 * 1000000ULL, peer_keepalive_cb, p);
+	if (rv < 0) {
+		free(p);
+		return rv;
+	}
+
+	*out = p;
+	return 0;
+}
+
+void
+mbt_peer_free(struct mbt_peer *p)
+{
+	if (!p)
+		return;
+
+	if (p->timer)
+		mbt_ev_timer_free(p->timer);
+	if (p->defer)
+		mbt_ev_timer_free(p->defer);
+	if (p->conn)
+		mbt_conn_free(p->conn);
+
+	infohash_unref(p->ih);
+	tbmap_unref(p->bitfield);
+	free(p);
+}
+
+enum mbt_peer_state
+mbt_peer_state(struct mbt_peer *p)
+{
+	return p->state;
+}
+
+int
+mbt_peer_choked(struct mbt_peer *p)
+{
+	return p->peer_choking;
+}
+
+int
+mbt_peer_interested(struct mbt_peer *p)
+{
+	return p->am_interested;
+}
+
+struct tbmap *
+mbt_peer_bitfield(struct mbt_peer *p)
+{
+	return p->bitfield;
+}
+
+int
+mbt_peer_has_extension(struct mbt_peer *p)
+{
+	return p->ext[5] & 0x10;
+}
+
+size_t
+mbt_peer_metadata_size(struct mbt_peer *p)
+{
+	return p->metadata_size;
+}
+
+/* --- Send commands --- */
+
+int
+mbt_peer_send_interested(struct mbt_peer *p, int interested)
+{
+	uint8_t msg = interested ? 2 : 3;
+	unsigned char buf[5];
+	tpack(buf, "lb", (uint32_t)1, (int)msg);
+	p->am_interested = interested;
+	return peer_write(p, buf, 5) < 0 ? -EIO : 0;
+}
+
+int
+mbt_peer_send_choke(struct mbt_peer *p, int choke)
+{
+	uint8_t msg = choke ? 0 : 1;
+	unsigned char buf[5];
+	tpack(buf, "lb", (uint32_t)1, (int)msg);
+	p->am_choking = choke;
+	return peer_write(p, buf, 5) < 0 ? -EIO : 0;
+}
+
+int
+mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length)
+{
+	unsigned char buf[1 + 4 + 4 + 4];
+	int rv = tpack(buf, "blll", (int)6, piece, offset, length);
+	return peer_write_msg(p, buf, rv);
+}
+
+int
+mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length)
+{
+	unsigned char buf[1 + 4 + 4 + 4];
+	int rv = tpack(buf, "blll", (int)8, piece, offset, length);
+	return peer_write_msg(p, buf, rv);
+}
+
+int
+mbt_peer_send_have(struct mbt_peer *p, uint32_t piece)
+{
+	unsigned char buf[1 + 4];
+	int rv = tpack(buf, "bl", (int)4, piece);
+	return peer_write_msg(p, buf, rv);
+}
+
+int
+mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
+                    const void *data, size_t len)
+{
+	unsigned char hdr[4 + 1 + 4 + 4];
+	uint32_t msg_len = 1 + 4 + 4 + len;
+	tpack(hdr, "lbll", msg_len, (int)7, piece, offset);
+	if (mbt_conn_write(p->conn, hdr, sizeof(hdr)) < 0)
+		return -EIO;
+	if (mbt_conn_write(p->conn, data, len) < 0)
+		return -EIO;
+	return 0;
+}
+
+int
+mbt_peer_send_metadata_request(struct mbt_peer *p, int piece)
+{
+	__attribute__((cleanup(be_value_freep))) struct be_value *v = NULL;
+	unsigned char *encoded;
+	unsigned char packed[64];
+	size_t sz;
+	int rv;
+
+	if (!p->ut_metadata_id)
+		return -ENOTSUP;
+
+	be_dict_new(&v);
+	be_dict_append_number(v, "msg_type", 0);
+	be_dict_append_number(v, "piece", piece);
+
+	rv = be_value_encode(v, &encoded, &sz);
+	if (rv < 0)
+		return rv;
+
+	rv = tpack(packed, "bb*", (int)20, (int)p->ut_metadata_id, sz, encoded);
+	free(encoded);
+	if (rv < 0)
+		return rv;
+
+	return peer_write_msg(p, packed, rv);
+}

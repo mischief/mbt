@@ -112,6 +112,16 @@ static const struct mbt_conn_ops conn_lev_ops = {
 	.free          = conn_lev_free,
 };
 
+void
+mbt_conn_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
+                       mbt_conn_event_cb eventcb, void *arg)
+{
+	struct conn_lev *c = (struct conn_lev *)conn;
+	c->readcb = readcb;
+	c->eventcb = eventcb;
+	c->arg = arg;
+}
+
 int
 mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
              mbt_conn_read_cb readcb, mbt_conn_event_cb eventcb, void *arg)

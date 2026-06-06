@@ -102,6 +102,16 @@ static const struct mbt_conn_ops conn_sd_ops = {
 	.free          = conn_sd_free,
 };
 
+void
+mbt_conn_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
+                       mbt_conn_event_cb eventcb, void *arg)
+{
+	struct conn_sd *c = (struct conn_sd *)conn;
+	c->readcb = readcb;
+	c->eventcb = eventcb;
+	c->arg = arg;
+}
+
 /* Access the underlying sd_event* from our ev_sd backend */
 struct ev_sd {
 	struct mbt_ev base;
