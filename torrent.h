@@ -55,5 +55,6 @@ struct infohash *mbt_torrent_infohash(struct mbt_torrent *t);
 float mbt_torrent_progress(struct mbt_torrent *t);
 int mbt_torrent_complete(struct mbt_torrent *t);
 int mbt_torrent_has_metadata(struct mbt_torrent *t);
+int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);
 
 #endif

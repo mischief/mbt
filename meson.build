@@ -91,6 +91,9 @@ endforeach
 
 bt_test = executable('bt_test', 'test/bt_test.c', link_with: [libmbt], dependencies: deps)
 
+# New session-based test
+session_test = executable('session_test', 'test/session_test.c', link_with: [libmbt], dependencies: deps)
+
 # Event loop test
 ev_test = executable('ev_test', 'test/ev_test.c', link_with: [libmbt], dependencies: deps)
 test('ev', ev_test)

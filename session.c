@@ -84,13 +84,23 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	slen = sizeof(error);
 	rv = getsockopt(pc->fd, SOL_SOCKET, SO_ERROR, &error, &slen);
-	if (rv < 0 || error != 0)
+	if (rv < 0 || error != 0) {
+		warnx("connect failed: %s", strerror(error ? error : errno));
 		goto fail;
+	}
+
+	warnx("connected to peer, creating conn");
+
+	/* Free connect watcher before creating conn (conn registers its own) */
+	mbt_ev_io_free(pc->io);
+	pc->io = NULL;
 
 	/* Connection succeeded — create mbt_conn */
 	rv = mbt_conn_new(s->ev, &conn, pc->fd, NULL, NULL, NULL);
-	if (rv < 0)
+	if (rv < 0) {
+		warnx("mbt_conn_new failed: %s", strerror(-rv));
 		goto fail;
+	}
 
 	/* Hand to torrent — torrent takes ownership of conn */
 	rv = mbt_torrent_add_peer(pc->torrent, conn);
@@ -100,14 +110,14 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	}
 
 	/* Clean up pending */
-	mbt_ev_io_free(pc->io);
 	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
 	free(pc);
 	return;
 
 fail:
 	close(pc->fd);
-	mbt_ev_io_free(pc->io);
+	if (pc->io)
+		mbt_ev_io_free(pc->io);
 	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
 	free(pc);
 }

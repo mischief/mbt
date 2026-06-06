@@ -74,6 +74,7 @@ peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 static void
 peer_error(struct mbt_peer *p, int err)
 {
+	warnx("peer: error %d", err);
 	p->state = MBT_PEER_CLOSED;
 	if (p->cb.on_error)
 		p->cb.on_error(p, err, p->cb_arg);
@@ -374,6 +375,8 @@ peer_on_read(struct mbt_conn *c, void *v)
 	int rv;
 
 	(void)c;
+
+	warnx("peer_on_read: state=%d avail=%zu", p->state, mbt_conn_available(p->conn));
 
 	switch (p->state) {
 	case MBT_PEER_HANDSHAKE:

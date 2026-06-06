@@ -535,3 +535,11 @@ mbt_torrent_has_metadata(struct mbt_torrent *t)
 {
 	return t->pieces != NULL;
 }
+
+int
+mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece)
+{
+	if (!t->pieces || piece >= t->piece_count)
+		return 0;
+	return t->pieces[piece].state == MBT_PIECE_COMPLETE;
+}
