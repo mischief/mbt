@@ -37,6 +37,7 @@ struct session_torrent {
 	int tracker_count;
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
+	time_t last_dht_lookup;
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -135,6 +136,15 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 				break;
 			pe->state = MBT_PEERDB_CONNECTING;
 			mbt_session_add_peer(s, st->ih, pe->addr, pe->port);
+		}
+
+		/* DHT re-lookup every 5 min if incomplete and few peers */
+		if (s->dht && !mbt_torrent_complete(st->torrent)) {
+			time_t now = time(NULL);
+			if (now - st->last_dht_lookup >= 300) {
+				st->last_dht_lookup = now;
+				mbt_session_dht_get_peers(s, st->ih);
+			}
 		}
 	}
 
