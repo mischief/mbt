@@ -201,7 +201,7 @@ on_active(struct mbt_peer *p, void *arg)
 	mbt_log_debug(MBT_LOG_TORRENT, "on_active: metadata=%p metadata_size=%zu",
 	              (void *)t->metadata, mbt_peer_metadata_size(p));
 
-	/* Send bitfield if we have any pieces */
+	/* Send bitfield if we have pieces */
 	if (t->have && mbt_bitmap_count(t->have) > 0)
 		mbt_peer_send_bitfield(p, t->have);
 
@@ -357,6 +357,10 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu",
 			             piece, mbt_peer_addr(p), mbt_peer_port(p));
+
+			/* Broadcast HAVE to all connected peers */
+			for (struct torrent_peer *hp = t->peers; hp; hp = hp->next)
+				mbt_peer_send_have(hp->peer, piece);
 
 			if (t->cb.on_piece_complete)
 				t->cb.on_piece_complete(t, piece, t->cb_arg);
@@ -524,6 +528,31 @@ on_pex(struct mbt_peer *p, const char *addr, uint16_t port, void *arg)
 }
 
 static void
+on_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, void *arg)
+{
+	struct mbt_torrent *t = arg;
+	(void)offset; (void)length;
+
+	if (piece >= t->piece_count) return;
+	struct piece_info *pi = &t->pieces[piece];
+
+	/* Reset piece if this peer owned it */
+	struct torrent_peer *tp = find_torrent_peer(t, p);
+	if (tp && pi->owner == tp) {
+		pi->state = MBT_PIECE_PENDING;
+		pi->owner = NULL;
+		pi->requested = 0;
+		pi->received = 0;
+		tp->outstanding--;
+		/* Try to re-request from someone else */
+		for (struct torrent_peer *op = t->peers; op; op = op->next) {
+			if (op != tp && !mbt_peer_choked(op->peer))
+				torrent_drive_peer(t, op);
+		}
+	}
+}
+
+static void
 on_error(struct mbt_peer *p, int err, void *arg)
 {
 	struct mbt_torrent *t = arg;
@@ -577,6 +606,7 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 	.on_metadata_request = on_metadata_request,
 	.on_interest = on_interest,
 	.on_request  = on_request,
+	.on_reject   = on_reject,
 	.on_error    = on_error,
 	.on_pex      = on_pex,
 };

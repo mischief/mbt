@@ -63,6 +63,10 @@ struct mbt_peer_callbacks {
 
 	/* PEX: peer exchange — new peer discovered */
 	void (*on_pex)(struct mbt_peer *p, const char *addr, uint16_t port, void *arg);
+
+	/* BEP 6 Fast: peer rejected our request */
+	void (*on_reject)(struct mbt_peer *p, uint32_t piece, uint32_t offset,
+	                  uint32_t length, void *arg);
 };
 
 /* Create peer from a connected mbt_conn (takes ownership of conn) */
@@ -99,6 +103,7 @@ int mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, u
 int mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length);
 int mbt_peer_send_have(struct mbt_peer *p, uint32_t piece);
 int mbt_peer_send_bitfield(struct mbt_peer *p, struct mbt_bitmap *bm);
+int mbt_peer_send_msg(struct mbt_peer *p, const void *buf, size_t len);
 int mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
                         const void *data, size_t len);
 

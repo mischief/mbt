@@ -110,6 +110,8 @@ peer_send_handshake(struct mbt_peer *p)
 
 	/* BEP 10 */
 	ext[5] |= 0x10;
+	/* BEP 6 Fast Extension */
+	ext[7] |= 0x04;
 
 	rv = mbt_pack(buf, "b*", 19, (size_t)19, "BitTorrent protocol");
 	o += rv;
@@ -417,6 +419,49 @@ peer_rx_message(struct mbt_peer *p)
 	}
 
 	default:
+		/* BEP 6 Fast Extension messages */
+		if (cmd == 14 && (p->flags & MBT_PEER_FLAG_FAST)) {
+			/* HAVE_ALL — peer has everything */
+			if (p->piece_count == 0) break; /* can't set bits without knowing count */
+			if (p->bitfield)
+				mbt_bitmap_unref(p->bitfield);
+			mbt_bitmap_new_bits(&p->bitfield, p->piece_count);
+			for (uint32_t i = 0; i < p->piece_count; i++)
+				mbt_bitmap_set(p->bitfield, i);
+			if (p->cb.on_bitfield)
+				p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
+			break;
+		}
+		if (cmd == 15 && (p->flags & MBT_PEER_FLAG_FAST)) {
+			/* HAVE_NONE — peer has nothing */
+			if (p->piece_count == 0) break;
+			if (p->bitfield)
+				mbt_bitmap_unref(p->bitfield);
+			mbt_bitmap_new_bits(&p->bitfield, p->piece_count);
+			if (p->cb.on_bitfield)
+				p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
+			break;
+		}
+		if (cmd == 16 && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 12) {
+			/* REJECT_REQUEST — peer won't serve this block */
+			unsigned char rj[12];
+			mbt_conn_read(p->conn, rj, 12);
+			p->msglen -= 12;
+			uint32_t rpiece, roffset, rlen;
+			mbt_unpack(rj, "lll", &rpiece, &roffset, &rlen);
+			if (p->cb.on_reject)
+				p->cb.on_reject(p, rpiece, roffset, rlen, p->cb_arg);
+			break;
+		}
+		if (cmd == 17 && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 4) {
+			/* ALLOWED_FAST — piece we can request while choked */
+			unsigned char af[4];
+			mbt_conn_read(p->conn, af, 4);
+			p->msglen -= 4;
+			/* Store or just log — for now ignore (we still request normally) */
+			break;
+		}
+
 		/* unknown message, discard payload */
 		if (p->msglen > 0) {
 			unsigned char discard[1024];
@@ -823,6 +868,12 @@ mbt_peer_send_bitfield(struct mbt_peer *p, struct mbt_bitmap *bm)
 	int rv = peer_write_msg(p, buf, 1 + bytes);
 	free(buf);
 	return rv;
+}
+
+int
+mbt_peer_send_msg(struct mbt_peer *p, const void *buf, size_t len)
+{
+	return peer_write_msg(p, buf, len);
 }
 
 int
