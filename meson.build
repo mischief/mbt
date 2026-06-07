@@ -54,6 +54,7 @@ bt_src = [
   'picker.c',
   'session.c',
   'storage_file.c',
+  'storage_memory.c',
   'bitmap.c',
   'torrent.c',
   'tracker_http.c',
