@@ -40,6 +40,8 @@
 - [x] Auto-announce to trackers from .torrent announce-list (BEP 12)
 - [x] Re-announce timer (clamped 30s–15min)
 - [x] Peer pool + maintenance timer for refill
+- [x] PEX receive (BEP 11) — parse incoming ut_pex, insert into peerdb
+- [ ] PEX send — batch connected peers, send ut_pex every 60s to all peers
 - [ ] DHT (BEP 5) — future
 - [ ] PEX (BEP 11) — future
 
