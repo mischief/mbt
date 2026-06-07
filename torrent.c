@@ -316,9 +316,6 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	/* Allocate piece buffer on first block */
 	if (!pi->data) {
-		uint32_t max_active = 64 * 1024 * 1024 / (t->piece_length ? t->piece_length : 262144);
-		if (max_active < 8) max_active = 8;
-		if (t->active_pieces >= max_active) return; /* cap at ~64MB */
 		pi->data = calloc(1, pi->length);
 		if (!pi->data) return;
 		t->active_pieces++;
@@ -672,7 +669,18 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 
 	int sent = 0;
 	while (tp->outstanding < limit) {
-		int idx = t->picker(t, tp->peer, t->picker_ctx);
+		/* Prefer continuing a piece this peer already owns */
+		int idx = -1;
+		for (uint32_t i = 0; i < t->piece_count; i++) {
+			if (t->pieces[i].owner == tp && t->pieces[i].state == MBT_PIECE_ACTIVE &&
+			    t->pieces[i].requested < t->pieces[i].length) {
+				idx = i;
+				break;
+			}
+		}
+		/* If no existing piece, pick a new one */
+		if (idx < 0)
+			idx = t->picker(t, tp->peer, t->picker_ctx);
 		if (idx < 0) {
 			/* Check if we should enter endgame */
 			if (!t->endgame && t->piece_count > 0) {
