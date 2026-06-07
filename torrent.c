@@ -16,6 +16,7 @@
 #include "mbt/bitmap.h"
 #include "mbt/peerdb.h"
 #include "mbt/be.h"
+#include "mbt/picker.h"
 
 enum {
 	BLOCK_SIZE = 16384,
@@ -399,6 +400,8 @@ static void
 on_metadata_request(struct mbt_peer *p, int piece, void *arg)
 {
 	struct mbt_torrent *t = arg;
+	mbt_log_debug(MBT_LOG_TORRENT, "on_metadata_request piece=%d metadata=%p len=%zu",
+	              piece, (void*)t->metadata, t->metadata_len);
 	if (!t->metadata || t->metadata_len == 0)
 		return;
 
@@ -585,6 +588,8 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
 	if (!t->pieces || mbt_peer_choked(tp->peer))
 		return;
+	if (t->have_count == t->piece_count)
+		return; /* complete — nothing to request */
 
 	int limit = 512; /* default if peer doesn't advertise reqq */
 	int peer_limit = mbt_peer_reqq(tp->peer);
@@ -656,8 +661,11 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 static void
 torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp)
 {
-	for (int i = 0; i < t->metadata_pieces; i++)
-		mbt_peer_send_metadata_request(tp->peer, i);
+	mbt_log_debug(MBT_LOG_TORRENT, "requesting %d metadata pieces", t->metadata_pieces);
+	for (int i = 0; i < t->metadata_pieces; i++) {
+		int rv = mbt_peer_send_metadata_request(tp->peer, i);
+		mbt_log_debug(MBT_LOG_TORRENT, "metadata request piece %d: rv=%d", i, rv);
+	}
 }
 
 /* --- Public API --- */
@@ -676,7 +684,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	memcpy(t->peer_id, cfg->peer_id, 20);
 	t->storage_ops = cfg->storage_ops;
 	t->storage_ctx = cfg->storage_ctx;
-	t->picker = cfg->picker;
+	t->picker = cfg->picker ? cfg->picker : mbt_picker_random;
 	t->picker_ctx = cfg->picker_ctx;
 	t->request_timeout_sec = cfg->request_timeout_sec ? cfg->request_timeout_sec : 15;
 

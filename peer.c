@@ -278,6 +278,9 @@ peer_rx_message(struct mbt_peer *p)
 		return -EIO;
 	p->msglen -= 1;
 
+	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: rx cmd=%d msglen=%u",
+	              p->addr, p->port, cmd, p->msglen);
+
 	switch (cmd) {
 	case 0: /* choke */
 		p->peer_choking = 1;
