@@ -65,6 +65,7 @@ libmbt = library('mbt', bt_src, dependencies: deps, install: true,
                  link_depends: files('libmbt.map'))
 
 install_headers(
+  'mbt.h',
   'be.h',
   'bitmap.h',
   'conn.h',
