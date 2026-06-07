@@ -440,36 +440,18 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 
 	mbt_be_dict_append(root, "info", info);
 
-	int rv = mbt_be_value_encode(root, out, len);
-	mbt_be_value_free(root);
-
-	/* Compute raw_info and infohash from the encoded output */
-	if (rv == 0 && !mi->raw_info) {
-		unsigned char *is = memmem(*out, *len, "4:infod", 7);
-		if (!is) is = memmem(*out, *len, "4:info", 6);
-		if (is) {
-			is += 6;
-			int depth = 0;
-			unsigned char *ii = is;
-			unsigned char *e = *out + *len;
-			while (ii < e) {
-				if (*ii == 'd' || *ii == 'l') { depth++; ii++; }
-				else if (*ii == 'e') { depth--; ii++; if (depth == 0) break; }
-				else if (*ii == 'i') { ii = memchr(ii, 'e', e - ii); if (ii) ii++; else break; }
-				else if (*ii >= '0' && *ii <= '9') {
-					unsigned char *colon = memchr(ii, ':', e - ii);
-					if (!colon) break;
-					size_t slen = strtoul((char *)ii, NULL, 10);
-					ii = colon + 1 + slen;
-				} else break;
-			}
-			size_t il = ii - is;
-			mi->raw_info = malloc(il);
-			memcpy(mi->raw_info, is, il);
-			mi->raw_info_len = il;
+	/* Encode info dict separately to compute infohash */
+	if (!mi->raw_info) {
+		unsigned char *info_enc;
+		size_t info_enc_len;
+		if (mbt_be_value_encode(info, &info_enc, &info_enc_len) == 0) {
+			mi->raw_info = info_enc;
+			mi->raw_info_len = info_enc_len;
 			compute_infohash(mi);
 		}
 	}
 
+	int rv = mbt_be_value_encode(root, out, len);
+	mbt_be_value_free(root);
 	return rv;
 }
