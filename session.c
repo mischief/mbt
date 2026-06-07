@@ -608,10 +608,24 @@ mbt_session_enable_dht(struct mbt_session *s)
 	if (rv < 0)
 		return rv;
 
-	mbt_dht_bootstrap(s->dht, "router.bittorrent.com", 6881);
-	mbt_dht_bootstrap(s->dht, "dht.transmissionbt.com", 6881);
+	/* Default bootstrap nodes */
+	mbt_session_dht_bootstrap(s, "router.bittorrent.com", 6881);
+	mbt_session_dht_bootstrap(s, "dht.transmissionbt.com", 6881);
 
-	/* Start lookups for all existing torrents */
+	return 0;
+}
+
+int
+mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, uint16_t port)
+{
+	if (!s->dht)
+		return -EINVAL;
+
+	int rv = mbt_dht_bootstrap(s->dht, addr, port);
+	if (rv < 0)
+		return rv;
+
+	/* Trigger lookups for all existing torrents (new node may help) */
 	struct session_torrent *st;
 	STAILQ_FOREACH(st, &s->torrents, next)
 		mbt_session_dht_get_peers(s, st->ih);
