@@ -20,6 +20,7 @@
 #include <sha1.h>
 
 static struct mbt_session *session;
+static int seed_mode;
 
 /* --- curl HTTP callback --- */
 
@@ -128,17 +129,29 @@ on_complete(struct mbt_torrent *t, void *arg)
 {
 	(void)arg;
 	fprintf(stderr, "\ndownload complete: %s\n", mbt_torrent_name(t));
+	if (!seed_mode)
+		mbt_session_stop(session);
+	else
+		fprintf(stderr, "seeding...\n");
+}
+
+static void
+on_signal(int sig)
+{
+	(void)sig;
+	fprintf(stderr, "\ninterrupted, shutting down...\n");
 	mbt_session_stop(session);
 }
 
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-d] [-o dir] [-p max_peers] [-s strategy] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "usage: %s [-dS] [-o dir] [-p max_peers] [-s strategy] <file.torrent | magnet:?...>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
 	fprintf(stderr, "  -s strategy   piece picker: sequential (default) or random\n");
+	fprintf(stderr, "  -S            seed after download completes\n");
 	exit(1);
 }
 
@@ -151,10 +164,13 @@ main(int argc, char *argv[])
 	int max_peers = 0;
 	mbt_picker_fn picker = mbt_picker_sequential;
 
-	while ((ch = getopt(argc, argv, "do:p:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dSo:p:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
+			break;
+		case 'S':
+			seed_mode = 1;
 			break;
 		case 'o':
 			download_dir = optarg;
@@ -184,6 +200,8 @@ main(int argc, char *argv[])
 		usage(argv[-optind]);
 
 	signal(SIGPIPE, SIG_IGN);
+	signal(SIGINT, on_signal);
+	signal(SIGTERM, on_signal);
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 
 	mbt_log_set(mbt_log_stderr, NULL);
