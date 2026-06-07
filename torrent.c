@@ -277,6 +277,13 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	if (piece >= t->piece_count)
 		return;
 
+	/* Already have this piece — ignore late/unsolicited data */
+	if (mbt_bitmap_isset(t->have, piece) > 0) {
+		struct torrent_peer *tp2 = find_torrent_peer(t, p);
+		if (tp2) tp2->outstanding--;
+		return;
+	}
+
 	struct piece_info *pi = &t->pieces[piece];
 
 	if (mbt_bitmap_isset(t->have, piece) > 0)
