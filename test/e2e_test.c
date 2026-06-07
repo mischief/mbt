@@ -180,6 +180,7 @@ main(void)
 	fprintf(stderr, "e2e_test: PASS (%d pieces transferred over localhost, data verified)\n", NUM_PIECES);
 
 	/* Cleanup */
+	free(torrent_buf);
 	mbt_session_free(s1);
 	mbt_session_free(s2);
 	mbt_ev_destroy(ev);

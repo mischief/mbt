@@ -679,7 +679,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (limit > 4096)
 		limit = 4096;
 
-	int sent = 0;
+	int sent __attribute__((unused)) = 0;
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
 		int idx = -1;

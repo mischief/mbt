@@ -151,6 +151,7 @@ int main(void)
 	        mbt_tracker_server_num_peers(tracker));
 
 	mbt_ev_timer_free(to);
+	free(torrent_buf);
 	mbt_session_free(s1);
 	mbt_session_free(s2);
 	mbt_tracker_server_free(tracker);
