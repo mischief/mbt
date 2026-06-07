@@ -316,16 +316,14 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	/* Allocate piece buffer on first block */
 	if (!pi->data) {
-		/* Only accept if we own this piece or it's unowned */
-		if (pi->owner && pi->owner != tp) {
+		/* Only accept if piece is ACTIVE and owned by this peer */
+		if (pi->state != MBT_PIECE_ACTIVE || pi->owner != tp) {
 			tp->outstanding--;
 			return;
 		}
 		pi->data = calloc(1, pi->length);
 		if (!pi->data) return;
 		t->active_pieces++;
-		pi->state = MBT_PIECE_ACTIVE;
-		pi->owner = tp;
 	}
 
 	/* Track block by index, ignore true duplicates */
