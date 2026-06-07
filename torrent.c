@@ -33,7 +33,7 @@ struct piece_info {
 	size_t received;       /* bytes received so far */
 	size_t requested;      /* bytes requested so far (>= received) */
 	uint8_t hash[20];      /* expected SHA1 */
-	uint32_t blocks_have;  /* bitmask of received 16KB blocks */
+	struct mbt_bitmap *blocks; /* received block bitmap */
 	enum mbt_piece_state state;
 	struct torrent_peer *owner; /* peer downloading this piece, NULL if pending */
 	uint64_t last_activity; /* monotonic time of last block received (usec) */
@@ -161,7 +161,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		pi->state = MBT_PIECE_PENDING;
 		pi->owner = NULL;
 		pi->received = 0;
-			pi->blocks_have = 0;
+			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 		pi->requested = 0;
 		pi->last_activity = 0;
 		free(pi->data);
@@ -250,7 +250,7 @@ on_choke(struct mbt_peer *p, int choked, void *arg)
 				pi->owner = NULL;
 				pi->requested = 0;
 				pi->received = 0;
-				pi->blocks_have = 0;
+				if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 				pi->last_activity = 0;
 			}
 		}
@@ -328,12 +328,15 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	/* Track block by index, ignore true duplicates */
 	uint32_t block_idx = offset / (16 * 1024);
-	if (block_idx < 32 && (pi->blocks_have & (1u << block_idx)))
+	if (pi->blocks && mbt_bitmap_isset(pi->blocks, block_idx) > 0)
 		{ tp->outstanding--; return; } /* duplicate block */
 
 	memcpy(pi->data + offset, data, len);
-	if (block_idx < 32)
-		pi->blocks_have |= (1u << block_idx);
+	if (!pi->blocks) {
+		uint32_t nblocks = (pi->length + 16*1024 - 1) / (16*1024);
+		mbt_bitmap_new_bits(&pi->blocks, nblocks);
+	}
+	mbt_bitmap_set(pi->blocks, block_idx);
 	pi->received += len;
 	pi->last_activity = now_usec();
 
@@ -357,9 +360,9 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch from %s:%hu",
 			             piece, mbt_peer_addr(p), mbt_peer_port(p));
 			mbt_log_debug(MBT_LOG_TORRENT, "  got=%s want=%s len=%zu received=%zu blocks=0x%x",
-			              got, want, pi->length, pi->received, pi->blocks_have);
+			              got, want, pi->length, pi->received, pi->blocks ? mbt_bitmap_count(pi->blocks) : 0);
 			pi->received = 0;
-			pi->blocks_have = 0;
+			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 			pi->requested = 0;
 			pi->state = MBT_PIECE_PENDING;
 			pi->owner = NULL;
@@ -587,7 +590,7 @@ on_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, 
 		pi->owner = NULL;
 		pi->requested = 0;
 		pi->received = 0;
-			pi->blocks_have = 0;
+			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 		tp->outstanding--;
 		/* Try to re-request from someone else */
 		for (struct torrent_peer *op = t->peers; op; op = op->next) {
@@ -613,6 +616,7 @@ on_error(struct mbt_peer *p, int err, void *arg)
 				t->pieces[i].received = 0;
 				t->pieces[i].requested = 0;
 				free(t->pieces[i].data);
+				if (t->pieces[i].blocks) mbt_bitmap_unref(t->pieces[i].blocks);
 				t->pieces[i].data = NULL;
 			}
 		}
@@ -795,8 +799,10 @@ mbt_torrent_free(struct mbt_torrent *t)
 
 	/* Free pieces */
 	if (t->pieces) {
-		for (uint32_t i = 0; i < t->piece_count; i++)
+		for (uint32_t i = 0; i < t->piece_count; i++) {
 			free(t->pieces[i].data);
+			if (t->pieces[i].blocks) mbt_bitmap_unref(t->pieces[i].blocks);
+		}
 		free(t->pieces);
 	}
 
