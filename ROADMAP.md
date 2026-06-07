@@ -18,9 +18,10 @@
 - [x] Torrent coordinator (torrent.c) — piece state, SHA1, storage, picker
 - [x] Session (session.c) — torrent list, async connect, LSD/DHT integration
 - [x] Storage backends: file (multi-file) + memory (testing)
-- [x] Pickers — sequential + random (default)
+- [x] Pickers — sequential + random (default: random)
 - [x] Request timeout (15s), peer banning (hash failures), endgame mode
 - [x] Peer database (peerdb.c) — RB tree, state/source/backoff, torrent-owned
+- [x] Out-of-order block assembly (bitmask tracking)
 
 ## Phase 2: Discovery (complete)
 
@@ -29,53 +30,61 @@
 - [x] UDP tracker client (BEP 15) — async, built-in
 - [x] Auto-announce from announce-list (BEP 12), re-announce timer
 - [x] PEX receive (BEP 11)
-- [x] DHT (BEP 5) — full Kademlia: routing table, iterative lookup, announce
+- [x] DHT (BEP 5) — Kademlia routing, iterative lookup, announce, stable node ID
 - [x] DHT periodic re-lookup (5 min) for incomplete torrents
-- [x] LSD listener + announcer (opt-in)
+- [x] LSD listener + announcer (opt-in, runtime toggle)
 - [ ] PEX send — 60s timer, batch added/dropped peers
 
-## Phase 3: Seeding + incoming connections (complete)
+## Phase 3: Seeding + incoming (complete)
 
 - [x] Listen socket — async accept, route by infohash
 - [x] Respond to piece requests (read from storage, send)
 - [x] Serve BEP 9 metadata requests
 - [x] Send bitfield on peer activation, unchoke all
 - [x] Resume: SHA1 verify existing pieces on startup
-- [ ] Send have messages on piece completion
+- [x] HAVE broadcast on piece completion
 - [ ] Choking algorithm (top-4 + optimistic)
 - [ ] Announce event=completed / event=stopped to tracker
 
-## Phase 4: Swarm quality (next)
+## Phase 4: Protocol extensions (mostly complete)
 
-- [ ] Per-peer write buffering (replace EAGAIN spin with EPOLLOUT queue)
-- [ ] Adaptive pipeline depth (ramp up from 4, not burst 512)
-- [ ] Anti-snubbing (peer silent 60s → request elsewhere)
-- [ ] Faster bad-peer detection (ban on 3 total hash failures, not 5 consecutive)
-- [ ] Rarest-first picker with peer availability tracking
-- [ ] Upload/download rate limiting
+- [x] BEP 6 Fast Extension — HAVE_ALL, HAVE_NONE, REJECT, ALLOWED_FAST
+- [x] Deferred HAVE_ALL (applied when piece_count becomes known)
+- [x] REJECT handling — instant piece failover
+- [x] Drop unsolicited/duplicate piece data
+- [ ] Private torrents (BEP 27) — disable DHT/PEX/LSD when private=1
 
 ## Phase 5: API polish (complete)
 
-- [x] All public symbols namespaced `mbt_*`
-- [x] Internal symbols hidden via linker version script
-- [x] Headers in `mbt/` subdir — `#include <mbt/mbt.h>`
-- [x] `meson install` works
-- [x] Safe bencode constructors
-- [x] `mbt_ev_new_default()` — backend-agnostic event loop
+- [x] All symbols namespaced `mbt_*`, internals hidden (linker script)
+- [x] Headers in `mbt/` — `#include <mbt/mbt.h>`
+- [x] `mbt_ev_new_default()` — backend-agnostic
 - [x] DHT/LSD enable/disable at runtime, order-independent
+- [x] Custom DHT bootstrap nodes (`mbt_session_dht_bootstrap`)
+- [x] Piece map accessor (`mbt_torrent_piece_map`) for GUI/TUI
+- [x] Safe bencode constructors
+- [x] Named protocol constants (no magic numbers)
 
-## Phase 6: Tools (mostly complete)
+## Phase 6: Swarm quality (next)
 
-- [x] `mbt-get` — download by .torrent/magnet (-S -D -L -l -d flags, SIGINT)
+- [ ] Per-peer write buffering (EPOLLOUT queue, replace EAGAIN spin)
+- [ ] Anti-snubbing (peer silent 60s → request elsewhere)
+- [ ] Adaptive pipeline depth (ramp from low, not burst full pipeline)
+- [ ] Rarest-first picker with peer availability tracking
+- [ ] Upload/download rate limiting
+- [ ] NAT-PMP / UPnP port mapping (built-in)
+
+## Phase 7: Tools
+
+- [x] `mbt-get` — download by .torrent/magnet (-S -D -L -l -d flags)
 - [x] `mbt-lsd` — LSD auto-replicate
-- [x] `mbt-torrent` — create .torrent, show metadata, emit magnet
-- [x] `mbt-dht` — standalone DHT lookup tool
+- [x] `mbt-torrent` — create .torrent, show, magnet
+- [x] `mbt-dht` — standalone DHT lookup
 - [ ] `mbt-seed` — seed a file given a .torrent
-- [ ] `mbt-daemon` — long-running daemon + control interface
+- [ ] `mbt-daemon` — long-running daemon + DBus control
 
-## Phase 7: Advanced
+## Phase 8: Advanced
 
-- [ ] Private torrents (BEP 27) — disable DHT/PEX/LSD when private=1
-- [ ] Fast Extension (BEP 6) — have-all/have-none
 - [ ] µTP transport (BEP 29)
 - [ ] Holepunch (BEP 55)
+- [ ] HTTP seeding (BEP 19)
