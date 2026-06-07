@@ -380,8 +380,10 @@ lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 		mbt_log_debug(MBT_LOG_DHT, "lookup complete, %d nodes queried", lk->node_count);
 		if (lk->done_cb)
 			lk->done_cb(lk->arg);
-		if (lk->timer)
+		if (lk->timer) {
 			mbt_ev_timer_free(lk->timer);
+			lk->timer = NULL;
+		}
 		lk->active = 0;
 	}
 }
