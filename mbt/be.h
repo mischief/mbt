@@ -40,6 +40,10 @@ struct mbt_be_value *mbt_be_find(struct mbt_be_value *be, const char *key);
 int mbt_be_dict_new(struct mbt_be_value **out);
 int mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value);
 int mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num);
+int mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf, size_t len);
+void mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len);
+void mbt_be_list_new(struct mbt_be_value **out);
+void mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val);
 
 int
 mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len);

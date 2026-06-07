@@ -448,6 +448,47 @@ mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num)
 	return 0;
 }
 
+int
+mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf, size_t len)
+{
+	struct mbt_be_value *v;
+	int rv = be_alloc(BE_STRING, dict, &v);
+	if (rv < 0) return rv;
+	v->string.iov_base = malloc(len);
+	if (!v->string.iov_base) { free(v); return -ENOMEM; }
+	memcpy(v->string.iov_base, buf, len);
+	v->string.iov_len = len;
+	rv = mbt_be_dict_append(dict, key, v);
+	if (rv < 0) { free(v->string.iov_base); free(v); return rv; }
+	return 0;
+}
+
+void
+mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len)
+{
+	struct mbt_be_value *v = calloc(1, sizeof(*v));
+	v->type = BE_STRING;
+	v->string.iov_base = malloc(len);
+	memcpy(v->string.iov_base, buf, len);
+	v->string.iov_len = len;
+	*out = v;
+}
+
+void
+mbt_be_list_new(struct mbt_be_value **out)
+{
+	struct mbt_be_value *v = calloc(1, sizeof(*v));
+	v->type = BE_LIST;
+	STAILQ_INIT(&v->listhead);
+	*out = v;
+}
+
+void
+mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val)
+{
+	STAILQ_INSERT_TAIL(&list->listhead, val, next);
+}
+
 struct encode_state
 {
 	char *ptr;

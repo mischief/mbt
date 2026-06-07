@@ -324,58 +324,42 @@ cmd_create(int argc, char **argv)
 	mbt_be_dict_new(&info);
 
 	if (tracker) {
-		struct mbt_be_value *trval = calloc(1, sizeof(*trval));
-		trval->type = BE_STRING; /* BE_STRING */
-		trval->string.iov_base = (void *)tracker;
-		trval->string.iov_len = strlen(tracker);
-		mbt_be_dict_append(root, "announce", trval);
+		mbt_be_dict_append_string(root, "announce", tracker, strlen(tracker));
 	}
 
 	mbt_be_dict_append(root, "info", info);
 	mbt_be_dict_append_number(info, "piece length", piece_size);
 
 	/* pieces (binary string) */
-	struct mbt_be_value *pval = calloc(1, sizeof(*pval));
-	pval->type = BE_STRING; /* BE_STRING */
-	pval->string.iov_base = pieces_hash;
-	pval->string.iov_len = piece_idx * 20;
-	mbt_be_dict_append(info, "pieces", pval);
+	mbt_be_dict_append_string(info, "pieces", pieces_hash, piece_idx * 20);
 
 	/* name */
-	struct mbt_be_value *nval = calloc(1, sizeof(*nval));
-	nval->type = BE_STRING;
-	nval->string.iov_base = (void *)name;
-	nval->string.iov_len = strlen(name);
-	mbt_be_dict_append(info, "name", nval);
+	mbt_be_dict_append_string(info, "name", name, strlen(name));
 
 	if (single) {
 		mbt_be_dict_append_number(info, "length", total);
 	} else {
 		/* files list */
-		struct mbt_be_value *flist = calloc(1, sizeof(*flist));
-		flist->type = BE_LIST; /* BE_LIST */
-		STAILQ_INIT(&flist->listhead);
+		struct mbt_be_value *flist;
+		mbt_be_list_new(&flist);
 		for (int i = 0; i < nfiles; i++) {
 			struct mbt_be_value *fdict = NULL;
 			mbt_be_dict_new(&fdict);
 			mbt_be_dict_append_number(fdict, "length", files[i].size);
 
 			/* path list */
-			struct mbt_be_value *plist = calloc(1, sizeof(*plist));
-			plist->type = BE_LIST;
-			STAILQ_INIT(&plist->listhead);
+			struct mbt_be_value *plist;
+			mbt_be_list_new(&plist);
 
 			char *p = files[i].path;
 			char *tok, *saveptr;
 			for (tok = strtok_r(p, "/", &saveptr); tok; tok = strtok_r(NULL, "/", &saveptr)) {
-				struct mbt_be_value *comp = calloc(1, sizeof(*comp));
-				comp->type = BE_STRING;
-				comp->string.iov_base = tok;
-				comp->string.iov_len = strlen(tok);
-				STAILQ_INSERT_TAIL(&plist->listhead, comp, next);
+				struct mbt_be_value *comp;
+				mbt_be_string_new(&comp, tok, strlen(tok));
+				mbt_be_list_append(plist, comp);
 			}
 			mbt_be_dict_append(fdict, "path", plist);
-			STAILQ_INSERT_TAIL(&flist->listhead, fdict, next);
+			mbt_be_list_append(flist, fdict);
 		}
 		mbt_be_dict_append(info, "files", flist);
 	}
