@@ -59,6 +59,8 @@ struct mbt_torrent *mbt_session_torrent_next(struct mbt_session *s, struct mbt_t
 
 /* Peer discovery — enable/disable sources */
 int mbt_session_enable_lsd(struct mbt_session *s);
+int mbt_session_enable_dht(struct mbt_session *s);
+void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih);
 int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                          const char *addr, uint16_t port);
 

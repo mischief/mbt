@@ -163,11 +163,12 @@ main(int argc, char *argv[])
 	const char *download_dir = ".";
 	int debug = 0;
 	int no_lsd = 0;
+	int use_dht = 0;
 	int max_peers = 0;
 	int listen_port = 6881;
 	mbt_picker_fn picker = mbt_picker_sequential;
 
-	while ((ch = getopt(argc, argv, "dSLl:o:p:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dDSLl:o:p:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -177,6 +178,9 @@ main(int argc, char *argv[])
 			break;
 		case 'L':
 			no_lsd = 1;
+			break;
+		case 'D':
+			use_dht = 1;
 			break;
 		case 'l':
 			listen_port = atoi(optarg);
@@ -215,7 +219,7 @@ main(int argc, char *argv[])
 
 	mbt_log_set(mbt_log_stderr, NULL);
 	if (debug)
-		mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_TORRENT | MBT_LOG_PEER);
+		mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_TORRENT | MBT_LOG_PEER | MBT_LOG_DHT);
 
 	struct mbt_session_config cfg = {0};
 #ifdef HAVE_SD_EVENT
@@ -238,6 +242,11 @@ main(int argc, char *argv[])
 	if (rv < 0)
 		errx(1, "session: %s", strerror(-rv));
 
+	if (!no_lsd)
+		mbt_session_enable_lsd(session);
+	if (use_dht)
+		mbt_session_enable_dht(session);
+
 	/* Add torrent or magnet */
 	if (strncmp(argv[0], "magnet:", 7) == 0) {
 		rv = mbt_session_add_magnet(session, argv[0]);
@@ -259,10 +268,6 @@ main(int argc, char *argv[])
 		mbt_torrent_set_callbacks(t, &cb, NULL);
 		fprintf(stderr, "downloading: %s\n", mbt_torrent_name(t) ? mbt_torrent_name(t) : "(metadata pending)");
 	}
-
-	if (!no_lsd)
-		mbt_session_enable_lsd(session);
-
 	rv = mbt_session_run(session);
 
 	mbt_session_free(session);

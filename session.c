@@ -21,6 +21,7 @@
 #include "mbt/session.h"
 #include "mbt/log.h"
 #include "mbt/lsd.h"
+#include "mbt/dht.h"
 #include "mbt/magnet.h"
 #include "mbt/tracker.h"
 
@@ -78,6 +79,9 @@ struct mbt_session {
 	/* LSD */
 	struct mbt_lsd *lsd;
 	struct mbt_ev_io *lsd_io;
+
+	/* DHT */
+	struct mbt_dht *dht;
 
 	/* Listen socket */
 	int listen_fd;
@@ -422,6 +426,8 @@ mbt_session_free(struct mbt_session *s)
 		close(s->listen_fd);
 	if (s->lsd_announce_timer)
 		mbt_ev_timer_free(s->lsd_announce_timer);
+	if (s->dht)
+		mbt_dht_free(s->dht);
 
 	/* Free pending connects */
 	struct pending_connect *pc;
@@ -566,6 +572,60 @@ mbt_session_enable_lsd(struct mbt_session *s)
 	return 0;
 }
 
+/* --- DHT --- */
+
+struct dht_lookup_ctx {
+	struct mbt_session *session;
+	struct mbt_infohash *ih;
+};
+
+static void
+dht_peers_cb(const char *addr, uint16_t port, void *arg)
+{
+	struct dht_lookup_ctx *ctx = arg;
+	struct session_torrent *st = session_find(ctx->session, ctx->ih);
+	if (st) {
+		mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), addr, port, MBT_SOURCE_DHT);
+		mbt_log_debug(MBT_LOG_DHT, "DHT peer: %s:%hu", addr, port);
+	}
+}
+
+static void
+dht_done_cb(void *arg)
+{
+	struct dht_lookup_ctx *ctx = arg;
+	mbt_infohash_unref(ctx->ih);
+	free(ctx);
+}
+
+int
+mbt_session_enable_dht(struct mbt_session *s)
+{
+	if (s->dht)
+		return 0;
+
+	int rv = mbt_dht_new(&s->dht, s->ev, s->listen_port ? s->listen_port : 6881);
+	if (rv < 0)
+		return rv;
+
+	mbt_dht_bootstrap(s->dht, "router.bittorrent.com", 6881);
+	mbt_dht_bootstrap(s->dht, "dht.transmissionbt.com", 6881);
+	return 0;
+}
+
+void
+mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih)
+{
+	if (!s->dht) return;
+
+	struct dht_lookup_ctx *ctx = malloc(sizeof(*ctx));
+	if (!ctx) return;
+	ctx->session = s;
+	ctx->ih = mbt_infohash_ref(ih);
+
+	mbt_dht_get_peers(s->dht, ih, dht_peers_cb, dht_done_cb, ctx);
+}
+
 /* --- Tracker callbacks --- */
 
 static void
@@ -681,6 +741,10 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 	st->session = s;
 	st->ih = mbt_infohash_ref(ih);
 	STAILQ_INSERT_TAIL(&s->torrents, st, next);
+
+	/* Start DHT lookup if enabled */
+	if (s->dht)
+		mbt_session_dht_get_peers(s, ih);
 
 	return 0;
 }
