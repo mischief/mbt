@@ -473,6 +473,8 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 		/* Drive all peers now that we have metadata */
 		struct torrent_peer *tp;
 		for (tp = t->peers; tp; tp = tp->next) {
+			/* Update piece_count — applies deferred HAVE_ALL */
+			mbt_peer_set_piece_count(tp->peer, t->piece_count);
 			/* Re-send interested in case it was missed */
 			mbt_peer_send_interested(tp->peer, 1);
 			if (!mbt_peer_choked(tp->peer))
@@ -690,9 +692,12 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		sent++;
 	}
 
-	if (sent == 0 && tp->outstanding == 0)
-		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer %s:%hu: picker returned -1, nothing to request",
-		              mbt_peer_addr(tp->peer), mbt_peer_port(tp->peer));
+	if (sent == 0 && tp->outstanding == 0) {
+		struct mbt_bitmap *pb = mbt_peer_bitfield(tp->peer);
+		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer %s:%hu: nothing to request (peer has %zu/%u pieces)",
+		              mbt_peer_addr(tp->peer), mbt_peer_port(tp->peer),
+		              pb ? mbt_bitmap_count(pb) : 0, t->piece_count);
+	}
 }
 
 static void

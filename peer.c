@@ -71,6 +71,7 @@ struct mbt_peer {
 	/* extension protocol */
 	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
 	uint8_t ut_pex_id;     /* their msg id for ut_pex, 0=unsupported */
+	uint8_t have_all;      /* BEP 6: peer sent HAVE_ALL (deferred until piece_count known) */
 	size_t metadata_size;
 	int reqq;              /* peer's max outstanding requests (0=unknown) */
 
@@ -446,7 +447,10 @@ peer_rx_message(struct mbt_peer *p)
 		/* BEP 6 Fast Extension messages */
 		if (cmd == BT_HAVE_ALL && (p->flags & MBT_PEER_FLAG_FAST)) {
 			/* HAVE_ALL — peer has everything */
-			if (p->piece_count == 0) break; /* can't set bits without knowing count */
+			if (p->piece_count == 0) {
+				p->have_all = 1; /* deferred until piece_count known */
+				break;
+			}
 			if (p->bitfield)
 				mbt_bitmap_unref(p->bitfield);
 			mbt_bitmap_new_bits(&p->bitfield, p->piece_count);
@@ -748,6 +752,23 @@ void
 mbt_peer_set_our_metadata_size(struct mbt_peer *p, size_t sz)
 {
 	p->our_metadata_size = sz;
+}
+
+void
+mbt_peer_set_piece_count(struct mbt_peer *p, uint32_t count)
+{
+	p->piece_count = count;
+	/* Apply deferred HAVE_ALL */
+	if (p->have_all && count > 0) {
+		p->have_all = 0;
+		if (p->bitfield)
+			mbt_bitmap_unref(p->bitfield);
+		mbt_bitmap_new_bits(&p->bitfield, count);
+		for (uint32_t i = 0; i < count; i++)
+			mbt_bitmap_set(p->bitfield, i);
+		if (p->cb.on_bitfield)
+			p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
+	}
 }
 
 void

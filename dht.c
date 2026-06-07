@@ -16,6 +16,8 @@
 #include <time.h>
 #include <fcntl.h>
 
+#include <sha1.h>
+
 #include "mbt/dht.h"
 #include "mbt/event.h"
 #include "mbt/infohash.h"
@@ -99,6 +101,27 @@ random_bytes(uint8_t *buf, size_t len)
 {
 	for (size_t i = 0; i < len; i++)
 		buf[i] = rand() & 0xff;
+}
+
+static void
+dht_init_node_id(uint8_t *id)
+{
+	FILE *fp = fopen("/etc/machine-id", "r");
+	if (fp) {
+		char buf[64] = {0};
+		if (fread(buf, 1, 32, fp) == 32) {
+			/* SHA1(machine-id) → stable 20-byte node ID */
+			SHA1_CTX ctx;
+			SHA1Init(&ctx);
+			SHA1Update(&ctx, (uint8_t *)buf, 32);
+			SHA1Final(id, &ctx);
+			fclose(fp);
+			return;
+		}
+		fclose(fp);
+	}
+	/* Fallback: random */
+	random_bytes(id, 20);
 }
 
 /* XOR distance — returns bucket index (0 = closest to us) */
@@ -557,7 +580,9 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	d->ev = ev;
 	d->port = port;
 	srand(time(NULL) ^ getpid());
-	random_bytes(d->id, 20);
+
+	/* Derive stable node ID from machine-id, or fall back to random */
+	dht_init_node_id(d->id);
 
 	/* Bind UDP socket */
 	d->fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -691,4 +716,10 @@ mbt_dht_node_count(struct mbt_dht *d)
 	for (int i = 0; i < 160; i++)
 		total += d->buckets[i].count;
 	return total;
+}
+
+void
+mbt_dht_set_node_id(struct mbt_dht *d, const uint8_t id[20])
+{
+	memcpy(d->id, id, 20);
 }

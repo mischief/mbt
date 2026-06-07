@@ -32,4 +32,7 @@ int mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen
 /* Number of nodes in routing table */
 int mbt_dht_node_count(struct mbt_dht *d);
 
+/* Override the node ID (call before bootstrap) */
+void mbt_dht_set_node_id(struct mbt_dht *d, const uint8_t id[20]);
+
 #endif
