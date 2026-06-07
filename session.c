@@ -25,23 +25,17 @@
 
 /* --- Torrent list entry --- */
 
-struct peer_candidate {
-	char addr[INET6_ADDRSTRLEN];
-	uint16_t port;
-};
-
-#define MAX_PEER_POOL 200
+#include "peerdb.h"
 
 struct session_torrent {
-	struct mbt_session *session;     /* back-reference */
+	struct mbt_session *session;
 	struct mbt_torrent *torrent;
 	struct mbt_infohash *ih;
 	char *trackers[16];
 	int tracker_count;
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
-	struct peer_candidate pool[MAX_PEER_POOL];
-	int pool_count;
+	struct mbt_peerdb peerdb;
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -103,15 +97,18 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 	struct session_torrent *st;
 
 	STAILQ_FOREACH(st, &s->torrents, next) {
-		/* Refill peers from pool if below cap */
-		while (mbt_torrent_peer_count(st->torrent) < s->max_peers && st->pool_count > 0) {
-			st->pool_count--;
-			struct peer_candidate *pc = &st->pool[st->pool_count];
-			mbt_session_add_peer(s, st->ih, pc->addr, pc->port);
+		/* Refill peers from peerdb if below cap */
+		while (mbt_torrent_peer_count(st->torrent) +
+		       mbt_peerdb_count(&st->peerdb, MBT_PEERDB_CONNECTING) < s->max_peers) {
+			struct mbt_peer_entry *pe = mbt_peerdb_select(&st->peerdb);
+			if (!pe)
+				break;
+			pe->state = MBT_PEERDB_CONNECTING;
+			mbt_session_add_peer(s, st->ih, pe->addr, pe->port);
 		}
 	}
 
-	mbt_ev_timer_mod(timer, 5 * 1000000ULL); /* check every 5s */
+	mbt_ev_timer_mod(timer, 5 * 1000000ULL);
 }
 
 static void session_generate_peer_id(uint8_t *id);
@@ -269,6 +266,7 @@ mbt_session_free(struct mbt_session *s)
 		STAILQ_REMOVE_HEAD(&s->torrents, next);
 		mbt_torrent_free(st->torrent);
 		mbt_infohash_unref(st->ih);
+		mbt_peerdb_free(&st->peerdb);
 		if (st->reannounce_timer)
 			mbt_ev_timer_free(st->reannounce_timer);
 		for (int i = 0; i < st->tracker_count; i++)
@@ -354,14 +352,23 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		return;
 
 	STAILQ_FOREACH(ih, &info->infohashes, next) {
+		struct session_torrent *st = session_find(s, ih);
+
 		if (s->cb.on_lsd_announce) {
-			/* Caller decides policy */
-			if (s->cb.on_lsd_announce(s, ih, info->remote, info->port, s->cb.arg))
+			if (s->cb.on_lsd_announce(s, ih, info->remote, info->port, s->cb.arg)) {
+				if (!st) {
+					mbt_session_add_infohash(s, ih);
+					st = session_find(s, ih);
+				}
+				if (st)
+					mbt_peerdb_insert(&st->peerdb, info->remote, info->port, MBT_SOURCE_LSD);
 				mbt_session_add_peer(s, ih, info->remote, info->port);
+			}
 		} else {
-			/* Default: only connect peers for torrents we already track */
-			if (session_find(s, ih))
+			if (st) {
+				mbt_peerdb_insert(&st->peerdb, info->remote, info->port, MBT_SOURCE_LSD);
 				mbt_session_add_peer(s, ih, info->remote, info->port);
+			}
 		}
 	}
 }
@@ -395,17 +402,14 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 {
 	struct mbt_session *s = arg;
 	struct session_torrent *st = session_find(s, ih);
+	if (!st) return;
 
-	/* If at peer cap, store in pool for later */
-	if (st && mbt_torrent_peer_count(st->torrent) >= s->max_peers) {
-		if (st->pool_count < MAX_PEER_POOL) {
-			snprintf(st->pool[st->pool_count].addr,
-			         sizeof(st->pool[st->pool_count].addr), "%s", addr);
-			st->pool[st->pool_count].port = port;
-			st->pool_count++;
-		}
-		return;
-	}
+	/* Insert into peerdb (deduplicates automatically) */
+	mbt_peerdb_insert(&st->peerdb, addr, port, MBT_SOURCE_TRACKER);
+
+	/* If below cap, connect immediately */
+	if (mbt_torrent_peer_count(st->torrent) < s->max_peers)
+		mbt_session_add_peer(s, ih, addr, port);
 
 	mbt_session_add_peer(s, ih, addr, port);
 }
@@ -504,6 +508,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 
 	st->session = s;
 	st->ih = mbt_infohash_ref(ih);
+	mbt_peerdb_init(&st->peerdb);
 	STAILQ_INSERT_TAIL(&s->torrents, st, next);
 
 	return 0;
