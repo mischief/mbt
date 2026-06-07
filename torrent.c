@@ -80,6 +80,7 @@ struct mbt_torrent {
 	/* Have bitmap */
 	struct mbt_bitmap *have;
 	uint32_t have_count;
+	uint32_t active_pieces; /* pieces with allocated buffers */
 
 	/* Peers */
 	struct torrent_peer *peers;
@@ -163,7 +164,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 			pi->blocks_have = 0;
 		pi->requested = 0;
 		pi->last_activity = 0;
-		free(pi->data);
+		free(pi->data); t->active_pieces--;
 		pi->data = NULL;
 		reset_count++;
 	}
@@ -294,8 +295,10 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	/* Allocate piece buffer on first block */
 	if (!pi->data) {
+		if (t->active_pieces >= 32) return; /* cap concurrent buffers */
 		pi->data = calloc(1, pi->length);
 		if (!pi->data) return;
+		t->active_pieces++;
 		pi->state = MBT_PIECE_ACTIVE;
 		pi->owner = tp;
 	}
@@ -333,7 +336,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			pi->state = MBT_PIECE_PENDING;
 			pi->owner = NULL;
 			pi->last_activity = 0;
-			free(pi->data);
+			free(pi->data); t->active_pieces--;
 			pi->data = NULL;
 
 			/* Ban peer after repeated failures */
@@ -365,7 +368,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 				t->storage_ops->write_piece(t->storage_ctx, piece, pi->data, pi->length);
 
 			/* Free piece buffer */
-			free(pi->data);
+			free(pi->data); t->active_pieces--;
 			pi->data = NULL;
 
 			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu",
