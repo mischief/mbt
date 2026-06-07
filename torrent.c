@@ -853,6 +853,34 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn)
 	return 0;
 }
 
+int
+mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
+                              const uint8_t ext[8], const uint8_t their_id[20])
+{
+	struct torrent_peer *tp;
+	struct mbt_peer *peer;
+	int rv;
+
+	tp = calloc(1, sizeof(*tp));
+	if (!tp)
+		return -ENOMEM;
+
+	rv = mbt_peer_new_incoming(&peer, t->ev, conn, t->ih, t->peer_id,
+	                           t->piece_count, ext, their_id,
+	                           &torrent_peer_cbs, t);
+	if (rv < 0) {
+		free(tp);
+		return rv;
+	}
+
+	tp->peer = peer;
+	tp->next = t->peers;
+	t->peers = tp;
+	t->peer_count++;
+
+	return 0;
+}
+
 struct mbt_infohash *
 mbt_torrent_infohash(struct mbt_torrent *t)
 {

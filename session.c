@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -78,8 +79,15 @@ struct mbt_session {
 	struct lsd *lsd;
 	struct mbt_ev_io *lsd_io;
 
+	/* Listen socket */
+	int listen_fd;
+	struct mbt_ev_io *listen_io;
+
 	/* Maintenance timer (refill peers from pool) */
 	struct mbt_ev_timer *maintain_timer;
+
+	/* LSD announcer timer (optional) */
+	struct mbt_ev_timer *lsd_announce_timer;
 
 	/* Torrents */
 	struct session_torrent_list torrents;
@@ -89,6 +97,25 @@ struct mbt_session {
 };
 
 /* --- Forward declarations --- */
+
+static void
+session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_session *s = v;
+	struct session_torrent *st;
+
+	(void)timer;
+	if (!s->lsd || s->listen_port == 0)
+		return;
+
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		char hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
+		mbt_infohash_string(st->ih, hex, sizeof(hex));
+		lsd_announce(s->lsd, hex, s->listen_port);
+		mbt_log_debug(MBT_LOG_LSD, "LSD announce: %s port %hu", hex, s->listen_port);
+	}
+}
+
 static void
 session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 {
@@ -210,6 +237,100 @@ session_find(struct mbt_session *s, struct mbt_infohash *ih)
 	return NULL;
 }
 
+/* --- Listen socket --- */
+
+#define HANDSHAKE_SIZE 68
+
+static void
+listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
+{
+	struct mbt_session *s = v;
+	struct sockaddr_in addr;
+	socklen_t alen = sizeof(addr);
+	int cfd, rv;
+	unsigned char hs[HANDSHAKE_SIZE];
+	uint8_t hash[20], ext[8], their_id[20];
+
+	(void)io; (void)events;
+
+	cfd = accept4(fd, (struct sockaddr *)&addr, &alen, SOCK_NONBLOCK | SOCK_CLOEXEC);
+	if (cfd < 0)
+		return;
+
+	/* Read handshake synchronously (nonblocking — drop if not immediately available) */
+	ssize_t n = recv(cfd, hs, HANDSHAKE_SIZE, MSG_WAITALL);
+	if (n != HANDSHAKE_SIZE || hs[0] != 19 ||
+	    memcmp(hs + 1, "BitTorrent protocol", 19) != 0) {
+		close(cfd);
+		return;
+	}
+
+	memcpy(ext, hs + 20, 8);
+	memcpy(hash, hs + 28, 20);
+	memcpy(their_id, hs + 48, 20);
+
+	/* Find torrent by infohash */
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (memcmp(st->ih->hash_sha1, hash, 20) == 0)
+			break;
+	}
+
+	if (!st) {
+		close(cfd);
+		return;
+	}
+
+	char paddr[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &addr.sin_addr, paddr, sizeof(paddr));
+	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, ntohs(addr.sin_port));
+
+	/* Wrap fd in conn and hand to torrent */
+	struct mbt_conn *conn;
+	rv = mbt_conn_new(s->ev, &conn, cfd, NULL, NULL, NULL);
+	if (rv < 0) { close(cfd); return; }
+
+	rv = mbt_torrent_add_peer_incoming(st->torrent, conn, ext, their_id);
+	if (rv < 0)
+		mbt_conn_free(conn);
+}
+
+static int
+session_listen(struct mbt_session *s)
+{
+	int fd, rv, yes = 1;
+	struct sockaddr_in sa = {
+		.sin_family = AF_INET,
+		.sin_port = htons(s->listen_port),
+		.sin_addr.s_addr = INADDR_ANY,
+	};
+
+	fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	if (fd < 0)
+		return -errno;
+
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+	if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+		rv = -errno;
+		close(fd);
+		return rv;
+	}
+
+	if (listen(fd, 16) < 0) {
+		rv = -errno;
+		close(fd);
+		return rv;
+	}
+
+	s->listen_fd = fd;
+	rv = mbt_ev_io_new(s->ev, &s->listen_io, fd, MBT_EV_READ, listen_accept_cb, s);
+	if (rv < 0) { close(fd); return rv; }
+
+	mbt_log_info(MBT_LOG_SESSION, "listening on port %hu", s->listen_port);
+	return 0;
+}
+
 /* --- Public API --- */
 
 int
@@ -240,6 +361,15 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	/* Maintenance timer: refill peers from pool every 5s */
 	mbt_ev_timer_new(s->ev, &s->maintain_timer, 5 * 1000000ULL, session_maintain_cb, s);
 
+	/* Listen socket for incoming peers */
+	if (s->listen_port > 0)
+		session_listen(s);
+
+	/* LSD announcer: multicast our infohashes every 5 min */
+	if (cfg->lsd_announce && s->lsd && s->listen_port > 0)
+		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, 300 * 1000000ULL,
+		                 session_lsd_announce_cb, s);
+
 	*out = s;
 	return 0;
 }
@@ -249,6 +379,13 @@ mbt_session_free(struct mbt_session *s)
 {
 	if (!s)
 		return;
+
+	if (s->listen_io)
+		mbt_ev_io_free(s->listen_io);
+	if (s->listen_fd > 0)
+		close(s->listen_fd);
+	if (s->lsd_announce_timer)
+		mbt_ev_timer_free(s->lsd_announce_timer);
 
 	/* Free pending connects */
 	struct pending_connect *pc;

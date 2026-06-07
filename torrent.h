@@ -57,6 +57,8 @@ int mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len
 
 /* Add a connected peer — torrent takes ownership of conn */
 int mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn);
+int mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
+                                  const uint8_t ext[8], const uint8_t their_id[20]);
 struct mbt_peerdb *mbt_torrent_peerdb(struct mbt_torrent *t);
 
 /* Query */

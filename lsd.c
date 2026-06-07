@@ -238,3 +238,30 @@ err:
 	lsd_frame_info_freep(&info);
 	return -ENOMEM;
 }
+
+int
+lsd_announce(struct lsd *lsd, const char *infohash_hex, uint16_t port)
+{
+	char buf[256];
+	int len;
+	struct sockaddr_in dst = {
+		.sin_family = AF_INET,
+		.sin_port = htons(6771),
+		.sin_addr.s_addr = inet_addr("239.192.152.143"),
+	};
+
+	len = snprintf(buf, sizeof(buf),
+		"BT-SEARCH * HTTP/1.1\r\n"
+		"Host: 239.192.152.143:6771\r\n"
+		"Port: %hu\r\n"
+		"Infohash: %s\r\n"
+		"\r\n", port, infohash_hex);
+
+	if (len < 0 || (size_t)len >= sizeof(buf))
+		return -ENOMEM;
+
+	ssize_t rv = sendto(lsd->fd, buf, len, 0, (struct sockaddr *)&dst, sizeof(dst));
+	if (rv < 0)
+		return -errno;
+	return 0;
+}

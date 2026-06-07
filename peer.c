@@ -569,6 +569,62 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 	return 0;
 }
 
+int
+mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
+                      struct mbt_infohash *ih, const uint8_t peer_id[20],
+                      uint32_t piece_count, const uint8_t ext[8], const uint8_t their_id[20],
+                      struct mbt_peer_callbacks *cb, void *arg)
+{
+	struct mbt_peer *p;
+	int rv;
+
+	p = calloc(1, sizeof(*p));
+	if (!p)
+		return -ENOMEM;
+
+	p->ev = ev;
+	p->conn = conn;
+	p->ih = mbt_infohash_ref(ih);
+	memcpy(p->our_id, peer_id, 20);
+	p->cb = *cb;
+	p->cb_arg = arg;
+	p->peer_choking = 1;
+	p->am_choking = 1;
+	p->piece_count = piece_count;
+
+	memcpy(p->ext, ext, 8);
+	memcpy(p->their_id, their_id, 20);
+	p->flags = 0;
+	if (ext[7] & 0x01) p->flags |= MBT_PEER_FLAG_DHT;
+	if (ext[7] & 0x04) p->flags |= MBT_PEER_FLAG_FAST;
+	if (ext[5] & 0x10) p->flags |= MBT_PEER_FLAG_EXTENSION;
+
+	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->port);
+	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);
+
+	/* Send our handshake as response */
+	rv = peer_send_handshake(p);
+	if (rv < 0) { free(p); return rv; }
+
+	/* Already past handshake — go to extension or active */
+	if (p->flags & MBT_PEER_FLAG_EXTENSION) {
+		p->state = MBT_PEER_EXTENSION;
+		peer_send_extension_handshake(p);
+		mbt_conn_set_watermark(p->conn, 4);
+	} else {
+		p->state = MBT_PEER_ACTIVE;
+		mbt_conn_set_watermark(p->conn, 4);
+		if (p->cb.on_active)
+			p->cb.on_active(p, p->cb_arg);
+	}
+
+	rv = mbt_ev_timer_new(ev, &p->timer, 120 * 1000000ULL, peer_keepalive_cb, p);
+	if (rv < 0) { free(p); return rv; }
+
+	*out = p;
+	return 0;
+}
+
 void
 mbt_peer_disconnect(struct mbt_peer *p)
 {

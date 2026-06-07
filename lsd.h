@@ -34,4 +34,5 @@ void lsd_frame_info_freep(struct lsd_frame_info **v);
 int lsd_init(struct lsd **out, int setfl);
 int lsd_recv(struct lsd *lsd, struct lsd_frame **out);
 int lsd_frame_parse(struct lsd_frame *frame, struct lsd_frame_info **out);
+int lsd_announce(struct lsd *lsd, const char *infohash_hex, uint16_t port);
 

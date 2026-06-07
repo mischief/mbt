@@ -69,6 +69,12 @@ int mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn
                  uint32_t piece_count,
                  struct mbt_peer_callbacks *cb, void *arg);
 
+/* Create peer from an already-accepted incoming connection (handshake already read) */
+int mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
+                          struct mbt_infohash *ih, const uint8_t peer_id[20],
+                          uint32_t piece_count, const uint8_t ext[8], const uint8_t their_id[20],
+                          struct mbt_peer_callbacks *cb, void *arg);
+
 /* Free peer (closes connection) */
 void mbt_peer_free(struct mbt_peer *p);
 
