@@ -79,16 +79,21 @@ test_ipv6_peer(void)
 static void
 test_errors(void)
 {
-	struct mbt_magnet m;
+	struct mbt_magnet m = {0};
 
 	/* Not a magnet */
 	assert(mbt_magnet_parse("http://example.com", &m) < 0);
+	mbt_magnet_free(&m);
 
 	/* No infohash */
+	memset(&m, 0, sizeof(m));
 	assert(mbt_magnet_parse("magnet:?dn=test", &m) < 0);
+	mbt_magnet_free(&m);
 
 	/* Bad hash length */
+	memset(&m, 0, sizeof(m));
 	assert(mbt_magnet_parse("magnet:?xt=urn:btih:tooshort", &m) < 0);
+	mbt_magnet_free(&m);
 }
 
 static void

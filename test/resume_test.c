@@ -109,6 +109,7 @@ main(void)
 
 	/* Cleanup */
 	mbt_session_free(session);
+	mbt_ev_destroy(cfg.ev);
 	mbt_storage_memory_destroy(mem);
 	unlink(torrent_path);
 	free(torrent_path);
