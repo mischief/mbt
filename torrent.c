@@ -618,8 +618,8 @@ on_error(struct mbt_peer *p, int err, void *arg)
 				t->pieces[i].received = 0;
 				t->pieces[i].requested = 0;
 				free(t->pieces[i].data);
-				if (t->pieces[i].blocks) mbt_bitmap_unref(t->pieces[i].blocks);
 				t->pieces[i].data = NULL;
+				if (t->pieces[i].blocks) { mbt_bitmap_unref(t->pieces[i].blocks); t->pieces[i].blocks = NULL; }
 			}
 		}
 	}
