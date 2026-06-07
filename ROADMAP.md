@@ -22,7 +22,7 @@
 - [x] Request timeout (15s), peer banning (hash failures), endgame mode
 - [x] Peer database (peerdb.c) — RB tree, state/source/backoff, torrent-owned
 - [x] Out-of-order block assembly (bitmask tracking)
-- [x] Bounded memory: active piece buffer cap (peer_count × 4 + 8)
+- [x] Bounded memory: one active piece per peer
 
 ## Phase 2: Discovery (complete)
 
@@ -44,6 +44,8 @@
 - [x] Send bitfield on peer activation, unchoke all
 - [x] Resume: SHA1 verify existing pieces on startup
 - [x] HAVE broadcast on piece completion
+- [x] Metadata retry from multiple peers (resilient to disconnects)
+- [x] Immediate piece reassignment on peer choke
 - [ ] Choking algorithm (top-4 + optimistic)
 - [ ] Announce event=completed / event=stopped to tracker
 
