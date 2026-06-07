@@ -177,5 +177,8 @@ test('dht', dht_test, timeout: 10)
 tracker_server_test = executable('tracker_server_test', 'test/tracker_server_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_server', tracker_server_test, timeout: 15)
 
+metainfo_test = executable('metainfo_test', 'test/metainfo_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('metainfo', metainfo_test)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
