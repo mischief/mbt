@@ -241,12 +241,6 @@ main(int argc, char *argv[])
 	rv = mbt_session_new(&session, &cfg);
 	if (rv < 0)
 		errx(1, "session: %s", strerror(-rv));
-
-	if (!no_lsd)
-		mbt_session_enable_lsd(session);
-	if (use_dht)
-		mbt_session_enable_dht(session);
-
 	/* Add torrent or magnet */
 	if (strncmp(argv[0], "magnet:", 7) == 0) {
 		rv = mbt_session_add_magnet(session, argv[0]);
@@ -268,6 +262,12 @@ main(int argc, char *argv[])
 		mbt_torrent_set_callbacks(t, &cb, NULL);
 		fprintf(stderr, "downloading: %s\n", mbt_torrent_name(t) ? mbt_torrent_name(t) : "(metadata pending)");
 	}
+
+	if (!no_lsd)
+		mbt_session_enable_lsd(session);
+	if (use_dht)
+		mbt_session_enable_dht(session);
+
 	rv = mbt_session_run(session);
 
 	mbt_session_free(session);
