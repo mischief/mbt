@@ -869,11 +869,38 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	if (t->storage_ops && t->storage_ops->open)
 		t->storage_ops->open(t->storage_ctx, t);
 
-	if (t->storage_ops && t->storage_ops->have_piece) {
-		for (uint32_t i = 0; i < t->piece_count; i++) {
-			if (t->storage_ops->have_piece(t->storage_ctx, i) > 0) {
-				mbt_bitmap_set(t->have, i);
-				t->have_count++;
+	if (t->storage_ops && t->storage_ops->read_piece) {
+		uint8_t *buf = malloc(t->piece_length);
+		if (buf) {
+			for (uint32_t i = 0; i < t->piece_count; i++) {
+				uint32_t plen = t->piece_length;
+				if (i == t->piece_count - 1) {
+					uint32_t rem = t->total_length % t->piece_length;
+					if (rem) plen = rem;
+				}
+				int rv2 = t->storage_ops->read_piece(t->storage_ctx, i, buf, plen);
+				if (rv2 < 0)
+					continue;
+
+				SHA1_CTX ctx;
+				uint8_t digest[20];
+				SHA1Init(&ctx);
+				SHA1Update(&ctx, buf, plen);
+				SHA1Final(digest, &ctx);
+
+				if (memcmp(digest, t->pieces[i].hash, 20) == 0) {
+					mbt_bitmap_set(t->have, i);
+					t->have_count++;
+				}
+			}
+			free(buf);
+			if (t->have_count > 0)
+				mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
+				             t->have_count, t->piece_count);
+			if (t->have_count == t->piece_count) {
+				mbt_log_info(MBT_LOG_TORRENT, "all pieces verified, nothing to download");
+				if (t->cb.on_complete)
+					t->cb.on_complete(t, t->cb_arg);
 			}
 		}
 	}
