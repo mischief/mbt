@@ -154,5 +154,11 @@ test('resume', resume_test)
 e2e_test = executable('e2e_test', 'test/e2e_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('e2e', e2e_test, timeout: 15)
 
+storage_file_test = executable('storage_file_test', 'test/storage_file_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('storage_file', storage_file_test)
+
+peerdb_test = executable('peerdb_test', 'test/peerdb_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('peerdb', peerdb_test)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
