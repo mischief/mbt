@@ -274,7 +274,17 @@ mbt_metainfo_set_content(struct mbt_metainfo *mi, const char *path, uint32_t pie
 	struct stat st;
 	if (stat(path, &st) < 0) return -errno;
 
-	if (piece_length > 0) mi->piece_length = piece_length;
+	if (piece_length > 0) {
+		/* Validate: must be power of 2, 16KB–16MB */
+		if (piece_length < 16384) piece_length = 16384;
+		if (piece_length > 16 * 1024 * 1024) piece_length = 16 * 1024 * 1024;
+		/* Round up to next power of 2 */
+		uint32_t p = 1;
+		while (p < piece_length) p <<= 1;
+		mi->piece_length = p;
+	} else {
+		/* Auto-select based on total size (after scanning files) */
+	}
 	int single = S_ISREG(st.st_mode);
 
 	const char *name = strrchr(path, '/');
@@ -292,6 +302,16 @@ mbt_metainfo_set_content(struct mbt_metainfo *mi, const char *path, uint32_t pie
 		mi->file_count = 1;
 	} else {
 		collect_files(path, "", mi);
+	}
+
+	/* Auto-select piece length if not specified */
+	if (piece_length == 0) {
+		if (mi->total_length < 256 * 1024)         mi->piece_length = 16384;
+		else if (mi->total_length < 4 * 1024 * 1024)   mi->piece_length = 65536;
+		else if (mi->total_length < 64 * 1024 * 1024)  mi->piece_length = 262144;
+		else if (mi->total_length < 512 * 1024 * 1024) mi->piece_length = 524288;
+		else if (mi->total_length < (uint64_t)2 * 1024 * 1024 * 1024) mi->piece_length = 1048576;
+		else mi->piece_length = 2097152;
 	}
 
 	/* Compute piece hashes */
