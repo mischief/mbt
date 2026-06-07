@@ -5,6 +5,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <libgen.h>
 
 #include "storage.h"
 #include "torrent.h"
@@ -15,63 +16,87 @@
  * File storage backend.
  * ctx = (const char *) download directory.
  *
- * On open: creates dir/name (single-file) or dir/name/ (multi-file).
- * Per-torrent fd tracked by infohash in a simple list.
+ * Single-file: dir/name
+ * Multi-file: dir/torrent_name/path/to/file
+ *
+ * Pieces are written to the correct file(s) based on the file table.
  */
 
-#define MAX_TORRENTS 64
-
 struct file_entry {
-	struct mbt_infohash *ih;
 	int fd;
+	uint64_t offset;  /* global offset in torrent data */
+	uint64_t length;
+};
+
+struct file_storage {
+	struct file_entry *entries;
+	int count;
 	uint32_t piece_length;
 };
 
-static struct file_entry entries[MAX_TORRENTS];
-static int entry_count;
+static struct file_storage fs = {0};
 
-static struct file_entry *
-find_entry(struct mbt_torrent *t)
+static int
+mkdirs(const char *path)
 {
-	struct mbt_infohash *ih = mbt_torrent_infohash(t);
-	for (int i = 0; i < entry_count; i++) {
-		if (mbt_infohash_cmp(entries[i].ih, ih) == 0)
-			return &entries[i];
+	char *tmp = strdup(path);
+	char *dir = dirname(tmp);
+	if (strlen(dir) > 1) {
+		/* Recursively create parent dirs */
+		char *parent = strdup(dir);
+		mkdirs(parent);
+		free(parent);
+		mkdir(dir, 0755);
 	}
-	return NULL;
+	free(tmp);
+	return 0;
 }
 
 int
 mbt_storage_file_open(void *ctx, struct mbt_torrent *t)
 {
 	const char *dir = ctx;
+	int fc = mbt_torrent_file_count(t);
 	const char *name = mbt_torrent_name(t);
-	char path[4096];
-	int fd, rv;
 
-	if (find_entry(t))
-		return 0;
+	if (fs.entries)
+		return 0; /* already open */
 
-	if (entry_count >= MAX_TORRENTS)
+	if (fc == 0)
+		return -EINVAL;
+
+	fs.entries = calloc(fc, sizeof(struct file_entry));
+	if (!fs.entries)
 		return -ENOMEM;
+	fs.count = fc;
+	fs.piece_length = mbt_torrent_piece_length(t);
 
-	if (!name)
-		name = "download";
+	for (int i = 0; i < fc; i++) {
+		const struct mbt_file *f = mbt_torrent_file(t, i);
+		char path[4096];
 
-	rv = snprintf(path, sizeof(path), "%s/%s", dir, name);
-	if (rv < 0 || (size_t)rv >= sizeof(path))
-		return -ENAMETOOLONG;
+		if (fc == 1) {
+			/* Single-file: dir/filename */
+			snprintf(path, sizeof(path), "%s/%s", dir, f->path);
+		} else {
+			/* Multi-file: dir/torrent_name/file_path */
+			snprintf(path, sizeof(path), "%s/%s/%s", dir,
+			         name ? name : "download", f->path);
+		}
 
-	fd = open(path, O_RDWR | O_CREAT, 0644);
-	if (fd < 0)
-		return -errno;
+		mkdirs(path);
 
-	entries[entry_count].ih = mbt_infohash_ref(mbt_torrent_infohash(t));
-	entries[entry_count].fd = fd;
-	entries[entry_count].piece_length = 0;
-	entry_count++;
+		fs.entries[i].fd = open(path, O_RDWR | O_CREAT, 0644);
+		if (fs.entries[i].fd < 0) {
+			mbt_log_warn(MBT_LOG_STORAGE, "open %s: %s", path, strerror(errno));
+			return -errno;
+		}
 
-	mbt_log_info(MBT_LOG_STORAGE, "opened %s", path);
+		fs.entries[i].offset = f->offset;
+		fs.entries[i].length = f->length;
+	}
+
+	mbt_log_info(MBT_LOG_STORAGE, "opened %d file(s) in %s", fc, dir);
 	return 0;
 }
 
@@ -79,23 +104,37 @@ int
 mbt_storage_file_write_piece(void *ctx, uint32_t index, const void *data, size_t len)
 {
 	(void)ctx;
-	/* Caller passes ctx but we need the torrent to find fd.
-	 * Workaround: for now use last opened entry (single-torrent case).
-	 * TODO: proper per-torrent dispatch once interface supports it. */
-	struct file_entry *e = &entries[entry_count - 1];
-	off_t offset;
-	ssize_t rv;
+	uint64_t piece_offset = (uint64_t)index * fs.piece_length;
+	const uint8_t *p = data;
+	size_t remaining = len;
 
-	if (e->piece_length == 0)
-		e->piece_length = len;
+	/* Find which file(s) this piece spans */
+	for (int i = 0; i < fs.count && remaining > 0; i++) {
+		struct file_entry *e = &fs.entries[i];
+		uint64_t file_end = e->offset + e->length;
 
-	offset = (off_t)index * e->piece_length;
+		/* Does this file overlap with the piece? */
+		if (piece_offset >= file_end)
+			continue;
+		if (piece_offset + remaining <= e->offset)
+			break;
 
-	rv = pwrite(e->fd, data, len, offset);
-	if (rv < 0)
-		return -errno;
-	if ((size_t)rv != len)
-		return -EIO;
+		/* Compute write offset within this file */
+		uint64_t write_start = piece_offset > e->offset ? piece_offset - e->offset : 0;
+		uint64_t data_start = piece_offset > e->offset ? 0 : e->offset - piece_offset;
+		uint64_t can_write = e->length - write_start;
+		size_t to_write = remaining - data_start;
+		if (to_write > can_write)
+			to_write = can_write;
+
+		ssize_t rv = pwrite(e->fd, p + data_start, to_write, write_start);
+		if (rv < 0)
+			return -errno;
+
+		remaining -= (data_start + to_write);
+		piece_offset += (data_start + to_write);
+		p += (data_start + to_write);
+	}
 
 	return 0;
 }
@@ -104,20 +143,34 @@ int
 mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, size_t len)
 {
 	(void)ctx;
-	struct file_entry *e = &entries[entry_count - 1];
-	off_t offset;
-	ssize_t rv;
+	uint64_t piece_offset = (uint64_t)index * fs.piece_length;
+	uint8_t *p = buf;
+	size_t remaining = len;
 
-	if (e->piece_length == 0)
-		return -EINVAL;
+	for (int i = 0; i < fs.count && remaining > 0; i++) {
+		struct file_entry *e = &fs.entries[i];
+		uint64_t file_end = e->offset + e->length;
 
-	offset = (off_t)index * e->piece_length;
+		if (piece_offset >= file_end)
+			continue;
+		if (piece_offset + remaining <= e->offset)
+			break;
 
-	rv = pread(e->fd, buf, len, offset);
-	if (rv < 0)
-		return -errno;
-	if ((size_t)rv != len)
-		return -EIO;
+		uint64_t read_start = piece_offset > e->offset ? piece_offset - e->offset : 0;
+		uint64_t data_start = piece_offset > e->offset ? 0 : e->offset - piece_offset;
+		uint64_t can_read = e->length - read_start;
+		size_t to_read = remaining - data_start;
+		if (to_read > can_read)
+			to_read = can_read;
+
+		ssize_t rv = pread(e->fd, p + data_start, to_read, read_start);
+		if (rv < 0)
+			return -errno;
+
+		remaining -= (data_start + to_read);
+		piece_offset += (data_start + to_read);
+		p += (data_start + to_read);
+	}
 
 	return 0;
 }
@@ -127,18 +180,21 @@ mbt_storage_file_have_piece(void *ctx, uint32_t index)
 {
 	(void)ctx;
 	(void)index;
-	return 0;
+	return 0; /* no resume support yet */
 }
 
 void
 mbt_storage_file_close(void *ctx)
 {
 	(void)ctx;
-	for (int i = 0; i < entry_count; i++) {
-		close(entries[i].fd);
-		mbt_infohash_unref(entries[i].ih);
+	if (fs.entries) {
+		for (int i = 0; i < fs.count; i++)
+			if (fs.entries[i].fd >= 0)
+				close(fs.entries[i].fd);
+		free(fs.entries);
+		fs.entries = NULL;
+		fs.count = 0;
 	}
-	entry_count = 0;
 }
 
 static const struct mbt_storage_ops file_ops = {

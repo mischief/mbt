@@ -70,6 +70,10 @@ struct mbt_torrent {
 	uint64_t total_length;
 	char *name;
 
+	/* File table */
+	struct mbt_file *files;
+	int file_count;
+
 	/* Have bitmap */
 	struct mbt_bitmap *have;
 	uint32_t have_count;
@@ -641,6 +645,11 @@ mbt_torrent_free(struct mbt_torrent *t)
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);
 	free(t->name);
+	if (t->files) {
+		for (int i = 0; i < t->file_count; i++)
+			free(t->files[i].path);
+		free(t->files);
+	}
 	mbt_infohash_unref(t->ih);
 	free(t);
 }
@@ -680,18 +689,66 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	tmp = be_find(be, "length");
 	if (tmp && tmp->type == BE_INTEGER) {
 		t->total_length = (uint64_t)tmp->integer;
+		/* Single-file: one entry in file table */
+		t->file_count = 1;
+		t->files = calloc(1, sizeof(struct mbt_file));
+		if (t->files) {
+			t->files[0].path = t->name ? strdup(t->name) : strdup("download");
+			t->files[0].offset = 0;
+			t->files[0].length = t->total_length;
+		}
 	} else {
-		/* Multi-file: sum lengths from files list */
+		/* Multi-file: build file table from files list */
 		struct be_value *files = be_find(be, "files");
 		if (!files || files->type != BE_LIST)
 			return -EINVAL;
+
+		/* Count files */
 		struct be_value *f;
+		int count = 0;
+		STAILQ_FOREACH(f, &files->listhead, next)
+			if (f->type == BE_DICTIONARY) count++;
+
+		t->files = calloc(count, sizeof(struct mbt_file));
+		if (!t->files)
+			return -ENOMEM;
+
+		uint64_t offset = 0;
+		int idx = 0;
 		STAILQ_FOREACH(f, &files->listhead, next) {
 			if (f->type != BE_DICTIONARY) continue;
 			struct be_value *flen = be_find(f, "length");
-			if (flen && flen->type == BE_INTEGER)
-				t->total_length += (uint64_t)flen->integer;
+			if (!flen || flen->type != BE_INTEGER) continue;
+
+			/* Build path from path list */
+			struct be_value *path_list = be_find(f, "path");
+			if (path_list && path_list->type == BE_LIST) {
+				/* Join path components with / */
+				char pathbuf[1024] = {0};
+				size_t pos = 0;
+				struct be_value *comp;
+				STAILQ_FOREACH(comp, &path_list->listhead, next) {
+					if (comp->type != BE_STRING) continue;
+					if (pos > 0 && pos < sizeof(pathbuf) - 1)
+						pathbuf[pos++] = '/';
+					size_t clen = comp->string.iov_len;
+					if (pos + clen < sizeof(pathbuf)) {
+						memcpy(pathbuf + pos, comp->string.iov_base, clen);
+						pos += clen;
+					}
+				}
+				pathbuf[pos] = '\0';
+				t->files[idx].path = strdup(pathbuf);
+			}
+
+			t->files[idx].offset = offset;
+			t->files[idx].length = (uint64_t)flen->integer;
+			offset += t->files[idx].length;
+			idx++;
 		}
+		t->file_count = idx;
+		t->total_length = offset;
+
 		if (t->total_length == 0)
 			return -EINVAL;
 	}
@@ -845,4 +902,18 @@ mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece)
 	if (!t->pieces || piece >= t->piece_count)
 		return 0;
 	return t->pieces[piece].requested >= t->pieces[piece].length;
+}
+
+int
+mbt_torrent_file_count(struct mbt_torrent *t)
+{
+	return t->file_count;
+}
+
+const struct mbt_file *
+mbt_torrent_file(struct mbt_torrent *t, int index)
+{
+	if (index < 0 || index >= t->file_count)
+		return NULL;
+	return &t->files[index];
 }

@@ -20,6 +20,13 @@ enum mbt_piece_state {
 	MBT_PIECE_ACTIVE,      /* blocks being requested/received */
 };
 
+/* File entry in a torrent */
+struct mbt_file {
+	char *path;            /* relative path (single component or multi-component joined with /) */
+	uint64_t offset;       /* byte offset within the torrent data */
+	uint64_t length;
+};
+
 /* Torrent configuration */
 struct mbt_torrent_config {
 	struct mbt_ev *ev;
@@ -63,5 +70,7 @@ int mbt_torrent_peer_count(struct mbt_torrent *t);
 int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);
 int mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece);
 int mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece);
+int mbt_torrent_file_count(struct mbt_torrent *t);
+const struct mbt_file *mbt_torrent_file(struct mbt_torrent *t, int index);
 
 #endif
