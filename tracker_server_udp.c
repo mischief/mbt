@@ -171,17 +171,18 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		uint64_t left;
 		memcpy(&left, buf + 64, 8);
 		left = __builtin_bswap64(left);
-		/* bytes 72-75: event */
-		/* bytes 76-79: IP (0 = use source) */
-		/* bytes 80-83: key */
-		/* bytes 84-87: num_want */
+		/* bytes 72-79: uploaded */
+		/* bytes 80-83: event */
+		/* bytes 84-87: IP (0 = use source) */
+		/* bytes 88-91: key */
+		/* bytes 92-95: num_want */
 		int32_t num_want;
-		memcpy(&num_want, buf + 84, 4);
+		memcpy(&num_want, buf + 92, 4);
 		num_want = (int32_t)ntohl(num_want);
 		if (num_want <= 0 || num_want > 50) num_want = 50;
-		/* bytes 88-89: port */
+		/* bytes 96-97: port */
 		uint16_t peer_port;
-		memcpy(&peer_port, buf + 88, 2);
+		memcpy(&peer_port, buf + 96, 2);
 
 		struct sockaddr_in peer_addr = from;
 		if (peer_port) peer_addr.sin_port = peer_port; /* already network order */

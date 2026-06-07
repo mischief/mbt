@@ -17,6 +17,7 @@
 #include "mbt/storage.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "mbt/log.h"
 #include "mbt/infohash.h"
 
 #include <sha1.h>
@@ -92,6 +93,8 @@ int main(void)
 	for (int i = 0; i < TOTAL_LEN; i++) test_data[i] = (i * 7 + 13) & 0xff;
 
 	mbt_ev_new_default(&ev);
+	mbt_log_set(mbt_log_stderr, NULL);
+	mbt_log_set_debug(0xff);
 
 	/* Start local tracker */
 	struct mbt_tracker_server *tracker;
