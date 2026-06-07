@@ -58,24 +58,32 @@
 
 - [x] SHA1 verify existing pieces on startup (resume partial downloads)
 - [ ] Per-peer write buffering (replace EAGAIN spin with proper EPOLLOUT queue)
+- [ ] Torrent remove/pause at runtime
+- [ ] Upload/download rate limiting
 - [ ] `storage_memory.c` — for testing
-- [ ] `storage_blockdev.c` — write ISO directly to /dev/sdX
 
-## Phase 5: Tools
+## Phase 5: API polish (next)
+
+- [ ] Namespace all public symbols under `mbt_*` (be_*, lsd_*, hex utils)
+- [ ] Hide internal symbols (sdbuf, tpack/tunpack) via linker version script
+- [ ] Install headers under `<mbt/*.h>` via meson install
+- [ ] Stable public API surface: session.h, torrent.h, event.h, storage.h
+
+## Phase 6: Tools
 
 - [x] `mbt-get` — .torrent + magnet one-shot downloader (-S seed, -L no LSD, -l port)
 - [x] `mbt-lsd` — LSD listener, auto-add discovered torrents
 - [ ] `mbt-seed` — seed a file given a .torrent
-- [ ] `mbt-daemon` — long-running daemon + control socket
+- [ ] `mbt-daemon` — long-running daemon + DBus control interface
 
-## Phase 6: Tracker server (separate library)
+## Phase 7: Tracker server (separate library)
 
 - [ ] `libmbt-tracker` — embeddable tracker
 - [ ] HTTP announce endpoint (BEP 3)
 - [ ] UDP announce (BEP 15)
 - [ ] Scrape support
 
-## Phase 7: Advanced
+## Phase 8: Advanced
 
 - [ ] µTP transport (BEP 29)
 - [ ] HTTP seeding (BEP 19)
@@ -83,9 +91,3 @@
 - [ ] Holepunch (BEP 55)
 - [ ] Private torrents (BEP 27)
 - [ ] Rarest-first picker with peer availability tracking
-
-## Low Priority: Bencode cleanup
-
-- [ ] Namespace rename: `be_*` → `mbt_be_*`
-- [ ] Replace `struct iovec` with `struct { char *data; size_t len; }`
-- [ ] Single-pass growable-buffer encoder
