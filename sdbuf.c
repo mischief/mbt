@@ -43,12 +43,12 @@ sdbuf_new(struct sdbuf **out, sdbuf_cb read, sdbuf_cb write, sdbuf_eventcb error
 		return -ENOMEM;
 
 	b->rbuf.len = 4096;
-	b->rbuf.buf = malloc(b->rbuf.len);
+	b->rbuf.buf = calloc(1, b->rbuf.len);
 	if(!b->rbuf.buf)
 		goto serr;
 
 	b->wbuf.len = 4096;
-	b->wbuf.buf = malloc(b->wbuf.len);
+	b->wbuf.buf = calloc(1, b->wbuf.len);
 	if(!b->wbuf.buf)
 		goto rerr;
 
@@ -100,6 +100,7 @@ bufwant(struct buf *buf, size_t sz)
 	if(!np)
 		return -ENOMEM;
 
+	memset(np + buf->len, 0, buf->len); /* zero new space for valgrind */
 	buf->buf = np;
 	buf->p = buf->buf + diff;
 	buf->len = buf->len * 2;

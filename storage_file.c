@@ -166,6 +166,8 @@ mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, size_t len)
 		ssize_t rv = pread(e->fd, p + data_start, to_read, read_start);
 		if (rv < 0)
 			return -errno;
+		if ((size_t)rv < to_read)
+			return -EIO; /* short read — file truncated or not yet written */
 
 		remaining -= (data_start + to_read);
 		piece_offset += (data_start + to_read);

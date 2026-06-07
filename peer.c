@@ -131,7 +131,7 @@ peer_recv_handshake(struct mbt_peer *p)
 {
 	unsigned char buf[HANDSHAKE_SIZE];
 	unsigned char proto[19], hash[20];
-	uint32_t pstrlen;
+	uint32_t pstrlen = 0;
 	int off = 0, rv;
 
 	rv = mbt_conn_read(p->conn, buf, HANDSHAKE_SIZE);
