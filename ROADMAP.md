@@ -40,25 +40,30 @@
 - [ ] PEX send — 60s timer, batch added/dropped peers, send to all connected
 - [ ] DHT (BEP 5)
 
-## Phase 3: Seeding + incoming connections
+## Phase 3: Seeding + incoming connections (complete)
 
-- [ ] Listen socket in session — accept incoming peers
-- [ ] Route incoming handshake to correct torrent by infohash
-- [ ] Respond to request messages (read from storage, send piece)
+- [x] Listen socket in session — accept incoming peers
+- [x] Route incoming handshake to correct torrent by infohash
+- [x] Respond to request messages (read from storage, send piece)
+- [x] Serve BEP 9 metadata requests to peers
+- [x] Send bitfield on peer activation
+- [x] Unchoke all connected peers (simple strategy)
+- [x] LSD announcer (opt-in via session config)
 - [ ] Send have messages on piece completion to all connected peers
 - [ ] Choking algorithm (unchoke top-4 by upload rate + optimistic every 30s)
 - [ ] Announce `event=completed` to tracker when download finishes
 - [ ] Announce `event=stopped` on graceful shutdown
 
-## Phase 4: Resume + robustness
+## Phase 4: Resume + robustness (started)
 
-- [ ] SHA1 verify existing pieces on startup (resume partial downloads)
+- [x] SHA1 verify existing pieces on startup (resume partial downloads)
+- [ ] Per-peer write buffering (replace EAGAIN spin with proper EPOLLOUT queue)
 - [ ] `storage_memory.c` — for testing
 - [ ] `storage_blockdev.c` — write ISO directly to /dev/sdX
 
 ## Phase 5: Tools
 
-- [x] `mbt-get` — .torrent + magnet one-shot downloader
+- [x] `mbt-get` — .torrent + magnet one-shot downloader (-S seed, -L no LSD, -l port)
 - [x] `mbt-lsd` — LSD listener, auto-add discovered torrents
 - [ ] `mbt-seed` — seed a file given a .torrent
 - [ ] `mbt-daemon` — long-running daemon + control socket
