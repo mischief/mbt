@@ -237,9 +237,77 @@ session_find(struct mbt_session *s, struct mbt_infohash *ih)
 	return NULL;
 }
 
-/* --- Listen socket --- */
+
+/* --- Listen socket (async handshake) --- */
 
 #define HANDSHAKE_SIZE 68
+
+struct pending_accept {
+	struct mbt_session *session;
+	int fd;
+	struct mbt_ev_io *io;
+	struct sockaddr_in addr;
+	unsigned char hs[HANDSHAKE_SIZE];
+	size_t hs_got;
+};
+
+static void
+pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
+{
+	struct pending_accept *pa = v;
+	struct mbt_session *s = pa->session;
+	(void)io; (void)fd; (void)events;
+
+	ssize_t n = recv(pa->fd, pa->hs + pa->hs_got, HANDSHAKE_SIZE - pa->hs_got, 0);
+	if (n <= 0) {
+		close(pa->fd);
+		mbt_ev_io_free(pa->io);
+		free(pa);
+		return;
+	}
+	pa->hs_got += n;
+	if (pa->hs_got < HANDSHAKE_SIZE)
+		return;
+
+	if (pa->hs[0] != 19 || memcmp(pa->hs + 1, "BitTorrent protocol", 19) != 0) {
+		close(pa->fd);
+		mbt_ev_io_free(pa->io);
+		free(pa);
+		return;
+	}
+
+	uint8_t hash[20], ext[8], their_id[20];
+	memcpy(ext, pa->hs + 20, 8);
+	memcpy(hash, pa->hs + 28, 20);
+	memcpy(their_id, pa->hs + 48, 20);
+
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (memcmp(st->ih->hash_sha1, hash, 20) == 0)
+			break;
+	}
+	if (!st) {
+		close(pa->fd);
+		mbt_ev_io_free(pa->io);
+		free(pa);
+		return;
+	}
+
+	char paddr[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &pa->addr.sin_addr, paddr, sizeof(paddr));
+	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, ntohs(pa->addr.sin_port));
+
+	mbt_ev_io_free(pa->io);
+
+	struct mbt_conn *conn;
+	int rv = mbt_conn_new(s->ev, &conn, pa->fd, NULL, NULL, NULL);
+	if (rv < 0) { close(pa->fd); free(pa); return; }
+
+	rv = mbt_torrent_add_peer_incoming(st->torrent, conn, ext, their_id);
+	if (rv < 0)
+		mbt_conn_free(conn);
+	free(pa);
+}
 
 static void
 listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
@@ -247,57 +315,22 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	struct mbt_session *s = v;
 	struct sockaddr_in addr;
 	socklen_t alen = sizeof(addr);
-	int cfd, rv;
-	unsigned char hs[HANDSHAKE_SIZE];
-	uint8_t hash[20], ext[8], their_id[20];
-
+	int cfd;
 	(void)io; (void)events;
 
-	cfd = accept4(fd, (struct sockaddr *)&addr, &alen, SOCK_CLOEXEC);
+	cfd = accept4(fd, (struct sockaddr *)&addr, &alen, SOCK_NONBLOCK | SOCK_CLOEXEC);
 	if (cfd < 0)
 		return;
 
-	/* Read handshake (blocking — accepted fd is blocking until we hand to conn) */
-	ssize_t n = recv(cfd, hs, HANDSHAKE_SIZE, MSG_WAITALL);
-	if (n != HANDSHAKE_SIZE || hs[0] != 19 ||
-	    memcmp(hs + 1, "BitTorrent protocol", 19) != 0) {
-		close(cfd);
-		return;
-	}
+	struct pending_accept *pa = calloc(1, sizeof(*pa));
+	if (!pa) { close(cfd); return; }
+	pa->session = s;
+	pa->fd = cfd;
+	pa->addr = addr;
 
-	memcpy(ext, hs + 20, 8);
-	memcpy(hash, hs + 28, 20);
-	memcpy(their_id, hs + 48, 20);
-
-	/* Find torrent by infohash */
-	struct session_torrent *st;
-	STAILQ_FOREACH(st, &s->torrents, next) {
-		if (memcmp(st->ih->hash_sha1, hash, 20) == 0)
-			break;
-	}
-
-	if (!st) {
-		close(cfd);
-		return;
-	}
-
-	char paddr[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &addr.sin_addr, paddr, sizeof(paddr));
-	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, ntohs(addr.sin_port));
-
-	/* Set nonblock now that handshake is done */
-	fcntl(cfd, F_SETFL, fcntl(cfd, F_GETFL) | O_NONBLOCK);
-
-	/* Wrap fd in conn and hand to torrent */
-	struct mbt_conn *conn;
-	rv = mbt_conn_new(s->ev, &conn, cfd, NULL, NULL, NULL);
-	if (rv < 0) { close(cfd); return; }
-
-	rv = mbt_torrent_add_peer_incoming(st->torrent, conn, ext, their_id);
-	if (rv < 0)
-		mbt_conn_free(conn);
+	int rv = mbt_ev_io_new(s->ev, &pa->io, cfd, MBT_EV_READ, pending_accept_cb, pa);
+	if (rv < 0) { close(cfd); free(pa); return; }
 }
-
 static int
 session_listen(struct mbt_session *s)
 {

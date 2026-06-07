@@ -151,5 +151,8 @@ test('header', header_test)
 resume_test = executable('resume_test', 'test/resume_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('resume', resume_test)
 
+e2e_test = executable('e2e_test', 'test/e2e_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('e2e', e2e_test, timeout: 15)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)

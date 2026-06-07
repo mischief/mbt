@@ -39,8 +39,19 @@ int
 mbt_storage_memory_put_file(struct mbt_storage_memory *m, uint64_t offset,
                             const void *data, size_t len)
 {
-	if (!m->data || offset + len > m->total_length)
-		return -EINVAL;
+	/* Grow buffer if needed (allows pre-fill before open) */
+	if (offset + len > m->total_length) {
+		uint64_t new_len = offset + len;
+		uint8_t *p = realloc(m->data, new_len);
+		if (!p) return -ENOMEM;
+		memset(p + m->total_length, 0, new_len - m->total_length);
+		m->data = p;
+		m->total_length = new_len;
+	}
+	if (!m->data) {
+		m->data = calloc(1, m->total_length);
+		if (!m->data) return -ENOMEM;
+	}
 	memcpy(m->data + offset, data, len);
 	return 0;
 }
