@@ -43,18 +43,15 @@ endif
 # Core library
 bt_src = [
   'be.c',
-  'bt_legacy.c',
   'hex.c',
   'infohash.c',
   'log.c',
   'lsd.c',
   'magnet.c',
-  'node.c',
   'pack.c',
   'peer.c',
   'peerdb.c',
   'picker.c',
-  'remote.c',
   'session.c',
   'storage_file.c',
   'bitmap.c',
@@ -104,8 +101,6 @@ foreach t : tfiles
   test('be_test_file ' + t, be_test_file,
     args: [meson.current_source_dir() / 'test' / 'testdata' / t])
 endforeach
-
-bt_test = executable('bt_test', 'test/bt_test.c', link_with: [libmbt], dependencies: deps)
 
 # New session-based test
 session_test = executable('session_test', 'test/session_test.c', link_with: [libmbt], dependencies: deps)
