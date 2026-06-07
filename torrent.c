@@ -16,6 +16,7 @@
 #include "mbt/bitmap.h"
 #include "mbt/peerdb.h"
 #include "mbt/be.h"
+#include "mbt/hex.h"
 #include "mbt/picker.h"
 
 enum {
@@ -350,8 +351,13 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 		if (memcmp(digest, pi->hash, 20) != 0) {
 			/* Hash mismatch — reset piece, blame peer */
+			char got[41], want[41];
+			mbt_hex_encode(digest, 20, got, sizeof(got));
+			mbt_hex_encode(pi->hash, 20, want, sizeof(want));
 			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch from %s:%hu",
 			             piece, mbt_peer_addr(p), mbt_peer_port(p));
+			mbt_log_debug(MBT_LOG_TORRENT, "  got=%s want=%s len=%zu received=%zu blocks=0x%x",
+			              got, want, pi->length, pi->received, pi->blocks_have);
 			pi->received = 0;
 			pi->blocks_have = 0;
 			pi->requested = 0;
