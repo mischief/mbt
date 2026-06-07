@@ -53,6 +53,7 @@ struct mbt_peer {
 	/* bitfield */
 	struct mbt_bitmap *bitfield;
 	uint32_t piece_count;
+	size_t our_metadata_size; /* metadata we can serve (0 = unknown) */
 
 	/* message framing */
 	size_t msglen;
@@ -179,6 +180,8 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	be_dict_append(be, "m", m);
 	be_dict_append_number(m, "ut_metadata", 3);
 	be_dict_append_number(m, "ut_pex", 4);
+	if (p->our_metadata_size > 0)
+		be_dict_append_number(be, "metadata_size", (int64_t)p->our_metadata_size);
 
 	rv = be_value_encode(be, &encoded, &sz);
 	if (rv < 0)
@@ -252,8 +255,12 @@ peer_rx_message(struct mbt_peer *p)
 		if (length == 0)
 			return 0; /* keepalive */
 
-		if (length > (1 << 18))
+		if (length > (1 << 18)) {
+			mbt_log_warn(MBT_LOG_PEER, "%s:%hu: msg too large: %u (raw: %02x%02x%02x%02x)",
+			             p->addr, p->port, length,
+			             lenbuf[0], lenbuf[1], lenbuf[2], lenbuf[3]);
 			return -ENOMSG;
+		}
 
 		p->msglen = length;
 		mbt_conn_set_watermark(p->conn, p->msglen);
@@ -337,21 +344,28 @@ peer_rx_message(struct mbt_peer *p)
 			/* extension handshake (can arrive again) */
 			peer_recv_extension_handshake(p, p->msglen);
 		} else if (p->ut_metadata_id && extcmd == 3) {
-			/* ut_metadata data for us */
+			/* ut_metadata message */
 			unsigned char *mbuf = malloc(p->msglen);
 			if (!mbuf) return -ENOMEM;
 			sz = mbt_conn_read(p->conn, mbuf, p->msglen);
 
-			/* Parse bencode prefix to find piece number, data follows */
 			__attribute__((cleanup(be_value_freep))) struct be_value *be = NULL;
 			rv = be_value_parse(mbuf, sz, &be);
 			if (rv > 0) {
+				struct be_value *mt = be_find(be, "msg_type");
 				struct be_value *pt = be_find(be, "piece");
-				if (pt && pt->type == BE_INTEGER) {
-					size_t data_off = rv;
-					if (p->cb.on_metadata)
-						p->cb.on_metadata(p, (int)pt->integer,
-						                  mbuf + data_off, sz - data_off, p->cb_arg);
+				if (mt && mt->type == BE_INTEGER && pt && pt->type == BE_INTEGER) {
+					if (mt->integer == 0) {
+						/* Request — fire on_metadata_request */
+						if (p->cb.on_metadata_request)
+							p->cb.on_metadata_request(p, (int)pt->integer, p->cb_arg);
+					} else if (mt->integer == 1) {
+						/* Data response */
+						size_t data_off = rv;
+						if (p->cb.on_metadata)
+							p->cb.on_metadata(p, (int)pt->integer,
+							                  mbuf + data_off, sz - data_off, p->cb_arg);
+					}
 				}
 			}
 			free(mbuf);
@@ -446,6 +460,7 @@ peer_on_read(struct mbt_conn *c, void *v)
 
 		if (p->ext[5] & 0x10) {
 			p->state = MBT_PEER_EXTENSION;
+			peer_send_extension_handshake(p);
 			mbt_conn_set_watermark(p->conn, 4);
 		} else {
 			p->state = MBT_PEER_ACTIVE;
@@ -462,17 +477,44 @@ peer_on_read(struct mbt_conn *c, void *v)
 		unsigned char lenbuf[4];
 		ssize_t sz;
 
-		sz = mbt_conn_read(p->conn, lenbuf, 4);
-		if (sz != 4) { peer_error(p, -EIO); return; }
-		tunpack(lenbuf, "l", &length);
+		if (!p->msglen) {
+			/* First pass: read length, set watermark for full message */
+			sz = mbt_conn_read(p->conn, lenbuf, 4);
+			if (sz != 4) { peer_error(p, -EIO); return; }
+			tunpack(lenbuf, "l", &length);
 
-		if (length < 2) { peer_error(p, -ENOMSG); return; }
+			if (length == 0) break; /* keepalive */
+
+			if (length < 2) {
+				unsigned char skip[16];
+				if (length > 0)
+					mbt_conn_read(p->conn, skip, length);
+				p->state = MBT_PEER_ACTIVE;
+				mbt_conn_set_watermark(p->conn, 4);
+				if (p->cb.on_active)
+					p->cb.on_active(p, p->cb_arg);
+				break;
+			}
+
+			p->msglen = length;
+			mbt_conn_set_watermark(p->conn, length);
+			return; /* wait for full message */
+		}
+
+		/* Second pass: full message available */
+		length = p->msglen;
+		p->msglen = 0;
 
 		sz = mbt_conn_read(p->conn, &cmd, 1);
 		if (cmd != 20) {
-			/* Not extension — might be bitfield etc. Buffer for later? For now skip */
-			/* Actually we should handle it. Simplification: go active, replay. */
-			/* TODO: handle pre-active messages properly */
+			/* Non-extension message — skip and go active */
+			size_t rem = length - 1;
+			while (rem > 0) {
+				unsigned char discard[1024];
+				size_t chunk = rem < sizeof(discard) ? rem : sizeof(discard);
+				mbt_conn_read(p->conn, discard, chunk);
+				rem -= chunk;
+			}
 			p->state = MBT_PEER_ACTIVE;
 			mbt_conn_set_watermark(p->conn, 4);
 			if (p->cb.on_active)
@@ -484,9 +526,6 @@ peer_on_read(struct mbt_conn *c, void *v)
 		if (extcmd == 0) {
 			peer_recv_extension_handshake(p, length - 2);
 		}
-
-		/* Send our extension handshake + interested */
-		peer_send_extension_handshake(p);
 
 		p->state = MBT_PEER_ACTIVE;
 		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: ACTIVE (metadata_size=%zu reqq=%d)",
@@ -573,6 +612,7 @@ int
 mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
                       struct mbt_infohash *ih, const uint8_t peer_id[20],
                       uint32_t piece_count, const uint8_t ext[8], const uint8_t their_id[20],
+                      size_t metadata_size,
                       struct mbt_peer_callbacks *cb, void *arg)
 {
 	struct mbt_peer *p;
@@ -602,6 +642,9 @@ mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn 
 	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->port);
 	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);
 
+	/* Set metadata size so extension handshake includes it */
+	p->our_metadata_size = metadata_size;
+
 	/* Send our handshake as response */
 	rv = peer_send_handshake(p);
 	if (rv < 0) { free(p); return rv; }
@@ -623,6 +666,12 @@ mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn 
 
 	*out = p;
 	return 0;
+}
+
+void
+mbt_peer_set_our_metadata_size(struct mbt_peer *p, size_t sz)
+{
+	p->our_metadata_size = sz;
 }
 
 void
@@ -757,6 +806,19 @@ mbt_peer_send_have(struct mbt_peer *p, uint32_t piece)
 }
 
 int
+mbt_peer_send_bitfield(struct mbt_peer *p, struct mbt_bitmap *bm)
+{
+	size_t bytes = mbt_bitmap_bytes(bm);
+	unsigned char *buf = malloc(1 + bytes);
+	if (!buf) return -ENOMEM;
+	buf[0] = 5; /* bitfield msg id */
+	mbt_bitmap_raw(bm, buf + 1, bytes);
+	int rv = peer_write_msg(p, buf, 1 + bytes);
+	free(buf);
+	return rv;
+}
+
+int
 mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
                     const void *data, size_t len)
 {
@@ -796,4 +858,40 @@ mbt_peer_send_metadata_request(struct mbt_peer *p, int piece)
 		return rv;
 
 	return peer_write_msg(p, packed, rv);
+}
+
+int
+mbt_peer_send_metadata_data(struct mbt_peer *p, int piece, size_t total_size,
+                            const void *data, size_t len)
+{
+	__attribute__((cleanup(be_value_freep))) struct be_value *v = NULL;
+	unsigned char *encoded;
+	size_t sz;
+	int rv;
+
+	if (!p->ut_metadata_id)
+		return -ENOTSUP;
+
+	be_dict_new(&v);
+	be_dict_append_number(v, "msg_type", 1);
+	be_dict_append_number(v, "piece", piece);
+	be_dict_append_number(v, "total_size", (int64_t)total_size);
+
+	rv = be_value_encode(v, &encoded, &sz);
+	if (rv < 0)
+		return rv;
+
+	/* Message: ext_id(1) + ut_metadata_id(1) + bencode + raw data */
+	size_t msglen = 2 + sz + len;
+	unsigned char *msg = malloc(msglen);
+	if (!msg) { free(encoded); return -ENOMEM; }
+	msg[0] = 20;
+	msg[1] = p->ut_metadata_id;
+	memcpy(msg + 2, encoded, sz);
+	memcpy(msg + 2 + sz, data, len);
+	free(encoded);
+
+	rv = peer_write_msg(p, msg, msglen);
+	free(msg);
+	return rv;
 }

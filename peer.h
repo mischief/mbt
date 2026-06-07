@@ -55,6 +55,8 @@ struct mbt_peer_callbacks {
 	/* Metadata block received (BEP 9) */
 	void (*on_metadata)(struct mbt_peer *p, int piece, const void *data,
 	                    size_t len, void *arg);
+	/* BEP 9: peer requests metadata piece from us */
+	void (*on_metadata_request)(struct mbt_peer *p, int piece, void *arg);
 
 	/* Peer disconnected or errored */
 	void (*on_error)(struct mbt_peer *p, int err, void *arg);
@@ -73,7 +75,10 @@ int mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn
 int mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
                           struct mbt_infohash *ih, const uint8_t peer_id[20],
                           uint32_t piece_count, const uint8_t ext[8], const uint8_t their_id[20],
+                          size_t metadata_size,
                           struct mbt_peer_callbacks *cb, void *arg);
+
+void mbt_peer_set_our_metadata_size(struct mbt_peer *p, size_t sz);
 
 /* Free peer (closes connection) */
 void mbt_peer_free(struct mbt_peer *p);
@@ -93,11 +98,14 @@ int mbt_peer_send_choke(struct mbt_peer *p, int choke);
 int mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length);
 int mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length);
 int mbt_peer_send_have(struct mbt_peer *p, uint32_t piece);
+int mbt_peer_send_bitfield(struct mbt_peer *p, struct mbt_bitmap *bm);
 int mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
                         const void *data, size_t len);
 
 /* BEP 9: request metadata piece from peer */
 int mbt_peer_send_metadata_request(struct mbt_peer *p, int piece);
+int mbt_peer_send_metadata_data(struct mbt_peer *p, int piece, size_t total_size,
+                                const void *data, size_t len);
 
 /* Extension info (available after on_active) */
 int mbt_peer_has_extension(struct mbt_peer *p);       /* BEP 10 supported? */

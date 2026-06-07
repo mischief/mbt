@@ -98,6 +98,13 @@ mbt_bitmap_bytes(struct mbt_bitmap *tb)
 	return tb->bytes;
 }
 
+void
+mbt_bitmap_raw(struct mbt_bitmap *tb, void *out, size_t len)
+{
+	size_t n = len < tb->bytes ? len : tb->bytes;
+	memcpy(out, tb->map, n);
+}
+
 int
 mbt_bitmap_set(struct mbt_bitmap *tb, size_t bit)
 {

@@ -253,11 +253,11 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	(void)io; (void)events;
 
-	cfd = accept4(fd, (struct sockaddr *)&addr, &alen, SOCK_NONBLOCK | SOCK_CLOEXEC);
+	cfd = accept4(fd, (struct sockaddr *)&addr, &alen, SOCK_CLOEXEC);
 	if (cfd < 0)
 		return;
 
-	/* Read handshake synchronously (nonblocking — drop if not immediately available) */
+	/* Read handshake (blocking — accepted fd is blocking until we hand to conn) */
 	ssize_t n = recv(cfd, hs, HANDSHAKE_SIZE, MSG_WAITALL);
 	if (n != HANDSHAKE_SIZE || hs[0] != 19 ||
 	    memcmp(hs + 1, "BitTorrent protocol", 19) != 0) {
@@ -284,6 +284,9 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	char paddr[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &addr.sin_addr, paddr, sizeof(paddr));
 	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, ntohs(addr.sin_port));
+
+	/* Set nonblock now that handshake is done */
+	fcntl(cfd, F_SETFL, fcntl(cfd, F_GETFL) | O_NONBLOCK);
 
 	/* Wrap fd in conn and hand to torrent */
 	struct mbt_conn *conn;

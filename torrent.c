@@ -200,6 +200,13 @@ on_active(struct mbt_peer *p, void *arg)
 	mbt_log_debug(MBT_LOG_TORRENT, "on_active: metadata=%p metadata_size=%zu",
 	              (void *)t->metadata, mbt_peer_metadata_size(p));
 
+	/* Send bitfield if we have any pieces */
+	if (t->have && mbt_bitmap_count(t->have) > 0)
+		mbt_peer_send_bitfield(p, t->have);
+
+	/* Unchoke — simple strategy: unchoke everyone */
+	mbt_peer_send_choke(p, 0);
+
 	/* Always express interest */
 	mbt_peer_send_interested(p, 1);
 
@@ -389,6 +396,24 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 }
 
 static void
+on_metadata_request(struct mbt_peer *p, int piece, void *arg)
+{
+	struct mbt_torrent *t = arg;
+	if (!t->metadata || t->metadata_len == 0)
+		return;
+
+	size_t offset = (size_t)piece * METADATA_BLOCK_SIZE;
+	if (offset >= t->metadata_len)
+		return;
+	size_t len = t->metadata_len - offset;
+	if (len > METADATA_BLOCK_SIZE)
+		len = METADATA_BLOCK_SIZE;
+
+	mbt_peer_send_metadata_data(p, piece, t->metadata_len,
+	                            t->metadata + offset, len);
+}
+
+static void
 on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *arg)
 {
 	struct mbt_torrent *t = arg;
@@ -453,8 +478,36 @@ on_interest(struct mbt_peer *p, int interested, void *arg)
 static void
 on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, void *arg)
 {
-	/* TODO: seeding — serve piece from storage */
-	(void)p; (void)piece; (void)offset; (void)length; (void)arg;
+	struct mbt_torrent *t = arg;
+
+	/* Only serve if we have the piece */
+	if (mbt_bitmap_isset(t->have, piece) <= 0)
+		return;
+
+	if (!t->storage_ops || !t->storage_ops->read_piece)
+		return;
+
+	/* Read full piece from storage, then send the requested block */
+	uint32_t plen = t->piece_length;
+	if (piece == t->piece_count - 1) {
+		uint32_t rem = t->total_length % t->piece_length;
+		if (rem) plen = rem;
+	}
+	if (offset + length > plen)
+		return;
+
+	uint8_t *buf = malloc(plen);
+	if (!buf)
+		return;
+
+	int rv = t->storage_ops->read_piece(t->storage_ctx, piece, buf, plen);
+	if (rv < 0) {
+		free(buf);
+		return;
+	}
+
+	mbt_peer_send_piece(p, piece, offset, buf + offset, length);
+	free(buf);
 }
 
 static void
@@ -518,6 +571,7 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 	.on_bitfield = on_bitfield,
 	.on_piece    = on_piece,
 	.on_metadata = on_metadata,
+	.on_metadata_request = on_metadata_request,
 	.on_interest = on_interest,
 	.on_request  = on_request,
 	.on_error    = on_error,
@@ -845,6 +899,8 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn)
 		return rv;
 	}
 
+	mbt_peer_set_our_metadata_size(peer, t->metadata_len);
+
 	tp->peer = peer;
 	tp->next = t->peers;
 	t->peers = tp;
@@ -867,6 +923,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 
 	rv = mbt_peer_new_incoming(&peer, t->ev, conn, t->ih, t->peer_id,
 	                           t->piece_count, ext, their_id,
+	                           t->metadata_len,
 	                           &torrent_peer_cbs, t);
 	if (rv < 0) {
 		free(tp);

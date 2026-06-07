@@ -162,17 +162,21 @@ main(int argc, char *argv[])
 	int rv, ch;
 	const char *download_dir = ".";
 	int debug = 0;
+	int no_lsd = 0;
 	int max_peers = 0;
 	int listen_port = 6881;
 	mbt_picker_fn picker = mbt_picker_sequential;
 
-	while ((ch = getopt(argc, argv, "dSl:o:p:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dSLl:o:p:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
 			break;
 		case 'S':
 			seed_mode = 1;
+			break;
+		case 'L':
+			no_lsd = 1;
 			break;
 		case 'l':
 			listen_port = atoi(optarg);
@@ -256,8 +260,8 @@ main(int argc, char *argv[])
 		fprintf(stderr, "downloading: %s\n", mbt_torrent_name(t) ? mbt_torrent_name(t) : "(metadata pending)");
 	}
 
-	mbt_session_enable_lsd(session);
-
+	if (!no_lsd)
+		mbt_session_enable_lsd(session);
 
 	rv = mbt_session_run(session);
 

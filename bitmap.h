@@ -20,6 +20,7 @@ void mbt_bitmap_unrefp(struct mbt_bitmap **tb);
 
 size_t mbt_bitmap_bits(struct mbt_bitmap *tb);
 size_t mbt_bitmap_bytes(struct mbt_bitmap *tb);
+void mbt_bitmap_raw(struct mbt_bitmap *tb, void *out, size_t len);
 
 int mbt_bitmap_set(struct mbt_bitmap *tb, size_t bit);    /* 0=ok, <0=out of bounds */
 int mbt_bitmap_isset(struct mbt_bitmap *tb, size_t bit);  /* 1=set, 0=clear, <0=out of bounds */
