@@ -213,10 +213,12 @@ on_active(struct mbt_peer *p, void *arg)
 	mbt_peer_send_interested(p, 1);
 
 	/* If we need metadata, request it */
-	if (!t->metadata && mbt_peer_metadata_size(p) > 0) {
-		t->metadata_len = mbt_peer_metadata_size(p);
-		t->metadata = calloc(1, t->metadata_len);
-		t->metadata_pieces = (t->metadata_len + METADATA_BLOCK_SIZE - 1) / METADATA_BLOCK_SIZE;
+	if (mbt_peer_metadata_size(p) > 0 && t->piece_count == 0) {
+		if (!t->metadata) {
+			t->metadata_len = mbt_peer_metadata_size(p);
+			t->metadata = calloc(1, t->metadata_len);
+			t->metadata_pieces = (t->metadata_len + METADATA_BLOCK_SIZE - 1) / METADATA_BLOCK_SIZE;
+		}
 		torrent_request_metadata(t, tp);
 	}
 }
