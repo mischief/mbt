@@ -31,13 +31,15 @@
 - [ ] Delete `bt_legacy.c`, `bt_legacy.h`, `remote.c`, `remote.h`, `node.c`, `node.h`
 - [ ] Delete `test/bt_test.c` (replaced by session_test)
 
-## Phase 2: Discovery (in progress)
+## Phase 2: Discovery (mostly complete)
 
-- [ ] Magnet URI parser (`magnet.h` — infohash, display name, trackers, peer hints)
-- [ ] Wire `mbt_session_add_magnet` to parse URI + connect hints
-- [ ] HTTP tracker client (BEP 3) — announce, parse compact peer list
-- [ ] UDP tracker client (BEP 15) — connect, announce, scrape
-- [ ] Auto-announce to trackers from .torrent announce-list
+- [x] Magnet URI parser (`magnet.h` — infohash, display name, trackers, peer hints)
+- [x] Wire `mbt_session_add_magnet` to parse URI + connect hints + announce
+- [x] HTTP tracker client (BEP 3) — via caller-provided HTTP hook (curl in mbt-get)
+- [x] UDP tracker client (BEP 15) — async, built-in
+- [x] Auto-announce to trackers from .torrent announce-list (BEP 12)
+- [x] Re-announce timer (clamped 30s–15min)
+- [x] Peer pool + maintenance timer for refill
 - [ ] DHT (BEP 5) — future
 - [ ] PEX (BEP 11) — future
 
@@ -62,7 +64,7 @@
 - [ ] Persist across re-announces (don't lose peers on timer)
 - [ ] Integrate with session maintenance timer for smart refill
 
-## Phase 4: Storage improvements
+## Phase 4a: Storage improvements
 
 - [ ] Multi-file torrents (piece spans across file boundaries)
 - [ ] Resume (SHA1 verify existing pieces on startup)
@@ -71,7 +73,7 @@
 
 ## Phase 5: Tools
 
-- [ ] `mbt-get` — magnet/infohash one-shot downloader
+- [x] `mbt-get` — .torrent + magnet one-shot downloader (sequential/random picker, -d debug, -p peers, -o dir)
 - [ ] `mbt-lsd` — LSD auto-replicate (watch + download + seed)
 - [ ] `mbt-seed` — seed a file given a .torrent
 - [ ] `mbt-daemon` — long-running daemon + control socket
