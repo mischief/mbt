@@ -637,7 +637,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (t->have_count == t->piece_count)
 		return; /* complete — nothing to request */
 
-	int limit = 512; /* default if peer doesn't advertise reqq */
+	int limit = 64; /* default pipeline — keeps memory bounded */
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0)
 		limit = peer_limit;
