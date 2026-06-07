@@ -59,6 +59,7 @@ bt_src = [
   'torrent.c',
   'tracker_http.c',
   'tracker_udp.c',
+  'tracker_server_udp.c',
   'dht.c',
 ] + ev_src
 
@@ -89,6 +90,7 @@ install_headers(
   'mbt/storage.h',
   'mbt/torrent.h',
   'mbt/tracker.h',
+  'mbt/tracker_server.h',
   subdir: 'mbt',
 )
 
@@ -143,6 +145,7 @@ test('ev', ev_test)
 executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 executable('mbt-torrent', 'tools/mbt-torrent.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
 libcurl_dep = dependency('libcurl', required: false)
 if libcurl_dep.found()
@@ -168,6 +171,9 @@ test('toggle', toggle_test)
 
 dht_test = executable('dht_test', 'test/dht_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('dht', dht_test, timeout: 10)
+
+tracker_server_test = executable('tracker_server_test', 'test/tracker_server_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tracker_server', tracker_server_test, timeout: 15)
 
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
