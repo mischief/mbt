@@ -83,8 +83,8 @@ struct mbt_torrent {
 	struct torrent_peer *peers;
 	int peer_count;
 
-	/* Peer database (owned by session, set after creation) */
-	struct mbt_peerdb *peerdb;
+	/* Peer database (owned by torrent) */
+	struct mbt_peerdb peerdb;
 
 	/* Request timeout */
 	struct mbt_ev_timer *timeout_timer;
@@ -462,9 +462,8 @@ on_pex(struct mbt_peer *p, const char *addr, uint16_t port, void *arg)
 {
 	(void)p;
 	struct mbt_torrent *t = arg;
-	/* Insert into peerdb if we have one */
-	if (t->peerdb)
-		mbt_peerdb_insert(t->peerdb, addr, port, MBT_SOURCE_PEX);
+	/* Insert into peerdb */
+	mbt_peerdb_insert(&t->peerdb, addr, port, MBT_SOURCE_PEX);
 	mbt_log_debug(MBT_LOG_TORRENT, "PEX: %s:%hu", addr, port);
 }
 
@@ -627,6 +626,8 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->picker_ctx = cfg->picker_ctx;
 	t->request_timeout_sec = cfg->request_timeout_sec ? cfg->request_timeout_sec : 15;
 
+	mbt_peerdb_init(&t->peerdb);
+
 	/* Start timeout scanner */
 	mbt_ev_timer_new(t->ev, &t->timeout_timer, 5 * 1000000ULL, torrent_timeout_cb, t);
 
@@ -658,6 +659,7 @@ mbt_torrent_free(struct mbt_torrent *t)
 
 	if (t->timeout_timer)
 		mbt_ev_timer_free(t->timeout_timer);
+	mbt_peerdb_free(&t->peerdb);
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);
 	free(t->name);
@@ -677,11 +679,16 @@ mbt_torrent_set_callbacks(struct mbt_torrent *t, struct mbt_torrent_callbacks *c
 	t->cb_arg = arg;
 }
 
-void
-mbt_torrent_set_peerdb(struct mbt_torrent *t, struct mbt_peerdb *db)
+struct mbt_peerdb *
+mbt_torrent_peerdb(struct mbt_torrent *t)
 {
-	t->peerdb = db;
+	return &t->peerdb;
 }
+
+
+
+
+
 
 int
 mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)

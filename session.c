@@ -35,7 +35,6 @@ struct session_torrent {
 	int tracker_count;
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
-	struct mbt_peerdb peerdb;
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -99,8 +98,8 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		/* Refill peers from peerdb if below cap */
 		while (mbt_torrent_peer_count(st->torrent) +
-		       mbt_peerdb_count(&st->peerdb, MBT_PEERDB_CONNECTING) < s->max_peers) {
-			struct mbt_peer_entry *pe = mbt_peerdb_select(&st->peerdb);
+		       mbt_peerdb_count(mbt_torrent_peerdb(st->torrent), MBT_PEERDB_CONNECTING) < s->max_peers) {
+			struct mbt_peer_entry *pe = mbt_peerdb_select(mbt_torrent_peerdb(st->torrent));
 			if (!pe)
 				break;
 			pe->state = MBT_PEERDB_CONNECTING;
@@ -266,7 +265,6 @@ mbt_session_free(struct mbt_session *s)
 		STAILQ_REMOVE_HEAD(&s->torrents, next);
 		mbt_torrent_free(st->torrent);
 		mbt_infohash_unref(st->ih);
-		mbt_peerdb_free(&st->peerdb);
 		if (st->reannounce_timer)
 			mbt_ev_timer_free(st->reannounce_timer);
 		for (int i = 0; i < st->tracker_count; i++)
@@ -361,12 +359,12 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 					st = session_find(s, ih);
 				}
 				if (st)
-					mbt_peerdb_insert(&st->peerdb, info->remote, info->port, MBT_SOURCE_LSD);
+					mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), info->remote, info->port, MBT_SOURCE_LSD);
 				mbt_session_add_peer(s, ih, info->remote, info->port);
 			}
 		} else {
 			if (st) {
-				mbt_peerdb_insert(&st->peerdb, info->remote, info->port, MBT_SOURCE_LSD);
+				mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), info->remote, info->port, MBT_SOURCE_LSD);
 				mbt_session_add_peer(s, ih, info->remote, info->port);
 			}
 		}
@@ -405,7 +403,7 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 	if (!st) return;
 
 	/* Insert into peerdb (deduplicates automatically) */
-	mbt_peerdb_insert(&st->peerdb, addr, port, MBT_SOURCE_TRACKER);
+	mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), addr, port, MBT_SOURCE_TRACKER);
 
 	/* If below cap, connect immediately */
 	if (mbt_torrent_peer_count(st->torrent) < s->max_peers)
@@ -506,11 +504,9 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 		return rv;
 	}
 
-	mbt_torrent_set_peerdb(st->torrent, &st->peerdb);
 
 	st->session = s;
 	st->ih = mbt_infohash_ref(ih);
-	mbt_peerdb_init(&st->peerdb);
 	STAILQ_INSERT_TAIL(&s->torrents, st, next);
 
 	return 0;
