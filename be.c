@@ -500,6 +500,7 @@ void
 mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val)
 {
 	STAILQ_INSERT_TAIL(&list->listhead, val, next);
+	val->up = list;
 }
 
 struct encode_state
