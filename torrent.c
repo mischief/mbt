@@ -699,12 +699,6 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		sent++;
 	}
 
-	if (sent == 0 && tp->outstanding == 0) {
-		struct mbt_bitmap *pb = mbt_peer_bitfield(tp->peer);
-		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer %s:%hu: nothing to request (peer has %zu/%u pieces)",
-		              mbt_peer_addr(tp->peer), mbt_peer_port(tp->peer),
-		              pb ? mbt_bitmap_count(pb) : 0, t->piece_count);
-	}
 }
 
 static void
