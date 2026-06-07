@@ -12,7 +12,7 @@
  * Returns number of bytes consumed/produced.
  */
 
-int tpack(unsigned char *out, char *v, ...);
-int tunpack(unsigned char *in, char *v, ...);
+int mbt_pack(unsigned char *out, char *v, ...);
+int mbt_unpack(unsigned char *in, char *v, ...);
 
 #endif

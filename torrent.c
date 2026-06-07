@@ -747,29 +747,29 @@ mbt_torrent_peerdb(struct mbt_torrent *t)
 int
 mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 {
-	__attribute__((cleanup(be_value_freep))) struct be_value *be = NULL;
-	struct be_value *tmp;
+	__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *be = NULL;
+	struct mbt_be_value *tmp;
 	int rv;
 
-	rv = be_value_parse(info, len, &be);
+	rv = mbt_be_value_parse(info, len, &be);
 	if (rv < 0)
 		return rv;
 
 	/* Extract name */
-	tmp = be_find(be, "name");
+	tmp = mbt_be_find(be, "name");
 	if (tmp && tmp->type == BE_STRING && tmp->string.iov_len > 0) {
 		free(t->name);
 		t->name = strndup(tmp->string.iov_base, tmp->string.iov_len);
 	}
 
 	/* Extract piece length */
-	tmp = be_find(be, "piece length");
+	tmp = mbt_be_find(be, "piece length");
 	if (!tmp || tmp->type != BE_INTEGER)
 		return -EINVAL;
 	t->piece_length = (uint32_t)tmp->integer;
 
 	/* Extract total length (single-file) or compute from files list */
-	tmp = be_find(be, "length");
+	tmp = mbt_be_find(be, "length");
 	if (tmp && tmp->type == BE_INTEGER) {
 		t->total_length = (uint64_t)tmp->integer;
 		/* Single-file: one entry in file table */
@@ -782,12 +782,12 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		}
 	} else {
 		/* Multi-file: build file table from files list */
-		struct be_value *files = be_find(be, "files");
+		struct mbt_be_value *files = mbt_be_find(be, "files");
 		if (!files || files->type != BE_LIST)
 			return -EINVAL;
 
 		/* Count files */
-		struct be_value *f;
+		struct mbt_be_value *f;
 		int count = 0;
 		STAILQ_FOREACH(f, &files->listhead, next)
 			if (f->type == BE_DICTIONARY) count++;
@@ -800,16 +800,16 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		int idx = 0;
 		STAILQ_FOREACH(f, &files->listhead, next) {
 			if (f->type != BE_DICTIONARY) continue;
-			struct be_value *flen = be_find(f, "length");
+			struct mbt_be_value *flen = mbt_be_find(f, "length");
 			if (!flen || flen->type != BE_INTEGER) continue;
 
 			/* Build path from path list */
-			struct be_value *path_list = be_find(f, "path");
+			struct mbt_be_value *path_list = mbt_be_find(f, "path");
 			if (path_list && path_list->type == BE_LIST) {
 				/* Join path components with / */
 				char pathbuf[1024] = {0};
 				size_t pos = 0;
-				struct be_value *comp;
+				struct mbt_be_value *comp;
 				STAILQ_FOREACH(comp, &path_list->listhead, next) {
 					if (comp->type != BE_STRING) continue;
 					if (pos > 0 && pos < sizeof(pathbuf) - 1)
@@ -837,7 +837,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	}
 
 	/* Extract piece hashes */
-	tmp = be_find(be, "pieces");
+	tmp = mbt_be_find(be, "pieces");
 	if (!tmp || tmp->type != BE_STRING)
 		return -EINVAL;
 

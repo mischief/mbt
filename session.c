@@ -76,7 +76,7 @@ struct mbt_session {
 	struct mbt_session_callbacks cb;
 
 	/* LSD */
-	struct lsd *lsd;
+	struct mbt_lsd *lsd;
 	struct mbt_ev_io *lsd_io;
 
 	/* Listen socket */
@@ -111,7 +111,7 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		char hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
 		mbt_infohash_string(st->ih, hex, sizeof(hex));
-		lsd_announce(s->lsd, hex, s->listen_port);
+		mbt_lsd_announce(s->lsd, hex, s->listen_port);
 		mbt_log_debug(MBT_LOG_LSD, "LSD announce: %s port %hu", hex, s->listen_port);
 	}
 }
@@ -369,7 +369,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 		session_listen(s);
 
 	/* LSD announcer: multicast our infohashes every 5 min */
-	if (cfg->lsd_announce && s->lsd && s->listen_port > 0)
+	if (cfg->mbt_lsd_announce && s->lsd && s->listen_port > 0)
 		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, 300 * 1000000ULL,
 		                 session_lsd_announce_cb, s);
 
@@ -473,19 +473,19 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	struct mbt_session *s = v;
 	int rv;
-	__attribute__((cleanup(lsd_frame_freep))) struct lsd_frame *frame = NULL;
-	__attribute__((cleanup(lsd_frame_info_freep))) struct lsd_frame_info *info = NULL;
+	__attribute__((cleanup(mbt_lsd_frame_freep))) struct mbt_lsd_frame *frame = NULL;
+	__attribute__((cleanup(mbt_lsd_frame_info_freep))) struct mbt_lsd_frame_info *info = NULL;
 	struct mbt_infohash *ih;
 
 	(void)io;
 	(void)fd;
 	(void)events;
 
-	rv = lsd_recv(s->lsd, &frame);
+	rv = mbt_lsd_recv(s->lsd, &frame);
 	if (rv < 0)
 		return;
 
-	rv = lsd_frame_parse(frame, &info);
+	rv = mbt_lsd_frame_parse(frame, &info);
 	if (rv < 0)
 		return;
 
@@ -519,14 +519,14 @@ mbt_session_enable_lsd(struct mbt_session *s)
 	if (s->lsd)
 		return 0;
 
-	rv = lsd_init(&s->lsd, O_NONBLOCK);
+	rv = mbt_lsd_init(&s->lsd, O_NONBLOCK);
 	if (rv < 0)
 		return rv;
 
 	rv = mbt_ev_io_new(s->ev, &s->lsd_io, s->lsd->fd, MBT_EV_READ,
 	                   session_lsd_io_cb, s);
 	if (rv < 0) {
-		lsd_freep(&s->lsd);
+		mbt_lsd_freep(&s->lsd);
 		return rv;
 	}
 
@@ -659,7 +659,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	unsigned char *buf;
 	size_t len;
 	int rv;
-	struct be_value *be = NULL;
+	struct mbt_be_value *be = NULL;
 	struct mbt_infohash *ih = NULL;
 	struct mbt_torrent *t;
 	SHA1_CTX ctx;
@@ -725,7 +725,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	SHA1Init(&ctx);
 	SHA1Update(&ctx, info_start, info_len);
 	SHA1Final(digest, &ctx);
-	mbintohex(digest, 20, hexstr, sizeof(hexstr));
+	mbt_hex_encode(digest, 20, hexstr, sizeof(hexstr));
 
 	rv = mbt_infohash_new(&ih, hash_type, hexstr);
 	if (rv < 0) {
@@ -734,7 +734,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	}
 
 	/* Parse the file for structure */
-	rv = be_value_parse(buf, len, &be);
+	rv = mbt_be_value_parse(buf, len, &be);
 	if (rv < 0) {
 		free(buf);
 		mbt_infohash_unref(ih);
@@ -746,7 +746,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	if (rv < 0) {
 		mbt_infohash_unref(ih);
 		free(buf);
-		be_value_free(be);
+		mbt_be_value_free(be);
 		return rv;
 	}
 
@@ -759,12 +759,12 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	struct session_torrent *sta = session_find(s, ih);
 	if (sta && t) {
 		/* BEP 12: announce-list (list of lists of URLs) */
-		struct be_value *al = be_find(be, "announce-list");
+		struct mbt_be_value *al = mbt_be_find(be, "announce-list");
 		if (al && al->type == BE_LIST) {
-			struct be_value *tier;
+			struct mbt_be_value *tier;
 			STAILQ_FOREACH(tier, &al->listhead, next) {
 				if (tier->type != BE_LIST) continue;
-				struct be_value *url_val;
+				struct mbt_be_value *url_val;
 				STAILQ_FOREACH(url_val, &tier->listhead, next) {
 					if (url_val->type == BE_STRING && sta->tracker_count < 16) {
 						char *u = strndup(url_val->string.iov_base, url_val->string.iov_len);
@@ -777,7 +777,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 
 		/* Fallback: single announce field */
 		if (sta->tracker_count == 0) {
-			struct be_value *announce = be_find(be, "announce");
+			struct mbt_be_value *announce = mbt_be_find(be, "announce");
 			if (announce && announce->type == BE_STRING) {
 				char *u = strndup(announce->string.iov_base, announce->string.iov_len);
 				if (u)
@@ -791,7 +791,7 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 
 	mbt_infohash_unref(ih);
 	free(buf);
-	be_value_free(be);
+	mbt_be_value_free(be);
 
 	return 0;
 }

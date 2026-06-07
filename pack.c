@@ -7,7 +7,7 @@
 #include "pack.h"
 
 int
-tpack(unsigned char *out, char *v, ...)
+mbt_pack(unsigned char *out, char *v, ...)
 {
 	int s;
 	size_t l;
@@ -47,7 +47,7 @@ tpack(unsigned char *out, char *v, ...)
 }
 
 int
-tunpack(unsigned char *in, char *v, ...)
+mbt_unpack(unsigned char *in, char *v, ...)
 {
 	int s, l;
 	va_list ap;

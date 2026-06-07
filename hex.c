@@ -32,7 +32,7 @@ mchrtobin(char h, unsigned char *out)
 }
 
 int
-mhextobin(unsigned char *buf, size_t len, const char *str)
+mbt_hex_decode(unsigned char *buf, size_t len, const char *str)
 {
 	size_t i;
 	int rv;
@@ -55,7 +55,7 @@ mhextobin(unsigned char *buf, size_t len, const char *str)
 }
 
 int
-mbintohex(unsigned char *buf, size_t blen, char *str, size_t slen)
+mbt_hex_encode(unsigned char *buf, size_t blen, char *str, size_t slen)
 {
 	size_t i;
 	const char hex[] = "0123456789ABCDEF";

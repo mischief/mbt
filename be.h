@@ -11,36 +11,36 @@ enum {
 	BE_DICTIONARY_END = 5,
 };
 
-struct be_value;
+struct mbt_be_value;
 
-STAILQ_HEAD(be_value_head, be_value);
+STAILQ_HEAD(mbt_be_value_head, mbt_be_value);
 
-struct be_value
+struct mbt_be_value
 {
 	int type;
-	struct be_value *up;
+	struct mbt_be_value *up;
 	char *key;
-	STAILQ_ENTRY(be_value) next;
+	STAILQ_ENTRY(mbt_be_value) next;
 	union {
 		long long integer;
 		struct iovec string;
-		struct be_value_head listhead;
+		struct mbt_be_value_head listhead;
 	};
 };
 
-void be_value_free(struct be_value *v);
-void be_value_freep(struct be_value **v);
-int be_value_parse(const unsigned char *buf, size_t sz, struct be_value **out);
+void mbt_be_value_free(struct mbt_be_value *v);
+void mbt_be_value_freep(struct mbt_be_value **v);
+int mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out);
 
-int be_pp(struct be_value *be, void *arg);
+int mbt_be_pp(struct mbt_be_value *be, void *arg);
 
-void be_walk(struct be_value *be, int (*cb)(struct be_value *be, void *arg), void *arg);
-struct be_value *be_find(struct be_value *be, const char *key);
+void mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *arg), void *arg);
+struct mbt_be_value *mbt_be_find(struct mbt_be_value *be, const char *key);
 
-int be_dict_new(struct be_value **out);
-int be_dict_append(struct be_value *dict, char *key, struct be_value *value);
-int be_dict_append_number(struct be_value *dict, char *key, int64_t num);
+int mbt_be_dict_new(struct mbt_be_value **out);
+int mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value);
+int mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num);
 
 int
-be_value_encode(struct be_value *v, unsigned char **out, size_t *len);
+mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len);
 

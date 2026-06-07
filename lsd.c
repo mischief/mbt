@@ -16,9 +16,9 @@
 #include "lsd.h"
 
 void
-lsd_freep(struct lsd **v)
+mbt_lsd_freep(struct mbt_lsd **v)
 {
-	struct lsd *lsd = *v;
+	struct mbt_lsd *lsd = *v;
 
 	if(!lsd)
 		return;
@@ -28,16 +28,16 @@ lsd_freep(struct lsd **v)
 }
 
 void
-lsd_frame_freep(struct lsd_frame **v)
+mbt_lsd_frame_freep(struct mbt_lsd_frame **v)
 {
 	if(*v)
 		free(*v);
 }
 
 void
-lsd_frame_info_freep(struct lsd_frame_info **v)
+mbt_lsd_frame_info_freep(struct mbt_lsd_frame_info **v)
 {
-	struct lsd_frame_info *lfi;
+	struct mbt_lsd_frame_info *lfi;
 	struct mbt_infohash *ih, *next;
 
 	lfi = *v;
@@ -57,9 +57,9 @@ lsd_frame_info_freep(struct lsd_frame_info **v)
 }
 
 int
-lsd_init(struct lsd **out, int setfl)
+mbt_lsd_init(struct mbt_lsd **out, int setfl)
 {
-	struct lsd *lsd;
+	struct mbt_lsd *lsd;
 	int fd, serr, y = 1;
 	struct sockaddr_in sa;
 	struct ip_mreq mreq;
@@ -111,11 +111,11 @@ err:
 }
 
 int
-lsd_recv(struct lsd *lsd, struct lsd_frame **out)
+mbt_lsd_recv(struct mbt_lsd *lsd, struct mbt_lsd_frame **out)
 {
 	int rv;
 	socklen_t salen;
-	struct lsd_frame *frame;
+	struct mbt_lsd_frame *frame;
 
 	assert(lsd);
 	assert(out);
@@ -151,12 +151,12 @@ lsd_recv(struct lsd *lsd, struct lsd_frame **out)
 }
 
 int
-lsd_frame_parse(struct lsd_frame *frame, struct lsd_frame_info **out)
+mbt_lsd_frame_parse(struct mbt_lsd_frame *frame, struct mbt_lsd_frame_info **out)
 {
 	int rv;
 	unsigned long port;
 	const char *p, *ep;
-	struct lsd_frame_info *info;
+	struct mbt_lsd_frame_info *info;
 	struct mbt_infohash *ih;
 
 	p = frame->frame;
@@ -235,12 +235,12 @@ next:
 	return 0;
 
 err:
-	lsd_frame_info_freep(&info);
+	mbt_lsd_frame_info_freep(&info);
 	return -ENOMEM;
 }
 
 int
-lsd_announce(struct lsd *lsd, const char *infohash_hex, uint16_t port)
+mbt_lsd_announce(struct mbt_lsd *lsd, const char *infohash_hex, uint16_t port)
 {
 	char buf[256];
 	int len;

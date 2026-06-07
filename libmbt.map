@@ -1,0 +1,6 @@
+MBT_1 {
+    global:
+        mbt_*;
+    local:
+        *;
+};

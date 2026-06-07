@@ -1,5 +1,5 @@
 #include <stdlib.h>
 
-int mhextobin(unsigned char *buf, size_t len, const char *str);
-int mbintohex(unsigned char *buf, size_t blen, char *str, size_t slen);
+int mbt_hex_decode(unsigned char *buf, size_t len, const char *str);
+int mbt_hex_encode(unsigned char *buf, size_t blen, char *str, size_t slen);
 

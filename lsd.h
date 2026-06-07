@@ -1,17 +1,17 @@
 #include <net/ethernet.h>
 #include <arpa/inet.h>
 
-struct lsd_frame_info;
+struct mbt_lsd_frame_info;
 
-struct lsd
+struct mbt_lsd
 {
 	int fd;
 
-	int (*on_frame)(struct lsd_frame_info *lfi, void *v);
+	int (*on_frame)(struct mbt_lsd_frame_info *lfi, void *v);
 	void *on_frame_arg;
 };
 
-struct lsd_frame
+struct mbt_lsd_frame
 {
 	struct sockaddr_storage sa;
 	char remote[INET6_ADDRSTRLEN];
@@ -19,7 +19,7 @@ struct lsd_frame
 	int len;
 };
 
-struct lsd_frame_info
+struct mbt_lsd_frame_info
 {
 	struct sockaddr_storage sa;
 	char remote[INET6_ADDRSTRLEN];
@@ -28,11 +28,11 @@ struct lsd_frame_info
 	struct mbt_infohash_head infohashes;
 };
 
-void lsd_freep(struct lsd **v);
-void lsd_frame_freep(struct lsd_frame **v);
-void lsd_frame_info_freep(struct lsd_frame_info **v);
-int lsd_init(struct lsd **out, int setfl);
-int lsd_recv(struct lsd *lsd, struct lsd_frame **out);
-int lsd_frame_parse(struct lsd_frame *frame, struct lsd_frame_info **out);
-int lsd_announce(struct lsd *lsd, const char *infohash_hex, uint16_t port);
+void mbt_lsd_freep(struct mbt_lsd **v);
+void mbt_lsd_frame_freep(struct mbt_lsd_frame **v);
+void mbt_lsd_frame_info_freep(struct mbt_lsd_frame_info **v);
+int mbt_lsd_init(struct mbt_lsd **out, int setfl);
+int mbt_lsd_recv(struct mbt_lsd *lsd, struct mbt_lsd_frame **out);
+int mbt_lsd_frame_parse(struct mbt_lsd_frame *frame, struct mbt_lsd_frame_info **out);
+int mbt_lsd_announce(struct mbt_lsd *lsd, const char *infohash_hex, uint16_t port);
 

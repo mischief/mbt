@@ -19,7 +19,7 @@ enum {
 };
 
 static int
-be_count_depth(struct be_value *be)
+be_count_depth(struct mbt_be_value *be)
 {
 	int depth;
 
@@ -35,9 +35,9 @@ be_count_depth(struct be_value *be)
 }
 
 void
-be_value_free(struct be_value *v)
+mbt_be_value_free(struct mbt_be_value *v)
 {
-	struct be_value *ov, *head;
+	struct mbt_be_value *ov, *head;
 
 	for(; v;){
 		switch(v->type){
@@ -71,16 +71,16 @@ be_value_free(struct be_value *v)
 }
 
 void
-be_value_freep(struct be_value **v)
+mbt_be_value_freep(struct mbt_be_value **v)
 {
 	if(*v)
-		be_value_free(*v);
+		mbt_be_value_free(*v);
 }
 
 static int
-be_alloc(int type, struct be_value *up, struct be_value **out)
+be_alloc(int type, struct mbt_be_value *up, struct mbt_be_value **out)
 {
-	struct be_value *v;
+	struct mbt_be_value *v;
 
 	v = calloc(1, sizeof(*v));
 	if(!v)
@@ -103,14 +103,14 @@ enum {
 };
 
 static int
-be_value_parse_string(const unsigned char *buf, size_t sz, struct be_value **out)
+be_value_parse_string(const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
 	const unsigned char *p = buf, *cp;
 	size_t spn;
 	ptrdiff_t pdif;
 	int rv;
 	unsigned long insz;
-	struct be_value *v;
+	struct mbt_be_value *v;
 
 	*out = NULL;
 
@@ -130,13 +130,13 @@ be_value_parse_string(const unsigned char *buf, size_t sz, struct be_value **out
 
 	insz = strtoul((const char *)p, NULL, 10);
 	if(insz > sz){
-		be_value_free(v);
+		mbt_be_value_free(v);
 		return -ERANGE;
 	}
 
 	v->string.iov_base = malloc(insz+1);
 	if(!v->string.iov_base){
-		be_value_free(v);
+		mbt_be_value_free(v);
 		return -ENOMEM;
 	}
 
@@ -150,13 +150,13 @@ be_value_parse_string(const unsigned char *buf, size_t sz, struct be_value **out
 }
 
 static int
-be_value_parse_number(const unsigned char *buf, size_t sz, struct be_value **out)
+be_value_parse_number(const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
 	const unsigned char *p = buf, *cp;
 	size_t spn;
 	ptrdiff_t pdif;
 	int rv;
-	struct be_value *v;
+	struct mbt_be_value *v;
 
 	cp = memchr(p, 'e', MIN(BE_MAX_INT_LEN, sz));
 	if(!cp)
@@ -179,10 +179,10 @@ be_value_parse_number(const unsigned char *buf, size_t sz, struct be_value **out
 	return cp+1-p;
 }
 
-static int be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct be_value **out);
+static int be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct mbt_be_value **out);
 
 static void
-be_insert(struct be_value *v, struct be_value *val)
+be_insert(struct mbt_be_value *v, struct mbt_be_value *val)
 {
 	if(v->type == BE_LIST || v->type == BE_DICTIONARY)
 		STAILQ_INSERT_TAIL(&v->listhead, val, next);
@@ -190,10 +190,10 @@ be_insert(struct be_value *v, struct be_value *val)
 }
 
 static int
-be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct be_value **out)
+be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
 	const unsigned char *p = buf + 1;
-	struct be_value *v, *inner;
+	struct mbt_be_value *v, *inner;
 	int rv, chr;
 
 	chr = 1;
@@ -205,7 +205,7 @@ be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct be_va
 	while(*p && *p != 'e'){
 		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
 		if(rv < 0){
-			be_value_free(v);
+			mbt_be_value_free(v);
 			return rv;
 		}
 
@@ -223,10 +223,10 @@ be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct be_va
 }
 
 static int
-be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct be_value **out)
+be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
 	const unsigned char *p = buf;
-	struct be_value *v, *inner, *key;
+	struct mbt_be_value *v, *inner, *key;
 	int rv, chr;
 
 	if(sz < 2 || *p++ != 'd')
@@ -245,7 +245,7 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 		case '8': case '9':
 			rv = be_value_parse_string(p, sz, &key);
 			if(rv < 0){
-				be_value_free(v);
+				mbt_be_value_free(v);
 				return rv;
 			}
 
@@ -254,21 +254,21 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 
 			break;
 		default:
-			be_value_free(v);
+			mbt_be_value_free(v);
 			return -EINVAL;
 		}
 
 		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
 		if(rv < 0){
-			be_value_free(key);
-			be_value_free(v);
+			mbt_be_value_free(key);
+			mbt_be_value_free(v);
 			return rv;
 		}
 
 		/* kidnap key */
 		inner->key = key->string.iov_base;
 		key->string.iov_base = NULL;
-		be_value_free(key);
+		mbt_be_value_free(key);
 
 		be_insert(v, inner);
 		p += rv;
@@ -284,7 +284,7 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 }
 
 static int
-be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct be_value **out)
+be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
 	if(depth > 128)
 		return -EINVAL;
@@ -311,13 +311,13 @@ be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct be_v
 }
 
 int
-be_value_parse(const unsigned char *buf, size_t sz, struct be_value **out)
+mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
 	return be_value_parse_inner(0, buf, sz, out);
 }
 
 int 
-be_pp(struct be_value *be, void *arg)
+mbt_be_pp(struct mbt_be_value *be, void *arg)
 {
 	int depth;
 
@@ -357,9 +357,9 @@ be_pp(struct be_value *be, void *arg)
 }
 
 void
-be_walk(struct be_value *be, int (*cb)(struct be_value *be, void *arg), void *arg)
+mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *arg), void *arg)
 {
-	struct be_value *inner, fake = {0};
+	struct mbt_be_value *inner, fake = {0};
 
 	if(!be)
 		return;
@@ -371,7 +371,7 @@ be_walk(struct be_value *be, int (*cb)(struct be_value *be, void *arg), void *ar
 		[[fallthrough]];
 	case BE_DICTIONARY:
 		STAILQ_FOREACH(inner, &be->listhead, next){
-			be_walk(inner, cb, arg);
+			mbt_be_walk(inner, cb, arg);
 		}
 		break;
 	}
@@ -389,10 +389,10 @@ be_walk(struct be_value *be, int (*cb)(struct be_value *be, void *arg), void *ar
 	}
 }
 
-struct be_value*
-be_find(struct be_value *be, const char *key)
+struct mbt_be_value*
+mbt_be_find(struct mbt_be_value *be, const char *key)
 {
-	struct be_value *inner;
+	struct mbt_be_value *inner;
 
 	if(!be || !(be->type == BE_DICTIONARY))
 		return NULL;
@@ -406,13 +406,13 @@ be_find(struct be_value *be, const char *key)
 }
 
 int
-be_dict_new(struct be_value **out)
+mbt_be_dict_new(struct mbt_be_value **out)
 {
 	return be_alloc(BE_DICTIONARY, NULL, out);
 }
 
 int
-be_dict_append(struct be_value *dict, char *key, struct be_value *value)
+mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value)
 {
 	char *k;
 
@@ -428,10 +428,10 @@ be_dict_append(struct be_value *dict, char *key, struct be_value *value)
 }
 
 int
-be_dict_append_number(struct be_value *dict, char *key, int64_t num)
+mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num)
 {
 	int rv;
-	struct be_value *v;
+	struct mbt_be_value *v;
 
 	rv = be_alloc(BE_INTEGER, dict, &v);
 	if(rv < 0)
@@ -439,7 +439,7 @@ be_dict_append_number(struct be_value *dict, char *key, int64_t num)
 
 	v->integer = num;
 
-	rv = be_dict_append(dict, key, v);
+	rv = mbt_be_dict_append(dict, key, v);
 	if(rv < 0){
 		free(v);
 		return rv;
@@ -455,7 +455,7 @@ struct encode_state
 };
 
 static int
-encode_getsize_cb(struct be_value *v, void *arg)
+encode_getsize_cb(struct mbt_be_value *v, void *arg)
 {
 	struct encode_state *e = arg;
 	char buf[16];
@@ -499,7 +499,7 @@ encode_getsize_cb(struct be_value *v, void *arg)
 }
 
 static int
-encode_cb(struct be_value *v, void *arg)
+encode_cb(struct mbt_be_value *v, void *arg)
 {
 	struct encode_state *e = arg;
 	int slen;
@@ -546,12 +546,12 @@ encode_cb(struct be_value *v, void *arg)
 }
 
 int
-be_value_encode(struct be_value *v, unsigned char **out, size_t *len)
+mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len)
 {
 	struct encode_state e = {0};
 	unsigned char *buf;
 
-	be_walk(v, encode_getsize_cb, &e);
+	mbt_be_walk(v, encode_getsize_cb, &e);
 
 	buf = malloc(e.len + 1);
 	if(!buf)
@@ -559,7 +559,7 @@ be_value_encode(struct be_value *v, unsigned char **out, size_t *len)
 
 	e.ptr = (char*)buf;
 
-	be_walk(v, encode_cb, &e);
+	mbt_be_walk(v, encode_cb, &e);
 
 	*out = buf;
 	*len = e.len;

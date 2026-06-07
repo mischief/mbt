@@ -60,7 +60,30 @@ bt_src = [
   'tracker_udp.c',
 ] + ev_src
 
-libmbt = library('mbt', bt_src, dependencies: deps, install: true)
+libmbt = library('mbt', bt_src, dependencies: deps, install: true,
+                 link_args: ['-Wl,--version-script=' + meson.current_source_dir() / 'libmbt.map'],
+                 link_depends: files('libmbt.map'))
+
+install_headers(
+  'be.h',
+  'bitmap.h',
+  'conn.h',
+  'event.h',
+  'hex.h',
+  'infohash.h',
+  'log.h',
+  'lsd.h',
+  'magnet.h',
+  'pack.h',
+  'peer.h',
+  'peerdb.h',
+  'picker.h',
+  'session.h',
+  'storage.h',
+  'torrent.h',
+  'tracker.h',
+  subdir: 'mbt',
+)
 
 # Tests
 tbmap_test = executable('tbmap_test', 'test/bitmap_test.c', link_with: [libmbt])

@@ -59,8 +59,8 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 	}
 
 	/* Parse bencoded response */
-	struct be_value *be = NULL;
-	rv = be_value_parse(hresp.data, hresp.len, &be);
+	struct mbt_be_value *be = NULL;
+	rv = mbt_be_value_parse(hresp.data, hresp.len, &be);
 	if (rv < 0) {
 		free(hresp.data);
 		if (req->done_cb)
@@ -69,11 +69,11 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 	}
 
 	/* Check for failure reason */
-	struct be_value *fail = be_find(be, "failure reason");
+	struct mbt_be_value *fail = mbt_be_find(be, "failure reason");
 	if (fail && fail->type == BE_STRING) {
 		mbt_log_warn(MBT_LOG_SESSION, "tracker: %.*s",
 		             (int)fail->string.iov_len, (char *)fail->string.iov_base);
-		be_value_free(be);
+		mbt_be_value_free(be);
 		free(hresp.data);
 		if (req->done_cb)
 			req->done_cb(req->ih, -EPROTO, 0, req->arg);
@@ -82,12 +82,12 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 
 	/* Extract interval */
 	int interval = 1800;
-	struct be_value *intv = be_find(be, "interval");
+	struct mbt_be_value *intv = mbt_be_find(be, "interval");
 	if (intv && intv->type == BE_INTEGER)
 		interval = (int)intv->integer;
 
 	/* Parse compact peer list */
-	struct be_value *peers = be_find(be, "peers");
+	struct mbt_be_value *peers = mbt_be_find(be, "peers");
 	if (peers && peers->type == BE_STRING) {
 		/* Compact: 6 bytes per peer (4 IP + 2 port) */
 		int count = (int)(peers->string.iov_len / 6);
@@ -111,7 +111,7 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 	if (req->done_cb)
 		req->done_cb(req->ih, 0, interval, req->arg);
 
-	be_value_free(be);
+	mbt_be_value_free(be);
 	free(hresp.data);
 	return 0;
 }

@@ -22,7 +22,7 @@ __AFL_FUZZ_INIT()
 int
 main(int argc, char *argv[])
 {
-	struct be_value *be;
+	struct mbt_be_value *be;
 	int rv;
 
 	(void) argc;
@@ -46,11 +46,11 @@ main(int argc, char *argv[])
 		/* Setup function call, e.g. struct target *tmp = libtarget_init() */
 		/* Call function to be fuzzed, e.g.: */
 		be = NULL;
-		rv = be_value_parse(buf, len, &be);
+		rv = mbt_be_value_parse(buf, len, &be);
 		(void)rv;
 		/* Reset state. e.g. libtarget_free(tmp) */
 		if(be)
-			be_value_free(be);
+			mbt_be_value_free(be);
 	}
 
 	return 0;

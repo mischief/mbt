@@ -21,7 +21,7 @@ mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str)
 
 	infohash->type = type;
 
-	rv = mhextobin(infohash->hash_sha1, sizeof(infohash->hash_sha1), str);
+	rv = mbt_hex_decode(infohash->hash_sha1, sizeof(infohash->hash_sha1), str);
 	if(rv < 0){
 		free(infohash);
 		return rv;
@@ -71,7 +71,7 @@ mbt_infohash_string(struct mbt_infohash *ih, char *buf, size_t sz)
 	if(ih->type != MBT_INFOHASH_SHA1)
 		return -EINVAL;
 
-	if(mbintohex(ih->hash_sha1, sizeof(ih->hash_sha1), buf, sz) < 0)
+	if(mbt_hex_encode(ih->hash_sha1, sizeof(ih->hash_sha1), buf, sz) < 0)
 		return -EINVAL;
 
 	buf[sz-1] = 0;

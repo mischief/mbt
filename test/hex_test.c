@@ -11,7 +11,7 @@ test_bintohex(void)
 	char hex[9];
 	int rv;
 
-	rv = mbintohex(bin, 4, hex, sizeof(hex));
+	rv = mbt_hex_encode(bin, 4, hex, sizeof(hex));
 	assert(rv == 0);
 	assert(strcmp(hex, "DEADBEEF") == 0);
 }
@@ -22,7 +22,7 @@ test_hextobin(void)
 	unsigned char bin[4];
 	int rv;
 
-	rv = mhextobin(bin, sizeof(bin), "DEADBEEF");
+	rv = mbt_hex_decode(bin, sizeof(bin), "DEADBEEF");
 	assert(rv == 4);
 	assert(bin[0] == 0xDE);
 	assert(bin[1] == 0xAD);
@@ -30,7 +30,7 @@ test_hextobin(void)
 	assert(bin[3] == 0xEF);
 
 	/* lowercase */
-	rv = mhextobin(bin, sizeof(bin), "cafebabe");
+	rv = mbt_hex_decode(bin, sizeof(bin), "cafebabe");
 	assert(rv == 4);
 	assert(bin[0] == 0xCA);
 	assert(bin[1] == 0xFE);
@@ -47,10 +47,10 @@ test_roundtrip(void)
 	char hex[41];
 	unsigned char back[20];
 
-	mbintohex(orig, 20, hex, sizeof(hex));
+	mbt_hex_encode(orig, 20, hex, sizeof(hex));
 	assert(strlen(hex) == 40);
 
-	mhextobin(back, sizeof(back), hex);
+	mbt_hex_decode(back, sizeof(back), hex);
 	assert(memcmp(orig, back, 20) == 0);
 }
 

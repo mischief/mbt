@@ -11,7 +11,7 @@ int
 main(int argc, char *argv[])
 {
 	int rv;
-	struct be_value *be;
+	struct mbt_be_value *be;
 
 	(void)argc;
 	(void)argv;
@@ -32,13 +32,13 @@ main(int argc, char *argv[])
 	if(len <= 0)
 		err(1, "fread");
 
-	rv = be_value_parse(buf, len, &be);
+	rv = mbt_be_value_parse(buf, len, &be);
 	if(rv < 0)
-		errx(1, "be_value_parse: %s", strerror(-rv));
+		errx(1, "mbt_be_value_parse: %s", strerror(-rv));
 
-	be_walk(be, be_pp, NULL);
+	mbt_be_walk(be, mbt_be_pp, NULL);
 
-	be_value_free(be);
+	mbt_be_value_free(be);
 	free(buf);
 	fclose(fp);
 
