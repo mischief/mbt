@@ -34,8 +34,19 @@ static int
 conn_sd_io(sd_event_source *s, int fd, uint32_t revents, void *v)
 {
 	struct conn_sd *c = v;
-	(void)s;
-	return sdbuf_io(c->buf, fd, revents);
+
+	if (revents & EPOLLOUT) {
+		int rv = sdbuf_flush(c->buf, fd);
+		if (rv <= 0) {
+			/* Fully flushed or error — disable EPOLLOUT */
+			sd_event_source_set_io_events(s, EPOLLIN);
+		}
+	}
+
+	if (revents & EPOLLIN)
+		return sdbuf_io(c->buf, fd, revents);
+
+	return 0;
 }
 
 static int
@@ -98,18 +109,31 @@ static ssize_t
 conn_sd_write(struct mbt_conn *conn, const void *buf, size_t len)
 {
 	struct conn_sd *c = (struct conn_sd *)conn;
-	const unsigned char *p = buf;
-	size_t rem = len;
-	while (rem > 0) {
-		ssize_t n = write(c->fd, p, rem);
-		if (n < 0) {
-			if (errno == EINTR) continue;
-			if (errno == EAGAIN) continue; /* spin — acceptable for now */
-			return -errno;
+
+	/* If nothing pending, try direct write first */
+	if (sdbuf_write_pending(c->buf) == 0) {
+		const unsigned char *p = buf;
+		size_t rem = len;
+		while (rem > 0) {
+			ssize_t n = write(c->fd, p, rem);
+			if (n < 0) {
+				if (errno == EINTR) continue;
+				if (errno == EAGAIN) break; /* buffer the rest */
+				return -errno;
+			}
+			p += n;
+			rem -= n;
 		}
-		p += n;
-		rem -= n;
+		if (rem == 0) return (ssize_t)len; /* all sent */
+		/* Buffer remaining */
+		sdbuf_write(c->buf, p, rem);
+	} else {
+		/* Already have pending data, append to buffer */
+		sdbuf_write(c->buf, buf, len);
 	}
+
+	/* Enable EPOLLOUT to flush later */
+	sd_event_source_set_io_events(c->src, EPOLLIN | EPOLLOUT);
 	return (ssize_t)len;
 }
 

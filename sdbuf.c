@@ -219,8 +219,46 @@ sdbuf_read(struct sdbuf *b, void *out, size_t sz)
 }
 
 ssize_t
-sdbuf_write(struct sdbuf *b, void *buf, size_t sz)
+sdbuf_write(struct sdbuf *b, const void *data, size_t sz)
 {
-	return 0;
+	struct buf *buf = &b->wbuf;
+	size_t have = (size_t)(buf->p - buf->buf);
+
+	/* Grow buffer if needed */
+	while (have + sz > buf->len) {
+		if (bufwant(buf, sz) < 0)
+			return -ENOMEM;
+	}
+
+	memcpy(buf->p, data, sz);
+	buf->p += sz;
+	return (ssize_t)sz;
+}
+
+int
+sdbuf_flush(struct sdbuf *b, int fd)
+{
+	struct buf *buf = &b->wbuf;
+	size_t have = (size_t)(buf->p - buf->buf);
+
+	while (have > 0) {
+		ssize_t n = write(fd, buf->buf, have);
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			if (errno == EAGAIN) break; /* can't write more now */
+			return -errno;
+		}
+		memmove(buf->buf, buf->buf + n, have - n);
+		buf->p -= n;
+		have -= n;
+	}
+
+	return have > 0 ? 1 : 0; /* 1 = more to write, 0 = fully flushed */
+}
+
+size_t
+sdbuf_write_pending(struct sdbuf *b)
+{
+	return (size_t)(b->wbuf.p - b->wbuf.buf);
 }
 

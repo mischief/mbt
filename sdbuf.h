@@ -21,3 +21,6 @@ int sdbuf_io(struct sdbuf *b, int fd, uint32_t revents);
 size_t sdbuf_read_available(struct sdbuf *b);
 ssize_t sdbuf_discard(struct sdbuf *b, size_t sz);
 ssize_t sdbuf_read(struct sdbuf *b, void *buf, size_t sz);
+ssize_t sdbuf_write(struct sdbuf *b, const void *data, size_t sz);
+int sdbuf_flush(struct sdbuf *b, int fd);
+size_t sdbuf_write_pending(struct sdbuf *b);
