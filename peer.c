@@ -15,10 +15,34 @@
 #include "mbt/bitmap.h"
 #include "mbt/be.h"
 
+/* Protocol constants */
 enum {
 	HANDSHAKE_SIZE = 1 + 19 + 8 + 20 + 20, /* 68 */
 	METADATA_BLOCKSIZE = 1 << 14,
 };
+
+/* Handshake reserved byte flags */
+#define RESERVED_DHT       0x01  /* ext[7] bit 0 */
+#define RESERVED_FAST      0x04  /* ext[7] bit 2 */
+#define RESERVED_EXTENSION 0x10  /* ext[5] bit 4 */
+
+/* BT message IDs */
+#define BT_CHOKE           0
+#define BT_UNCHOKE         1
+#define BT_INTERESTED      2
+#define BT_NOT_INTERESTED  3
+#define BT_HAVE            4
+#define BT_BITFIELD        5
+#define BT_REQUEST         6
+#define BT_PIECE           7
+#define BT_CANCEL          8
+#define BT_EXTENSION       20
+
+/* BEP 6 Fast Extension message IDs */
+#define BT_HAVE_ALL        14
+#define BT_HAVE_NONE       15
+#define BT_REJECT          16
+#define BT_ALLOWED_FAST    17
 
 struct mbt_peer {
 	enum mbt_peer_state state;
@@ -109,9 +133,9 @@ peer_send_handshake(struct mbt_peer *p)
 	int o = 0, rv;
 
 	/* BEP 10 */
-	ext[5] |= 0x10;
+	ext[5] |= RESERVED_EXTENSION;
 	/* BEP 6 Fast Extension */
-	ext[7] |= 0x04;
+	ext[7] |= RESERVED_FAST;
 
 	rv = mbt_pack(buf, "b*", 19, (size_t)19, "BitTorrent protocol");
 	o += rv;
@@ -151,9 +175,9 @@ peer_recv_handshake(struct mbt_peer *p)
 
 	/* Parse reserved byte flags */
 	p->flags = 0;
-	if (p->ext[7] & 0x01) p->flags |= MBT_PEER_FLAG_DHT;
-	if (p->ext[7] & 0x04) p->flags |= MBT_PEER_FLAG_FAST;
-	if (p->ext[5] & 0x10) p->flags |= MBT_PEER_FLAG_EXTENSION;
+	if (p->ext[7] & RESERVED_DHT) p->flags |= MBT_PEER_FLAG_DHT;
+	if (p->ext[7] & RESERVED_FAST) p->flags |= MBT_PEER_FLAG_FAST;
+	if (p->ext[5] & RESERVED_EXTENSION) p->flags |= MBT_PEER_FLAG_EXTENSION;
 
 	rv = mbt_unpack(buf + off, "*", 20, hash);
 	off += rv;
@@ -189,7 +213,7 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	if (rv < 0)
 		return rv;
 
-	rv = mbt_pack(packed, "bb*", (int)20, (int)0, sz, encoded);
+	rv = mbt_pack(packed, "bb*", (int)BT_EXTENSION, (int)0, sz, encoded);
 	free(encoded);
 	if (rv < 0)
 		return rv;
@@ -282,38 +306,38 @@ peer_rx_message(struct mbt_peer *p)
 
 
 	switch (cmd) {
-	case 0: /* choke */
+	case BT_CHOKE:
 		p->peer_choking = 1;
 		if (p->cb.on_choke)
 			p->cb.on_choke(p, 1, p->cb_arg);
 		break;
 
-	case 1: /* unchoke */
+	case BT_UNCHOKE:
 		p->peer_choking = 0;
 		if (p->cb.on_choke)
 			p->cb.on_choke(p, 0, p->cb_arg);
 		break;
 
-	case 2: /* interested */
+	case BT_INTERESTED:
 		p->peer_interested = 1;
 		if (p->cb.on_interest)
 			p->cb.on_interest(p, 1, p->cb_arg);
 		break;
 
-	case 3: /* not interested */
+	case BT_NOT_INTERESTED:
 		p->peer_interested = 0;
 		if (p->cb.on_interest)
 			p->cb.on_interest(p, 0, p->cb_arg);
 		break;
 
-	case 4: /* have */
+	case BT_HAVE:
 		sz = mbt_conn_read(p->conn, buf, 4);
 		mbt_unpack(buf, "l", &piece);
 		if (p->cb.on_have)
 			p->cb.on_have(p, piece, p->cb_arg);
 		break;
 
-	case 5: /* bitfield */
+	case BT_BITFIELD:
 		if (p->msglen > sizeof(buf))
 			return -ENOMSG;
 		sz = mbt_conn_read(p->conn, buf, p->msglen);
@@ -323,14 +347,14 @@ peer_rx_message(struct mbt_peer *p)
 			p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
 		break;
 
-	case 6: /* request */
+	case BT_REQUEST:
 		sz = mbt_conn_read(p->conn, buf, 12);
 		mbt_unpack(buf, "lll", &piece, &offset, &req_len);
 		if (p->cb.on_request)
 			p->cb.on_request(p, piece, offset, req_len, p->cb_arg);
 		break;
 
-	case 7: { /* piece */
+	case BT_PIECE: {
 		unsigned char hdr[8];
 		sz = mbt_conn_read(p->conn, hdr, 8);
 		mbt_unpack(hdr, "ll", &piece, &offset);
@@ -344,7 +368,7 @@ peer_rx_message(struct mbt_peer *p)
 		break;
 	}
 
-	case 20: { /* extension */
+	case BT_EXTENSION: {
 		uint8_t extcmd;
 		sz = mbt_conn_read(p->conn, &extcmd, 1);
 		p->msglen -= 1;
@@ -420,7 +444,7 @@ peer_rx_message(struct mbt_peer *p)
 
 	default:
 		/* BEP 6 Fast Extension messages */
-		if (cmd == 14 && (p->flags & MBT_PEER_FLAG_FAST)) {
+		if (cmd == BT_HAVE_ALL && (p->flags & MBT_PEER_FLAG_FAST)) {
 			/* HAVE_ALL — peer has everything */
 			if (p->piece_count == 0) break; /* can't set bits without knowing count */
 			if (p->bitfield)
@@ -432,7 +456,7 @@ peer_rx_message(struct mbt_peer *p)
 				p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
 			break;
 		}
-		if (cmd == 15 && (p->flags & MBT_PEER_FLAG_FAST)) {
+		if (cmd == BT_HAVE_NONE && (p->flags & MBT_PEER_FLAG_FAST)) {
 			/* HAVE_NONE — peer has nothing */
 			if (p->piece_count == 0) break;
 			if (p->bitfield)
@@ -442,7 +466,7 @@ peer_rx_message(struct mbt_peer *p)
 				p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
 			break;
 		}
-		if (cmd == 16 && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 12) {
+		if (cmd == BT_REJECT && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 12) {
 			/* REJECT_REQUEST — peer won't serve this block */
 			unsigned char rj[12];
 			mbt_conn_read(p->conn, rj, 12);
@@ -453,7 +477,7 @@ peer_rx_message(struct mbt_peer *p)
 				p->cb.on_reject(p, rpiece, roffset, rlen, p->cb_arg);
 			break;
 		}
-		if (cmd == 17 && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 4) {
+		if (cmd == BT_ALLOWED_FAST && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 4) {
 			/* ALLOWED_FAST — piece we can request while choked */
 			unsigned char af[4];
 			mbt_conn_read(p->conn, af, 4);
@@ -510,7 +534,7 @@ peer_on_read(struct mbt_conn *c, void *v)
 		              (p->flags & MBT_PEER_FLAG_FAST) ? "FAST " : "",
 		              (p->flags & MBT_PEER_FLAG_EXTENSION) ? "EXT" : "");
 
-		if (p->ext[5] & 0x10) {
+		if (p->ext[5] & RESERVED_EXTENSION) {
 			p->state = MBT_PEER_EXTENSION;
 			peer_send_extension_handshake(p);
 			mbt_conn_set_watermark(p->conn, 4);
@@ -558,7 +582,7 @@ peer_on_read(struct mbt_conn *c, void *v)
 		p->msglen = 0;
 
 		sz = mbt_conn_read(p->conn, &cmd, 1);
-		if (cmd != 20) {
+		if (cmd != BT_EXTENSION) {
 			/* Non-extension message — skip and go active */
 			size_t rem = length - 1;
 			while (rem > 0) {
@@ -837,7 +861,7 @@ int
 mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length)
 {
 	unsigned char buf[1 + 4 + 4 + 4];
-	int rv = mbt_pack(buf, "blll", (int)6, piece, offset, length);
+	int rv = mbt_pack(buf, "blll", (int)BT_REQUEST, piece, offset, length);
 	return peer_write_msg(p, buf, rv);
 }
 
@@ -853,7 +877,7 @@ int
 mbt_peer_send_have(struct mbt_peer *p, uint32_t piece)
 {
 	unsigned char buf[1 + 4];
-	int rv = mbt_pack(buf, "bl", (int)4, piece);
+	int rv = mbt_pack(buf, "bl", (int)BT_HAVE, piece);
 	return peer_write_msg(p, buf, rv);
 }
 
@@ -863,7 +887,7 @@ mbt_peer_send_bitfield(struct mbt_peer *p, struct mbt_bitmap *bm)
 	size_t bytes = mbt_bitmap_bytes(bm);
 	unsigned char *buf = malloc(1 + bytes);
 	if (!buf) return -ENOMEM;
-	buf[0] = 5; /* bitfield msg id */
+	buf[0] = BT_BITFIELD;
 	mbt_bitmap_raw(bm, buf + 1, bytes);
 	int rv = peer_write_msg(p, buf, 1 + bytes);
 	free(buf);
@@ -882,7 +906,7 @@ mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 {
 	unsigned char hdr[4 + 1 + 4 + 4];
 	uint32_t msg_len = 1 + 4 + 4 + len;
-	mbt_pack(hdr, "lbll", msg_len, (int)7, piece, offset);
+	mbt_pack(hdr, "lbll", msg_len, (int)BT_PIECE, piece, offset);
 	if (mbt_conn_write(p->conn, hdr, sizeof(hdr)) < 0)
 		return -EIO;
 	if (mbt_conn_write(p->conn, data, len) < 0)
@@ -910,7 +934,7 @@ mbt_peer_send_metadata_request(struct mbt_peer *p, int piece)
 	if (rv < 0)
 		return rv;
 
-	rv = mbt_pack(packed, "bb*", (int)20, (int)p->ut_metadata_id, sz, encoded);
+	rv = mbt_pack(packed, "bb*", (int)BT_EXTENSION, (int)p->ut_metadata_id, sz, encoded);
 	free(encoded);
 	if (rv < 0)
 		return rv;
@@ -943,7 +967,7 @@ mbt_peer_send_metadata_data(struct mbt_peer *p, int piece, size_t total_size,
 	size_t msglen = 2 + sz + len;
 	unsigned char *msg = malloc(msglen);
 	if (!msg) { free(encoded); return -ENOMEM; }
-	msg[0] = 20;
+	msg[0] = BT_EXTENSION;
 	msg[1] = p->ut_metadata_id;
 	memcpy(msg + 2, encoded, sz);
 	memcpy(msg + 2 + sz, data, len);
