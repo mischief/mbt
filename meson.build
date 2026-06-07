@@ -148,5 +148,8 @@ endif
 header_test = executable('header_test', 'test/header_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('header', header_test)
 
+resume_test = executable('resume_test', 'test/resume_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('resume', resume_test)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
