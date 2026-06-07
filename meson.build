@@ -166,5 +166,8 @@ test('peerdb', peerdb_test)
 toggle_test = executable('toggle_test', 'test/toggle_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('toggle', toggle_test)
 
+dht_test = executable('dht_test', 'test/dht_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('dht', dht_test, timeout: 10)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)

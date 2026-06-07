@@ -84,6 +84,15 @@ struct mbt_dht {
 	/* Routing table: 160 buckets */
 	struct dht_bucket buckets[160];
 
+	/* Peer storage: announced peers for infohashes we've seen */
+#define DHT_MAX_STORED 64
+	struct {
+		uint8_t infohash[20];
+		struct sockaddr_in peers[8];
+		int peer_count;
+	} stored[DHT_MAX_STORED];
+	int stored_count;
+
 	/* Active lookups */
 	struct dht_lookup lookups[MAX_LOOKUPS];
 
@@ -541,6 +550,124 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			mbt_be_dict_append_string(rb, "id", d->id, 20);
 			mbt_be_dict_append(resp, "r", rb);
 
+			unsigned char *enc; size_t enc_len;
+			mbt_be_value_encode(resp, &enc, &enc_len);
+			dht_send(d, &from, enc, enc_len);
+			free(enc);
+			mbt_be_value_free(resp);
+		} else if (q->type == BE_STRING && q->string.iov_len == 9 &&
+		           memcmp(q->string.iov_base, "find_node", 9) == 0) {
+			/* Respond with closest nodes */
+			struct mbt_be_value *target_v = mbt_be_find(a, "target");
+			if (!target_v || target_v->type != BE_STRING || target_v->string.iov_len != 20)
+				goto out;
+			struct dht_node closest[K];
+			int n = routing_closest(d, target_v->string.iov_base, closest, K);
+			uint8_t compact[K * NODE_COMPACT_LEN];
+			for (int i = 0; i < n; i++) {
+				memcpy(compact + i*26, closest[i].id, 20);
+				memcpy(compact + i*26 + 20, &closest[i].addr.sin_addr, 4);
+				memcpy(compact + i*26 + 24, &closest[i].addr.sin_port, 2);
+			}
+			struct mbt_be_value *resp = NULL, *rb = NULL;
+			mbt_be_dict_new(&resp);
+			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
+			mbt_be_dict_append_string(resp, "y", "r", 1);
+			mbt_be_dict_new(&rb);
+			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			mbt_be_dict_append_string(rb, "nodes", compact, n * 26);
+			mbt_be_dict_append(resp, "r", rb);
+			unsigned char *enc; size_t enc_len;
+			mbt_be_value_encode(resp, &enc, &enc_len);
+			dht_send(d, &from, enc, enc_len);
+			free(enc);
+			mbt_be_value_free(resp);
+
+		} else if (q->type == BE_STRING && q->string.iov_len == 9 &&
+		           memcmp(q->string.iov_base, "get_peers", 9) == 0) {
+			/* Check if we have stored peers for this infohash */
+			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
+			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
+				goto out;
+			uint8_t token[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+			struct mbt_be_value *resp = NULL, *rb = NULL;
+			mbt_be_dict_new(&resp);
+			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
+			mbt_be_dict_append_string(resp, "y", "r", 1);
+			mbt_be_dict_new(&rb);
+			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			mbt_be_dict_append_string(rb, "token", token, 4);
+			/* Check stored peers */
+			int found_stored = 0;
+			for (int i = 0; i < d->stored_count; i++) {
+				if (memcmp(d->stored[i].infohash, ih_v->string.iov_base, 20) == 0) {
+					/* Return peers as "values" list */
+					struct mbt_be_value *vals;
+					mbt_be_list_new(&vals);
+					for (int j = 0; j < d->stored[i].peer_count; j++) {
+						uint8_t compact_peer[6];
+						memcpy(compact_peer, &d->stored[i].peers[j].sin_addr, 4);
+						memcpy(compact_peer + 4, &d->stored[i].peers[j].sin_port, 2);
+						struct mbt_be_value *pv;
+						mbt_be_string_new(&pv, compact_peer, 6);
+						mbt_be_list_append(vals, pv);
+					}
+					mbt_be_dict_append(rb, "values", vals);
+					found_stored = 1;
+					break;
+				}
+			}
+			if (!found_stored) {
+				/* Return closest nodes */
+				struct dht_node closest[K];
+				int n = routing_closest(d, ih_v->string.iov_base, closest, K);
+				uint8_t compact_nodes[K * NODE_COMPACT_LEN];
+				for (int i = 0; i < n; i++) {
+					memcpy(compact_nodes + i*26, closest[i].id, 20);
+					memcpy(compact_nodes + i*26 + 20, &closest[i].addr.sin_addr, 4);
+					memcpy(compact_nodes + i*26 + 24, &closest[i].addr.sin_port, 2);
+				}
+				mbt_be_dict_append_string(rb, "nodes", compact_nodes, n * 26);
+			}
+			mbt_be_dict_append(resp, "r", rb);
+			unsigned char *enc; size_t enc_len;
+			mbt_be_value_encode(resp, &enc, &enc_len);
+			dht_send(d, &from, enc, enc_len);
+			free(enc);
+			mbt_be_value_free(resp);
+
+		} else if (q->type == BE_STRING && q->string.iov_len == 13 &&
+		           memcmp(q->string.iov_base, "announce_peer", 13) == 0) {
+			/* Store the announcing peer */
+			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
+			struct mbt_be_value *port_v = mbt_be_find(a, "port");
+			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
+				goto out;
+			uint16_t aport = port_v ? (uint16_t)port_v->integer : ntohs(from.sin_port);
+			/* Find or create storage slot */
+			int slot = -1;
+			for (int i = 0; i < d->stored_count; i++) {
+				if (memcmp(d->stored[i].infohash, ih_v->string.iov_base, 20) == 0)
+					{ slot = i; break; }
+			}
+			if (slot < 0 && d->stored_count < DHT_MAX_STORED) {
+				slot = d->stored_count++;
+				memcpy(d->stored[slot].infohash, ih_v->string.iov_base, 20);
+				d->stored[slot].peer_count = 0;
+			}
+			if (slot >= 0 && d->stored[slot].peer_count < 8) {
+				struct sockaddr_in pa = from;
+				pa.sin_port = htons(aport);
+				d->stored[slot].peers[d->stored[slot].peer_count++] = pa;
+			}
+			/* Respond */
+			struct mbt_be_value *resp = NULL, *rb = NULL;
+			mbt_be_dict_new(&resp);
+			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
+			mbt_be_dict_append_string(resp, "y", "r", 1);
+			mbt_be_dict_new(&rb);
+			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			mbt_be_dict_append(resp, "r", rb);
 			unsigned char *enc; size_t enc_len;
 			mbt_be_value_encode(resp, &enc, &enc_len);
 			dht_send(d, &from, enc, enc_len);
