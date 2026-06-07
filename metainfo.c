@@ -458,9 +458,7 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 	if (mi->is_private)
 		mbt_be_dict_append_number(info, "private", 1);
 
-	mbt_be_dict_append(root, "info", info);
-
-	/* Encode info dict separately to compute infohash */
+	/* Encode info dict separately to compute infohash (before append sets key) */
 	if (!mi->raw_info) {
 		unsigned char *info_enc;
 		size_t info_enc_len;
@@ -470,6 +468,8 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 			compute_infohash(mi);
 		}
 	}
+
+	mbt_be_dict_append(root, "info", info);
 
 	int rv = mbt_be_value_encode(root, out, len);
 	mbt_be_value_free(root);

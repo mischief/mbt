@@ -48,6 +48,7 @@ test_create_single_file(void)
 	assert(mbt_metainfo_total_length(mi2) == 65536);
 	assert(mbt_metainfo_file_count(mi2) == 1);
 	assert(strcmp(mbt_metainfo_name(mi2), mbt_metainfo_name(mi)) == 0);
+	assert(strcmp(mbt_metainfo_infohash_hex(mi), mbt_metainfo_infohash_hex(mi2)) == 0);
 
 	free(buf);
 	mbt_metainfo_free(mi);

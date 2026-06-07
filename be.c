@@ -184,8 +184,21 @@ static int be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, 
 static void
 be_insert(struct mbt_be_value *v, struct mbt_be_value *val)
 {
-	if(v->type == BE_LIST || v->type == BE_DICTIONARY)
+	if (v->type == BE_DICTIONARY && val->key) {
+		/* Insert sorted by key (BEP 3 requirement) */
+		struct mbt_be_value *cur, *prev = NULL;
+		STAILQ_FOREACH(cur, &v->listhead, next) {
+			if (cur->key && strcmp(val->key, cur->key) < 0)
+				break;
+			prev = cur;
+		}
+		if (!prev)
+			STAILQ_INSERT_HEAD(&v->listhead, val, next);
+		else
+			STAILQ_INSERT_AFTER(&v->listhead, prev, val, next);
+	} else {
 		STAILQ_INSERT_TAIL(&v->listhead, val, next);
+	}
 	val->up = v;
 }
 
