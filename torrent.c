@@ -683,13 +683,19 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
 		int idx = -1;
+		int owns_active = 0;
 		for (uint32_t i = 0; i < t->piece_count; i++) {
-			if (t->pieces[i].owner == tp && t->pieces[i].state == MBT_PIECE_ACTIVE &&
-			    t->pieces[i].requested < t->pieces[i].length) {
-				idx = i;
-				break;
+			if (t->pieces[i].owner == tp && t->pieces[i].state == MBT_PIECE_ACTIVE) {
+				if (t->pieces[i].requested < t->pieces[i].length) {
+					idx = i;
+					break;
+				}
+				owns_active = 1; /* fully requested, waiting for blocks */
 			}
 		}
+		/* If peer already has a fully-requested piece in flight, wait for it */
+		if (idx < 0 && owns_active)
+			break;
 		/* If no existing piece, pick a new one */
 		if (idx < 0)
 			idx = t->picker(t, tp->peer, t->picker_ctx);
