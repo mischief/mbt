@@ -259,6 +259,12 @@ peer_rx_message(struct mbt_peer *p)
 			mbt_log_warn(MBT_LOG_PEER, "%s:%hu: msg too large: %u (raw: %02x%02x%02x%02x)",
 			             p->addr, p->port, length,
 			             lenbuf[0], lenbuf[1], lenbuf[2], lenbuf[3]);
+			/* Peek at next bytes for debugging */
+			unsigned char peek[8] = {0};
+			mbt_conn_read(p->conn, peek, sizeof(peek));
+			mbt_log_warn(MBT_LOG_PEER, "%s:%hu: next 8 bytes: %02x %02x %02x %02x %02x %02x %02x %02x",
+			             p->addr, p->port, peek[0], peek[1], peek[2], peek[3],
+			             peek[4], peek[5], peek[6], peek[7]);
 			return -ENOMSG;
 		}
 

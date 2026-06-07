@@ -98,7 +98,19 @@ static ssize_t
 conn_sd_write(struct mbt_conn *conn, const void *buf, size_t len)
 {
 	struct conn_sd *c = (struct conn_sd *)conn;
-	return write(c->fd, buf, len);
+	const unsigned char *p = buf;
+	size_t rem = len;
+	while (rem > 0) {
+		ssize_t n = write(c->fd, p, rem);
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			if (errno == EAGAIN) continue; /* spin — acceptable for now */
+			return -errno;
+		}
+		p += n;
+		rem -= n;
+	}
+	return (ssize_t)len;
 }
 
 static void
