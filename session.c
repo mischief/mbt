@@ -805,12 +805,10 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 }
 
 int
-mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
+mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len)
 {
-	FILE *fp;
-	unsigned char *buf;
-	size_t len;
 	int rv;
+	const unsigned char *buf = data;
 	struct mbt_be_value *be = NULL;
 	struct mbt_infohash *ih = NULL;
 	struct mbt_torrent *t;
@@ -818,37 +816,17 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	uint8_t digest[20];
 	char hexstr[41];
 
-	fp = fopen(path, "rb");
-	if (!fp)
-		return -errno;
-
-	buf = malloc(4 * 1024 * 1024);
-	if (!buf) {
-		fclose(fp);
-		return -ENOMEM;
-	}
-
-	len = fread(buf, 1, 4 * 1024 * 1024, fp);
-	fclose(fp);
-
-	if (len == 0) {
-		free(buf);
-		return -EIO;
-	}
-
 	/* Find raw info dict in the buffer for correct SHA1 */
 	unsigned char *info_start = NULL;
 	size_t info_len = 0;
 	{
-		/* Search for "4:info" key in top-level dict */
 		unsigned char *p = memmem(buf, len, "4:infod", 7);
 		if (!p) p = memmem(buf, len, "4:info", 6);
 		if (p) {
-			info_start = p + 6; /* skip "4:info", point at value start */
-			/* Parse bencode value to find its end */
+			info_start = p + 6;
 			int depth = 0;
 			unsigned char *i = info_start;
-			unsigned char *end = buf + len;
+			const unsigned char *end = buf + len;
 			while (i < end) {
 				if (*i == 'd' || *i == 'l') { depth++; i++; }
 				else if (*i == 'e') { depth--; i++; if (depth == 0) break; }
@@ -864,45 +842,31 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 		}
 	}
 
-	if (!info_start || info_len == 0) {
-		free(buf);
+	if (!info_start || info_len == 0)
 		return -EINVAL;
-	}
-
-	/* Compute infohash from raw info bytes.
-	 * v1 torrents use SHA1. v2 (BEP 52) will use SHA256 — detect via
-	 * "meta version" key in the info dict when we add v2 support. */
-	int hash_type = MBT_INFOHASH_SHA1;
 
 	SHA1Init(&ctx);
 	SHA1Update(&ctx, info_start, info_len);
 	SHA1Final(digest, &ctx);
 	mbt_hex_encode(digest, 20, hexstr, sizeof(hexstr));
 
-	rv = mbt_infohash_new(&ih, hash_type, hexstr);
-	if (rv < 0) {
-		free(buf);
+	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr);
+	if (rv < 0)
 		return rv;
-	}
 
-	/* Parse the file for structure */
 	rv = mbt_be_value_parse(buf, len, &be);
 	if (rv < 0) {
-		free(buf);
 		mbt_infohash_unref(ih);
 		return rv;
 	}
 
-	/* Add torrent */
 	rv = mbt_session_add_infohash(s, ih);
 	if (rv < 0) {
 		mbt_infohash_unref(ih);
-		free(buf);
 		mbt_be_value_free(be);
 		return rv;
 	}
 
-	/* Set metadata from raw info bytes */
 	t = mbt_session_find_torrent(s, ih);
 	if (t)
 		mbt_torrent_set_metadata(t, info_start, info_len);
@@ -910,7 +874,6 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 	/* Extract tracker URLs */
 	struct session_torrent *sta = session_find(s, ih);
 	if (sta && t) {
-		/* BEP 12: announce-list (list of lists of URLs) */
 		struct mbt_be_value *al = mbt_be_find(be, "announce-list");
 		if (al && al->type == BE_LIST) {
 			struct mbt_be_value *tier;
@@ -920,32 +883,44 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 				STAILQ_FOREACH(url_val, &tier->listhead, next) {
 					if (url_val->type == BE_STRING && sta->tracker_count < 16) {
 						char *u = strndup(url_val->string.iov_base, url_val->string.iov_len);
-						if (u)
-							sta->trackers[sta->tracker_count++] = u;
+						if (u) sta->trackers[sta->tracker_count++] = u;
 					}
 				}
 			}
 		}
-
-		/* Fallback: single announce field */
 		if (sta->tracker_count == 0) {
 			struct mbt_be_value *announce = mbt_be_find(be, "announce");
 			if (announce && announce->type == BE_STRING) {
 				char *u = strndup(announce->string.iov_base, announce->string.iov_len);
-				if (u)
-					sta->trackers[sta->tracker_count++] = u;
+				if (u) sta->trackers[sta->tracker_count++] = u;
 			}
 		}
-
 		if (sta->tracker_count > 0)
 			session_do_announce(s, sta);
 	}
 
 	mbt_infohash_unref(ih);
-	free(buf);
 	mbt_be_value_free(be);
-
 	return 0;
+}
+
+int
+mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
+{
+	FILE *fp = fopen(path, "rb");
+	if (!fp) return -errno;
+
+	unsigned char *buf = malloc(4 * 1024 * 1024);
+	if (!buf) { fclose(fp); return -ENOMEM; }
+
+	size_t len = fread(buf, 1, 4 * 1024 * 1024, fp);
+	fclose(fp);
+
+	if (len == 0) { free(buf); return -EIO; }
+
+	int rv = mbt_session_add_torrent_buf(s, buf, len);
+	free(buf);
+	return rv;
 }
 
 int

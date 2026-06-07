@@ -43,9 +43,9 @@ fill_test_data(uint8_t *buf, size_t len)
 		buf[i] = rand() & 0xff;
 }
 
-/* Build .torrent from data, write to tmp file, return path and hex infohash */
-static char *
-build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz)
+/* Build .torrent in memory, return encoded buffer and hex infohash */
+static unsigned char *
+build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz, size_t *out_len)
 {
 	uint8_t pieces_hash[NUM_PIECES * 20];
 	for (int i = 0; i < NUM_PIECES; i++) {
@@ -68,7 +68,7 @@ build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz)
 	size_t enc_len;
 	assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
 
-	/* Compute infohash from the raw info dict */
+	/* Compute infohash */
 	unsigned char *info_start = memmem(encoded, enc_len, "4:infod", 7);
 	assert(info_start);
 	info_start += 6;
@@ -84,16 +84,9 @@ build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz)
 	SHA1Final(digest, &ctx);
 	mbt_hex_encode(digest, 20, hex_out, hex_sz);
 
-	/* Write to temp file */
-	char *path = strdup("/tmp/mbt_e2e_XXXXXX.torrent");
-	int fd = mkstemps(path, 8);
-	assert(fd >= 0);
-	write(fd, encoded, enc_len);
-	close(fd);
-
-	free(encoded);
 	mbt_be_value_free(root);
-	return path;
+	*out_len = enc_len;
+	return encoded;
 }
 
 int
@@ -116,7 +109,8 @@ main(void)
 
 	/* Build .torrent */
 	char infohash_hex[41];
-	char *torrent_path = build_torrent(test_data, infohash_hex, sizeof(infohash_hex));
+	size_t torrent_len;
+	unsigned char *torrent_buf = build_torrent(test_data, infohash_hex, sizeof(infohash_hex), &torrent_len);
 	fprintf(stderr, "e2e_test: infohash=%s\n", infohash_hex);
 
 	/* --- Session 1 (seeder) --- */
@@ -135,7 +129,7 @@ main(void)
 	rv = mbt_session_new(&s1, &cfg1);
 	assert(rv == 0);
 
-	rv = mbt_session_add_torrent_file(s1, torrent_path);
+	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len);
 	assert(rv == 0);
 
 	/* Pre-fill seeder storage with test data (piece by piece) */
@@ -191,7 +185,5 @@ main(void)
 	mbt_ev_destroy(ev);
 	mbt_storage_memory_destroy(mem1);
 	mbt_storage_memory_destroy(mem2);
-	unlink(torrent_path);
-	free(torrent_path);
 	return 0;
 }

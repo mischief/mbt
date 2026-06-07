@@ -43,8 +43,8 @@ static void timeout_cb(struct mbt_ev_timer *timer, void *arg)
 }
 
 /* Build .torrent with tracker URL */
-static char *
-build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz)
+static unsigned char *
+build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz, size_t *out_len)
 {
 	uint8_t pieces_hash[NUM_PIECES * 20];
 	for (int i = 0; i < NUM_PIECES; i++) {
@@ -79,11 +79,9 @@ build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz)
 	SHA1Init(&ctx); SHA1Update(&ctx, info_start, ilen); SHA1Final(digest, &ctx);
 	mbt_hex_encode(digest, 20, hex_out, hex_sz);
 
-	char *path = strdup("/tmp/mbt_tracker_test_XXXXXX.torrent");
-	int fd = mkstemps(path, 8); assert(fd >= 0);
-	write(fd, encoded, enc_len); close(fd);
-	free(encoded); mbt_be_value_free(root);
-	return path;
+	mbt_be_value_free(root);
+	*out_len = enc_len;
+	return encoded;
 }
 
 int main(void)
@@ -103,7 +101,8 @@ int main(void)
 
 	/* Build .torrent */
 	char infohash_hex[41];
-	char *torrent_path = build_torrent(test_data, infohash_hex, sizeof(infohash_hex));
+	size_t torrent_len;
+	unsigned char *torrent_buf = build_torrent(test_data, infohash_hex, sizeof(infohash_hex), &torrent_len);
 
 	/* Seeder: pre-fill storage, add torrent */
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();
@@ -117,7 +116,7 @@ int main(void)
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
-	rv = mbt_session_add_torrent_file(s1, torrent_path); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len); assert(rv == 0);
 
 	/* Leecher: connects via tracker */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
@@ -129,7 +128,7 @@ int main(void)
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
-	rv = mbt_session_add_torrent_file(s2, torrent_path); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s2, torrent_buf, torrent_len); assert(rv == 0);
 
 	/* Set completion callback on leecher */
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
@@ -158,6 +157,5 @@ int main(void)
 	mbt_ev_destroy(ev);
 	mbt_storage_memory_destroy(mem1);
 	mbt_storage_memory_destroy(mem2);
-	unlink(torrent_path); free(torrent_path);
 	return 0;
 }

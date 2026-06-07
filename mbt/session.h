@@ -47,6 +47,7 @@ void mbt_session_stop(struct mbt_session *s);
 
 /* Add torrents */
 int mbt_session_add_torrent_file(struct mbt_session *s, const char *path);
+int mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len);
 int mbt_session_add_magnet(struct mbt_session *s, const char *uri);
 int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih);
 
