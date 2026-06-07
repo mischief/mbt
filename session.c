@@ -582,6 +582,14 @@ mbt_session_enable_lsd(struct mbt_session *s)
 	return 0;
 }
 
+void
+mbt_session_disable_lsd(struct mbt_session *s)
+{
+	if (s->lsd_io) { mbt_ev_io_free(s->lsd_io); s->lsd_io = NULL; }
+	if (s->lsd) { mbt_lsd_freep(&s->lsd); }
+	if (s->lsd_announce_timer) { mbt_ev_timer_free(s->lsd_announce_timer); s->lsd_announce_timer = NULL; }
+}
+
 /* --- DHT --- */
 
 struct dht_lookup_ctx {
@@ -623,6 +631,11 @@ mbt_session_enable_dht(struct mbt_session *s)
 	mbt_session_dht_bootstrap(s, "dht.transmissionbt.com", 6881);
 
 	return 0;
+}
+void
+mbt_session_disable_dht(struct mbt_session *s)
+{
+	if (s->dht) { mbt_dht_free(s->dht); s->dht = NULL; }
 }
 
 int
