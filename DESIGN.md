@@ -93,26 +93,21 @@ ninja -C build && meson test -C build
 ## File Layout
 
 ```
-├── event.h / ev_sd.c / ev_libevent.c    # event loop abstraction
-├── conn.h / conn_sd.c / conn_libevent.c # buffered stream
-├── peer.h / peer.c                      # peer wire protocol state machine
-├── torrent.h / torrent.c               # download coordinator
-├── session.h / session.c               # multi-torrent session
-├── storage.h / storage_file.c          # pluggable storage
-├── picker.h / picker.c                 # pluggable piece selection
-├── be.h / be.c                         # bencode
-├── bitmap.h / bitmap.c                 # bit array (mbt_bitmap)
-├── infohash.h / infohash.c             # infohash type
-├── pack.h / pack.c                     # wire format helpers
-├── hex.h / hex.c                       # hex encode/decode
-├── log.h / log.c                       # logging subsystem
-├── lsd.h / lsd.c                       # Local Service Discovery (BEP 14)
-├── magnet.h / magnet.c                 # magnet URI parser
+├── mbt/                                 # public headers (installed to <mbt/*.h>)
+│   ├── mbt.h                           # convenience super-header
+│   ├── event.h, conn.h, peer.h         # core abstractions
+│   ├── session.h, torrent.h            # high-level API
+│   ├── storage.h, picker.h            # pluggable backends
+│   ├── be.h, bitmap.h, infohash.h     # utilities
+│   ├── log.h, hex.h, pack.h           # helpers
+│   ├── lsd.h, magnet.h, tracker.h     # protocol components
+│   └── peerdb.h                        # peer database
+├── *.c                                  # implementation files
+├── tools/                               # CLI tools (mbt-get, mbt-lsd, mbt-torrent)
 ├── test/                               # unit + integration tests
-├── tools/                              # CLI tools
 ├── fuzz/                               # AFL++ harness + corpus
-├── standards/                          # downloaded BEP specs (gitignored)
-├── DESIGN.md                           # this file
-├── ROADMAP.md                          # implementation plan
-└── meson.build
+├── libmbt.map                          # linker version script (symbol visibility)
+├── meson.build
+├── DESIGN.md
+└── ROADMAP.md
 ```
