@@ -432,6 +432,7 @@ parse_compact_peers(const uint8_t *data, size_t len,
 		inet_ntop(AF_INET, data + i * 6, addr, sizeof(addr));
 		memcpy(&port, data + i * 6 + 4, 2);
 		port = ntohs(port);
+		if (port < 1024) continue; /* skip bogus ports */
 		cb(addr, port, arg);
 	}
 }
