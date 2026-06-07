@@ -680,9 +680,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		if (pi->requested >= pi->length)
 			continue;
 
-		if (!pi->data) {
-			pi->data = malloc(pi->length);
-			if (!pi->data) return;
+		if (pi->state != MBT_PIECE_ACTIVE) {
 			pi->state = MBT_PIECE_ACTIVE;
 			pi->owner = tp;
 			pi->last_activity = now_usec();
