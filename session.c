@@ -506,6 +506,8 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 		return rv;
 	}
 
+	mbt_torrent_set_peerdb(st->torrent, &st->peerdb);
+
 	st->session = s;
 	st->ih = mbt_infohash_ref(ih);
 	mbt_peerdb_init(&st->peerdb);

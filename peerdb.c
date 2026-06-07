@@ -102,7 +102,7 @@ mbt_peerdb_select(struct mbt_peerdb *db)
 }
 
 int
-mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peer_state state)
+mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peerdb_state state)
 {
 	int n = 0;
 	struct mbt_peer_entry *e;

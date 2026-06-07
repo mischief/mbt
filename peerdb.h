@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <time.h>
 
-enum mbt_peer_state {
+enum mbt_peerdb_state {
 	MBT_PEERDB_KNOWN,       /* discovered but not yet tried */
 	MBT_PEERDB_CONNECTING,  /* TCP connect in progress */
 	MBT_PEERDB_ACTIVE,      /* connected and handshook */
@@ -27,7 +27,7 @@ struct mbt_peer_entry {
 	char addr[INET6_ADDRSTRLEN];
 	uint16_t port;
 
-	enum mbt_peer_state state;
+	enum mbt_peerdb_state state;
 	int sources;             /* bitmask of mbt_peer_source */
 	int failures;            /* consecutive failure count */
 	uint64_t last_seen;      /* last time reported by tracker/DHT/PEX (usec) */
@@ -55,7 +55,7 @@ struct mbt_peer_entry *mbt_peerdb_find(struct mbt_peerdb *db,
 struct mbt_peer_entry *mbt_peerdb_select(struct mbt_peerdb *db);
 
 /* Count peers in a given state */
-int mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peer_state state);
+int mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peerdb_state state);
 
 /* Count total peers */
 int mbt_peerdb_total(struct mbt_peerdb *db);

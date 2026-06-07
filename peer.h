@@ -58,6 +58,9 @@ struct mbt_peer_callbacks {
 
 	/* Peer disconnected or errored */
 	void (*on_error)(struct mbt_peer *p, int err, void *arg);
+
+	/* PEX: peer exchange — new peer discovered */
+	void (*on_pex)(struct mbt_peer *p, const char *addr, uint16_t port, void *arg);
 };
 
 /* Create peer from a connected mbt_conn (takes ownership of conn) */

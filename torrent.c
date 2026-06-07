@@ -14,6 +14,7 @@
 #include "peer.h"
 #include "torrent.h"
 #include "bitmap.h"
+#include "peerdb.h"
 #include "be.h"
 
 enum {
@@ -81,6 +82,9 @@ struct mbt_torrent {
 	/* Peers */
 	struct torrent_peer *peers;
 	int peer_count;
+
+	/* Peer database (owned by session, set after creation) */
+	struct mbt_peerdb *peerdb;
 
 	/* Request timeout */
 	struct mbt_ev_timer *timeout_timer;
@@ -454,6 +458,17 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 }
 
 static void
+on_pex(struct mbt_peer *p, const char *addr, uint16_t port, void *arg)
+{
+	(void)p;
+	struct mbt_torrent *t = arg;
+	/* Insert into peerdb if we have one */
+	if (t->peerdb)
+		mbt_peerdb_insert(t->peerdb, addr, port, MBT_SOURCE_PEX);
+	mbt_log_debug(MBT_LOG_TORRENT, "PEX: %s:%hu", addr, port);
+}
+
+static void
 on_error(struct mbt_peer *p, int err, void *arg)
 {
 	struct mbt_torrent *t = arg;
@@ -507,6 +522,7 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 	.on_interest = on_interest,
 	.on_request  = on_request,
 	.on_error    = on_error,
+	.on_pex      = on_pex,
 };
 
 /* --- Drive piece requests --- */
@@ -659,6 +675,12 @@ mbt_torrent_set_callbacks(struct mbt_torrent *t, struct mbt_torrent_callbacks *c
 {
 	t->cb = *cb;
 	t->cb_arg = arg;
+}
+
+void
+mbt_torrent_set_peerdb(struct mbt_torrent *t, struct mbt_peerdb *db)
+{
+	t->peerdb = db;
 }
 
 int

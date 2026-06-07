@@ -46,6 +46,7 @@ struct mbt_peer {
 
 	/* extension protocol */
 	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
+	uint8_t ut_pex_id;     /* their msg id for ut_pex, 0=unsupported */
 	size_t metadata_size;
 	int reqq;              /* peer's max outstanding requests (0=unknown) */
 
@@ -177,6 +178,7 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	be_dict_new(&m);
 	be_dict_append(be, "m", m);
 	be_dict_append_number(m, "ut_metadata", 3);
+	be_dict_append_number(m, "ut_pex", 4);
 
 	rv = be_value_encode(be, &encoded, &sz);
 	if (rv < 0)
@@ -212,6 +214,10 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 		struct be_value *utm = be_find(tmp, "ut_metadata");
 		if (utm && utm->type == BE_INTEGER)
 			p->ut_metadata_id = (uint8_t)utm->integer;
+
+		struct be_value *utp = be_find(tmp, "ut_pex");
+		if (utp && utp->type == BE_INTEGER)
+			p->ut_pex_id = (uint8_t)utp->integer;
 	}
 
 	tmp = be_find(be, "metadata_size");
@@ -349,6 +355,31 @@ peer_rx_message(struct mbt_peer *p)
 				}
 			}
 			free(mbuf);
+		} else if (extcmd == 4) {
+			/* ut_pex: peer exchange */
+			unsigned char *pbuf = malloc(p->msglen);
+			if (!pbuf) return -ENOMEM;
+			sz = mbt_conn_read(p->conn, pbuf, p->msglen);
+
+			__attribute__((cleanup(be_value_freep))) struct be_value *be = NULL;
+			rv = be_value_parse(pbuf, sz, &be);
+			if (rv > 0) {
+				struct be_value *added = be_find(be, "added");
+				if (added && added->type == BE_STRING && added->string.iov_len >= 6) {
+					int count = (int)(added->string.iov_len / 6);
+					uint8_t *d = added->string.iov_base;
+					for (int i = 0; i < count; i++) {
+						char addr[INET_ADDRSTRLEN];
+						uint16_t port;
+						inet_ntop(AF_INET, d + i * 6, addr, sizeof(addr));
+						memcpy(&port, d + i * 6 + 4, 2);
+						port = ntohs(port);
+						if (p->cb.on_pex)
+							p->cb.on_pex(p, addr, port, p->cb_arg);
+					}
+				}
+			}
+			free(pbuf);
 		} else {
 			/* unknown extension, discard */
 			if (p->msglen > 0) {
