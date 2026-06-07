@@ -1,0 +1,12 @@
+{
+   sdbuf_read_uninit
+   Memcheck:Cond
+   ...
+   fun:sdbuf_handle_read
+}
+{
+   sdbuf_read_uninit2
+   Memcheck:Cond
+   ...
+   fun:mbt_torrent_set_metadata
+}
