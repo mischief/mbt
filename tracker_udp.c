@@ -8,10 +8,10 @@
 #include <errno.h>
 #include <endian.h>
 
-#include "event.h"
-#include "infohash.h"
-#include "tracker.h"
-#include "log.h"
+#include "mbt/event.h"
+#include "mbt/infohash.h"
+#include "mbt/tracker.h"
+#include "mbt/log.h"
 
 /* BEP 15 constants */
 enum {

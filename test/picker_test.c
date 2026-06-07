@@ -3,10 +3,10 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "picker.h"
-#include "torrent.h"
-#include "bitmap.h"
-#include "peer.h"
+#include "mbt/picker.h"
+#include "mbt/torrent.h"
+#include "mbt/bitmap.h"
+#include "mbt/peer.h"
 
 /* Mock: we need mbt_torrent_piece_count, has_piece, piece_fully_requested
  * and mbt_peer_bitfield to work. We'll use real torrent/bitmap objects. */

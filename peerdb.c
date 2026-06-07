@@ -2,7 +2,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "peerdb.h"
+#include "mbt/peerdb.h"
 
 static uint64_t
 peerdb_now(void)

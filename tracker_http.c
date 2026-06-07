@@ -4,10 +4,10 @@
 #include <errno.h>
 #include <arpa/inet.h>
 
-#include "infohash.h"
-#include "tracker.h"
-#include "be.h"
-#include "log.h"
+#include "mbt/infohash.h"
+#include "mbt/tracker.h"
+#include "mbt/be.h"
+#include "mbt/log.h"
 
 /* URL-encode binary data (infohash, peer_id) */
 static size_t

@@ -8,14 +8,14 @@
 
 #include <curl/curl.h>
 
-#include "event.h"
-#include "infohash.h"
-#include "session.h"
-#include "torrent.h"
-#include "tracker.h"
-#include "log.h"
-#include "be.h"
-#include "hex.h"
+#include "mbt/event.h"
+#include "mbt/infohash.h"
+#include "mbt/session.h"
+#include "mbt/torrent.h"
+#include "mbt/tracker.h"
+#include "mbt/log.h"
+#include "mbt/be.h"
+#include "mbt/hex.h"
 
 #include <sha1.h>
 

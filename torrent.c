@@ -6,16 +6,16 @@
 
 #include <sha1.h>
 
-#include "log.h"
+#include "mbt/log.h"
 
-#include "event.h"
-#include "conn.h"
-#include "infohash.h"
-#include "peer.h"
-#include "torrent.h"
-#include "bitmap.h"
-#include "peerdb.h"
-#include "be.h"
+#include "mbt/event.h"
+#include "mbt/conn.h"
+#include "mbt/infohash.h"
+#include "mbt/peer.h"
+#include "mbt/torrent.h"
+#include "mbt/bitmap.h"
+#include "mbt/peerdb.h"
+#include "mbt/be.h"
 
 enum {
 	BLOCK_SIZE = 16384,

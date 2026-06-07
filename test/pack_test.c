@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "pack.h"
+#include "mbt/pack.h"
 
 static void
 test_pack_byte(void)

@@ -4,8 +4,8 @@
 #include <assert.h>
 #include <string.h>
 
-#include "infohash.h"
-#include "hex.h"
+#include "mbt/infohash.h"
+#include "mbt/hex.h"
 
 int
 mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str)

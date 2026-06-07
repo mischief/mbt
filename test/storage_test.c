@@ -6,8 +6,8 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
-#include "storage.h"
-#include "torrent.h"
+#include "mbt/storage.h"
+#include "mbt/torrent.h"
 
 static void
 test_storage_ops_exist(void)

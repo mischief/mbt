@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <string.h>
 
-#include "magnet.h"
+#include "mbt/magnet.h"
 
 static void
 test_basic(void)

@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "event.h"
+#include "mbt/event.h"
 
 static int io_fired;
 static int timer_fired;

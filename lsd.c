@@ -12,8 +12,8 @@
 #include <errno.h>
 #include <err.h>
 
-#include "infohash.h"
-#include "lsd.h"
+#include "mbt/infohash.h"
+#include "mbt/lsd.h"
 
 void
 mbt_lsd_freep(struct mbt_lsd **v)

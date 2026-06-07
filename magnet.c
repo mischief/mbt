@@ -3,7 +3,7 @@
 #include <errno.h>
 #include <ctype.h>
 
-#include "magnet.h"
+#include "mbt/magnet.h"
 
 /* Percent-decode in-place. Returns decoded length. */
 static size_t

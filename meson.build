@@ -60,60 +60,63 @@ bt_src = [
   'tracker_udp.c',
 ] + ev_src
 
+mbt_inc = include_directories('.', 'mbt')
+
 libmbt = library('mbt', bt_src, dependencies: deps, install: true,
+                 include_directories: mbt_inc,
                  link_args: ['-Wl,--version-script=' + meson.current_source_dir() / 'libmbt.map'],
                  link_depends: files('libmbt.map'))
 
 install_headers(
-  'mbt.h',
-  'be.h',
-  'bitmap.h',
-  'conn.h',
-  'event.h',
-  'hex.h',
-  'infohash.h',
-  'log.h',
-  'lsd.h',
-  'magnet.h',
-  'pack.h',
-  'peer.h',
-  'peerdb.h',
-  'picker.h',
-  'session.h',
-  'storage.h',
-  'torrent.h',
-  'tracker.h',
+  'mbt/mbt.h',
+  'mbt/be.h',
+  'mbt/bitmap.h',
+  'mbt/conn.h',
+  'mbt/event.h',
+  'mbt/hex.h',
+  'mbt/infohash.h',
+  'mbt/log.h',
+  'mbt/lsd.h',
+  'mbt/magnet.h',
+  'mbt/pack.h',
+  'mbt/peer.h',
+  'mbt/peerdb.h',
+  'mbt/picker.h',
+  'mbt/session.h',
+  'mbt/storage.h',
+  'mbt/torrent.h',
+  'mbt/tracker.h',
   subdir: 'mbt',
 )
 
 # Tests
-tbmap_test = executable('tbmap_test', 'test/bitmap_test.c', link_with: [libmbt])
+tbmap_test = executable('tbmap_test', 'test/bitmap_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('tbmap', tbmap_test)
 
-be_test = executable('be_test', 'test/test.c', link_with: [libmbt])
+be_test = executable('be_test', 'test/test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('be', be_test)
 
-pack_test = executable('pack_test', 'test/pack_test.c', link_with: [libmbt])
+pack_test = executable('pack_test', 'test/pack_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('pack', pack_test)
 
-hex_test = executable('hex_test', 'test/hex_test.c', link_with: [libmbt])
+hex_test = executable('hex_test', 'test/hex_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('hex', hex_test)
 
-infohash_test = executable('infohash_test', 'test/infohash_test.c', link_with: [libmbt])
+infohash_test = executable('infohash_test', 'test/infohash_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('infohash', infohash_test)
 
-magnet_test = executable('magnet_test', 'test/magnet_test.c', link_with: [libmbt])
+magnet_test = executable('magnet_test', 'test/magnet_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('magnet', magnet_test)
 
-tracker_test = executable('tracker_test', 'test/tracker_test.c', link_with: [libmbt], dependencies: deps)
+tracker_test = executable('tracker_test', 'test/tracker_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
-picker_test = executable('picker_test', 'test/picker_test.c', link_with: [libmbt])
+picker_test = executable('picker_test', 'test/picker_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('picker', picker_test)
 
-storage_test = executable('storage_test', 'test/storage_test.c', link_with: [libmbt])
+storage_test = executable('storage_test', 'test/storage_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('storage', storage_test)
 
-be_test_file = executable('be_test_file', 'test/test_file.c', link_with: [libmbt])
+be_test_file = executable('be_test_file', 'test/test_file.c', link_with: [libmbt], include_directories: mbt_inc)
 
 tfiles = [
   'openbsd76.torrent',
@@ -127,21 +130,21 @@ foreach t : tfiles
 endforeach
 
 # New session-based test
-session_test = executable('session_test', 'test/session_test.c', link_with: [libmbt], dependencies: deps)
+session_test = executable('session_test', 'test/session_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
 # Event loop test
-ev_test = executable('ev_test', 'test/ev_test.c', link_with: [libmbt], dependencies: deps)
+ev_test = executable('ev_test', 'test/ev_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('ev', ev_test)
 
 # Tools
-executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], dependencies: deps)
+executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
 libcurl_dep = dependency('libcurl', required: false)
 if libcurl_dep.found()
-  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], dependencies: deps + [libcurl_dep])
+  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [libcurl_dep], include_directories: mbt_inc)
 endif
-header_test = executable('header_test', 'test/header_test.c', link_with: [libmbt], dependencies: deps)
+header_test = executable('header_test', 'test/header_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('header', header_test)
 
 # Fuzz
-executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt])
+executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)

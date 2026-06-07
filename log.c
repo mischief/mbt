@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <syslog.h>
 
-#include "log.h"
+#include "mbt/log.h"
 
 static mbt_log_fn log_cb = NULL;
 static void *log_arg = NULL;

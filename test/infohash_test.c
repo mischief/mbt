@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <string.h>
 
-#include "infohash.h"
+#include "mbt/infohash.h"
 
 static void
 test_new_and_string(void)

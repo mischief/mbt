@@ -8,8 +8,8 @@
 
 #include <systemd/sd-event.h>
 
-#include "event.h"
-#include "conn.h"
+#include "mbt/event.h"
+#include "mbt/conn.h"
 #include "sdbuf.h"
 
 /* Access the underlying sd_event* from our ev_sd backend */

@@ -3,10 +3,10 @@
 #include <signal.h>
 #include <err.h>
 
-#include "event.h"
-#include "infohash.h"
-#include "tracker.h"
-#include "log.h"
+#include "mbt/event.h"
+#include "mbt/infohash.h"
+#include "mbt/tracker.h"
+#include "mbt/log.h"
 
 static struct mbt_ev *ev;
 

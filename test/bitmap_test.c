@@ -4,7 +4,7 @@
 #include <assert.h>
 #include <sys/types.h>
 
-#include "bitmap.h"
+#include "mbt/bitmap.h"
 
 static void
 test_basic(void)

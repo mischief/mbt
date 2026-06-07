@@ -6,14 +6,14 @@
 #include <string.h>
 #include <errno.h>
 
-#include "log.h"
-#include "event.h"
-#include "conn.h"
-#include "infohash.h"
-#include "pack.h"
-#include "peer.h"
-#include "bitmap.h"
-#include "be.h"
+#include "mbt/log.h"
+#include "mbt/event.h"
+#include "mbt/conn.h"
+#include "mbt/infohash.h"
+#include "mbt/pack.h"
+#include "mbt/peer.h"
+#include "mbt/bitmap.h"
+#include "mbt/be.h"
 
 enum {
 	HANDSHAKE_SIZE = 1 + 19 + 8 + 20 + 20, /* 68 */

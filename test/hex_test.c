@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "hex.h"
+#include "mbt/hex.h"
 
 static void
 test_bintohex(void)

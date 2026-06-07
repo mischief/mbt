@@ -7,10 +7,10 @@
 #include <stdio.h>
 #include <libgen.h>
 
-#include "storage.h"
-#include "torrent.h"
-#include "infohash.h"
-#include "log.h"
+#include "mbt/storage.h"
+#include "mbt/torrent.h"
+#include "mbt/infohash.h"
+#include "mbt/log.h"
 
 /*
  * File storage backend.

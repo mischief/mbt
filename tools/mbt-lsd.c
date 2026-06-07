@@ -8,11 +8,11 @@
 #include <unistd.h>
 #include <err.h>
 
-#include "event.h"
-#include "infohash.h"
-#include "session.h"
-#include "storage.h"
-#include "log.h"
+#include "mbt/event.h"
+#include "mbt/infohash.h"
+#include "mbt/session.h"
+#include "mbt/storage.h"
+#include "mbt/log.h"
 
 static int
 on_lsd(struct mbt_session *s, struct mbt_infohash *ih,

@@ -7,8 +7,8 @@
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
 
-#include "event.h"
-#include "conn.h"
+#include "mbt/event.h"
+#include "mbt/conn.h"
 
 struct conn_lev {
 	struct mbt_conn base;

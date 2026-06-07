@@ -1,9 +1,9 @@
 #include <stdlib.h>
 
-#include "picker.h"
-#include "torrent.h"
-#include "bitmap.h"
-#include "peer.h"
+#include "mbt/picker.h"
+#include "mbt/torrent.h"
+#include "mbt/bitmap.h"
+#include "mbt/peer.h"
 
 int
 mbt_picker_sequential(struct mbt_torrent *t, void *peer, void *ctx)

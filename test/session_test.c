@@ -3,11 +3,11 @@
 #include <string.h>
 #include <err.h>
 
-#include "event.h"
-#include "infohash.h"
-#include "session.h"
-#include "torrent.h"
-#include "log.h"
+#include "mbt/event.h"
+#include "mbt/infohash.h"
+#include "mbt/session.h"
+#include "mbt/torrent.h"
+#include "mbt/log.h"
 
 static void
 on_piece_complete(struct mbt_torrent *t, uint32_t piece, void *arg)

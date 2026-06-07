@@ -12,21 +12,21 @@
 
 #include <sha1.h>
 
-#include "event.h"
-#include "conn.h"
-#include "infohash.h"
-#include "hex.h"
-#include "be.h"
-#include "torrent.h"
-#include "session.h"
-#include "log.h"
-#include "lsd.h"
-#include "magnet.h"
-#include "tracker.h"
+#include "mbt/event.h"
+#include "mbt/conn.h"
+#include "mbt/infohash.h"
+#include "mbt/hex.h"
+#include "mbt/be.h"
+#include "mbt/torrent.h"
+#include "mbt/session.h"
+#include "mbt/log.h"
+#include "mbt/lsd.h"
+#include "mbt/magnet.h"
+#include "mbt/tracker.h"
 
 /* --- Torrent list entry --- */
 
-#include "peerdb.h"
+#include "mbt/peerdb.h"
 
 struct session_torrent {
 	struct mbt_session *session;
