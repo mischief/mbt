@@ -59,6 +59,7 @@ bt_src = [
   'torrent.c',
   'tracker_http.c',
   'tracker_udp.c',
+  'dht.c',
 ] + ev_src
 
 mbt_inc = include_directories('.', 'mbt')
@@ -73,6 +74,7 @@ install_headers(
   'mbt/be.h',
   'mbt/bitmap.h',
   'mbt/conn.h',
+  'mbt/dht.h',
   'mbt/event.h',
   'mbt/hex.h',
   'mbt/infohash.h',
@@ -140,6 +142,7 @@ test('ev', ev_test)
 # Tools
 executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 executable('mbt-torrent', 'tools/mbt-torrent.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
 libcurl_dep = dependency('libcurl', required: false)
 if libcurl_dep.found()
