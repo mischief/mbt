@@ -295,7 +295,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	/* Allocate piece buffer on first block */
 	if (!pi->data) {
-		if (t->active_pieces >= 32) return; /* cap concurrent buffers */
+		if (t->active_pieces >= (uint32_t)(t->peer_count * 4 + 8)) return; /* cap concurrent buffers */
 		pi->data = calloc(1, pi->length);
 		if (!pi->data) return;
 		t->active_pieces++;
