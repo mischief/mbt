@@ -586,7 +586,7 @@ void
 mbt_session_disable_lsd(struct mbt_session *s)
 {
 	if (s->lsd_io) { mbt_ev_io_free(s->lsd_io); s->lsd_io = NULL; }
-	if (s->lsd) { mbt_lsd_freep(&s->lsd); }
+	if (s->lsd) { mbt_lsd_freep(&s->lsd); s->lsd = NULL; }
 	if (s->lsd_announce_timer) { mbt_ev_timer_free(s->lsd_announce_timer); s->lsd_announce_timer = NULL; }
 }
 

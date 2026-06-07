@@ -163,5 +163,8 @@ test('storage_file', storage_file_test)
 peerdb_test = executable('peerdb_test', 'test/peerdb_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('peerdb', peerdb_test)
 
+toggle_test = executable('toggle_test', 'test/toggle_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('toggle', toggle_test)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
