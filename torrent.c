@@ -238,6 +238,27 @@ on_choke(struct mbt_peer *p, int choked, void *arg)
 
 	if (!choked && t->pieces)
 		torrent_drive_peer(t, tp);
+
+	/* When choked, release pieces owned by this peer so others can take them */
+	if (choked && t->pieces) {
+		for (uint32_t i = 0; i < t->piece_count; i++) {
+			struct piece_info *pi = &t->pieces[i];
+			if (pi->owner == tp && pi->state == MBT_PIECE_ACTIVE) {
+				pi->state = MBT_PIECE_PENDING;
+				pi->owner = NULL;
+				pi->requested = 0;
+				pi->received = 0;
+				pi->blocks_have = 0;
+				pi->last_activity = 0;
+				if (pi->data) { free(pi->data); t->active_pieces--; pi->data = NULL; }
+			}
+		}
+		tp->outstanding = 0;
+		/* Drive other unchoked peers to pick up freed pieces */
+		for (struct torrent_peer *op = t->peers; op; op = op->next)
+			if (op != tp && !mbt_peer_choked(op->peer))
+				torrent_drive_peer(t, op);
+	}
 }
 
 static void
