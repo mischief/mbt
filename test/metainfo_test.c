@@ -106,9 +106,10 @@ test_auto_piece_length(void)
 static void
 test_parse_real_torrent(void)
 {
-	/* Parse ubuntu torrent if available */
-	FILE *fp = fopen("/home/mischief/Downloads/ubuntu-24.04.2-desktop-amd64.iso.torrent", "rb");
-	if (!fp) return; /* skip if not available */
+	/* Parse ubuntu torrent from repo test corpus */
+	FILE *fp = fopen("../fuzz/corpus/ubuntu-24.04.2-desktop-amd64.iso.torrent", "rb");
+	if (!fp) fp = fopen("fuzz/corpus/ubuntu-24.04.2-desktop-amd64.iso.torrent", "rb");
+	if (!fp) return; /* skip if not found (e.g. out-of-tree build) */
 
 	unsigned char *buf = malloc(4 * 1024 * 1024);
 	size_t len = fread(buf, 1, 4 * 1024 * 1024, fp);
