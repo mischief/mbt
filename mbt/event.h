@@ -49,6 +49,19 @@ int mbt_ev_libevent_new(struct mbt_ev **out);
 struct event_base;
 int mbt_ev_libevent_new_from(struct mbt_ev **out, struct event_base *base);
 
+/* Create event loop using the compiled-in backend */
+static inline int
+mbt_ev_new_default(struct mbt_ev **out)
+{
+#ifdef HAVE_SD_EVENT
+	return mbt_ev_sd_new(out);
+#elif defined(HAVE_LIBEVENT)
+	return mbt_ev_libevent_new(out);
+#else
+#error "No event backend configured"
+#endif
+}
+
 /* Inline convenience wrappers */
 static inline int
 mbt_ev_io_new(struct mbt_ev *ev, struct mbt_ev_io **out, int fd, uint32_t events,
