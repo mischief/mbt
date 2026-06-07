@@ -146,8 +146,9 @@ on_signal(int sig)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-dS] [-o dir] [-p max_peers] [-s strategy] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "usage: %s [-dS] [-l port] [-o dir] [-p max_peers] [-s strategy] <file.torrent | magnet:?...>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
+	fprintf(stderr, "  -l port       listen port (default: 6881)\n");
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
 	fprintf(stderr, "  -s strategy   piece picker: sequential (default) or random\n");
@@ -162,15 +163,19 @@ main(int argc, char *argv[])
 	const char *download_dir = ".";
 	int debug = 0;
 	int max_peers = 0;
+	int listen_port = 6881;
 	mbt_picker_fn picker = mbt_picker_sequential;
 
-	while ((ch = getopt(argc, argv, "dSo:p:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dSl:o:p:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
 			break;
 		case 'S':
 			seed_mode = 1;
+			break;
+		case 'l':
+			listen_port = atoi(optarg);
 			break;
 		case 'o':
 			download_dir = optarg;
@@ -220,7 +225,7 @@ main(int argc, char *argv[])
 	cfg.storage_ops = mbt_storage_file_ops();
 	cfg.storage_ctx = (void *)download_dir;
 	cfg.picker = picker;
-	cfg.listen_port = 6881;
+	cfg.listen_port = listen_port;
 	cfg.http = curl_http_fn;
 	if (max_peers)
 		cfg.max_peers = max_peers;
