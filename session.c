@@ -22,6 +22,7 @@
 #include "mbt/log.h"
 #include "mbt/lsd.h"
 #include "mbt/dht.h"
+#include "mbt/metainfo.h"
 #include "mbt/magnet.h"
 #include "mbt/tracker.h"
 
@@ -808,99 +809,38 @@ int
 mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len)
 {
 	int rv;
-	const unsigned char *buf = data;
-	struct mbt_be_value *be = NULL;
-	struct mbt_infohash *ih = NULL;
+	struct mbt_metainfo *mi = NULL;
+	struct mbt_infohash *ih;
 	struct mbt_torrent *t;
-	SHA1_CTX ctx;
-	uint8_t digest[20];
-	char hexstr[41];
+	size_t raw_len;
 
-	/* Find raw info dict in the buffer for correct SHA1 */
-	unsigned char *info_start = NULL;
-	size_t info_len = 0;
-	{
-		unsigned char *p = memmem(buf, len, "4:infod", 7);
-		if (!p) p = memmem(buf, len, "4:info", 6);
-		if (p) {
-			info_start = p + 6;
-			int depth = 0;
-			unsigned char *i = info_start;
-			const unsigned char *end = buf + len;
-			while (i < end) {
-				if (*i == 'd' || *i == 'l') { depth++; i++; }
-				else if (*i == 'e') { depth--; i++; if (depth == 0) break; }
-				else if (*i == 'i') { i = memchr(i, 'e', end - i); if (i) i++; else break; }
-				else if (*i >= '0' && *i <= '9') {
-					unsigned char *colon = memchr(i, ':', end - i);
-					if (!colon) break;
-					size_t slen = strtoul((char *)i, NULL, 10);
-					i = colon + 1 + slen;
-				} else { break; }
-			}
-			info_len = (size_t)(i - info_start);
-		}
-	}
+	rv = mbt_metainfo_parse(&mi, data, len);
+	if (rv < 0) return rv;
 
-	if (!info_start || info_len == 0)
-		return -EINVAL;
-
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, info_start, info_len);
-	SHA1Final(digest, &ctx);
-	mbt_hex_encode(digest, 20, hexstr, sizeof(hexstr));
-
-	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hexstr);
-	if (rv < 0)
-		return rv;
-
-	rv = mbt_be_value_parse(buf, len, &be);
-	if (rv < 0) {
-		mbt_infohash_unref(ih);
-		return rv;
-	}
+	ih = mbt_metainfo_infohash(mi);
+	if (!ih) { mbt_metainfo_free(mi); return -EINVAL; }
 
 	rv = mbt_session_add_infohash(s, ih);
-	if (rv < 0) {
-		mbt_infohash_unref(ih);
-		mbt_be_value_free(be);
-		return rv;
-	}
+	if (rv < 0) { mbt_metainfo_free(mi); return rv; }
 
 	t = mbt_session_find_torrent(s, ih);
-	if (t)
-		mbt_torrent_set_metadata(t, info_start, info_len);
+	if (t) {
+		const void *raw = mbt_metainfo_raw_info(mi, &raw_len);
+		mbt_torrent_set_metadata(t, raw, raw_len);
+	}
 
 	/* Extract tracker URLs */
 	struct session_torrent *sta = session_find(s, ih);
-	if (sta && t) {
-		struct mbt_be_value *al = mbt_be_find(be, "announce-list");
-		if (al && al->type == BE_LIST) {
-			struct mbt_be_value *tier;
-			STAILQ_FOREACH(tier, &al->listhead, next) {
-				if (tier->type != BE_LIST) continue;
-				struct mbt_be_value *url_val;
-				STAILQ_FOREACH(url_val, &tier->listhead, next) {
-					if (url_val->type == BE_STRING && sta->tracker_count < 16) {
-						char *u = strndup(url_val->string.iov_base, url_val->string.iov_len);
-						if (u) sta->trackers[sta->tracker_count++] = u;
-					}
-				}
-			}
-		}
-		if (sta->tracker_count == 0) {
-			struct mbt_be_value *announce = mbt_be_find(be, "announce");
-			if (announce && announce->type == BE_STRING) {
-				char *u = strndup(announce->string.iov_base, announce->string.iov_len);
-				if (u) sta->trackers[sta->tracker_count++] = u;
-			}
+	if (sta) {
+		for (int i = 0; i < mbt_metainfo_tracker_count(mi) && sta->tracker_count < 16; i++) {
+			char *u = strdup(mbt_metainfo_tracker(mi, i));
+			if (u) sta->trackers[sta->tracker_count++] = u;
 		}
 		if (sta->tracker_count > 0)
 			session_do_announce(s, sta);
 	}
 
-	mbt_infohash_unref(ih);
-	mbt_be_value_free(be);
+	mbt_metainfo_free(mi);
 	return 0;
 }
 
