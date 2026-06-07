@@ -398,7 +398,9 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 				t->storage_ops->write_piece(t->storage_ctx, piece, pi->data, pi->length);
 
 			/* Free piece buffer */
+			free(pi->data);
 			pi->data = NULL;
+			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 
 			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu",
 			             piece, mbt_peer_addr(p), mbt_peer_port(p));
