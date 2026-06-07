@@ -22,6 +22,7 @@
 - [x] Request timeout (15s), peer banning (hash failures), endgame mode
 - [x] Peer database (peerdb.c) — RB tree, state/source/backoff, torrent-owned
 - [x] Out-of-order block assembly (bitmask tracking)
+- [x] Bounded memory: active piece buffer cap (peer_count × 4 + 8)
 
 ## Phase 2: Discovery (complete)
 
@@ -31,7 +32,7 @@
 - [x] Auto-announce from announce-list (BEP 12), re-announce timer
 - [x] PEX receive (BEP 11)
 - [x] DHT (BEP 5) — Kademlia routing, iterative lookup, announce, stable node ID
-- [x] DHT periodic re-lookup (5 min) for incomplete torrents
+- [x] DHT periodic re-lookup (5 min), runtime enable/disable
 - [x] LSD listener + announcer (opt-in, runtime toggle)
 - [ ] PEX send — 60s timer, batch added/dropped peers
 
@@ -52,6 +53,7 @@
 - [x] Deferred HAVE_ALL (applied when piece_count becomes known)
 - [x] REJECT handling — instant piece failover
 - [x] Drop unsolicited/duplicate piece data
+- [x] Named protocol constants (no magic numbers)
 - [ ] Private torrents (BEP 27) — disable DHT/PEX/LSD when private=1
 
 ## Phase 5: API polish (complete)
@@ -60,19 +62,19 @@
 - [x] Headers in `mbt/` — `#include <mbt/mbt.h>`
 - [x] `mbt_ev_new_default()` — backend-agnostic
 - [x] DHT/LSD enable/disable at runtime, order-independent
-- [x] Custom DHT bootstrap nodes (`mbt_session_dht_bootstrap`)
+- [x] Custom DHT bootstrap nodes
 - [x] Piece map accessor (`mbt_torrent_piece_map`) for GUI/TUI
-- [x] Safe bencode constructors
-- [x] Named protocol constants (no magic numbers)
+- [x] Safe bencode constructors, backend-guarded headers
 
-## Phase 6: Swarm quality (next)
+## Phase 6: Swarm quality + networking (next)
 
+- [ ] NAT-PMP / UPnP-IGD port mapping (auto-punch NAT)
 - [ ] Per-peer write buffering (EPOLLOUT queue, replace EAGAIN spin)
 - [ ] Anti-snubbing (peer silent 60s → request elsewhere)
-- [ ] Adaptive pipeline depth (ramp from low, not burst full pipeline)
+- [ ] Adaptive pipeline depth (ramp up, not burst)
 - [ ] Rarest-first picker with peer availability tracking
 - [ ] Upload/download rate limiting
-- [ ] NAT-PMP / UPnP port mapping (built-in)
+- [ ] Piece buffer memory pool (fixed-size allocator per torrent)
 
 ## Phase 7: Tools
 
