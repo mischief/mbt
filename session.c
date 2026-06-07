@@ -307,6 +307,14 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		return;
 	}
 
+	/* Enforce peer limit */
+	if (mbt_torrent_peer_count(st->torrent) >= s->max_peers) {
+		close(pa->fd);
+		mbt_ev_io_free(pa->io);
+		free(pa);
+		return;
+	}
+
 	char paddr[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, &pa->addr.sin_addr, paddr, sizeof(paddr));
 	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, ntohs(pa->addr.sin_port));
