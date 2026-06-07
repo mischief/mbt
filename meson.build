@@ -140,6 +140,8 @@ libcurl_dep = dependency('libcurl', required: false)
 if libcurl_dep.found()
   executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], dependencies: deps + [libcurl_dep])
 endif
+header_test = executable('header_test', 'test/header_test.c', link_with: [libmbt], dependencies: deps)
+test('header', header_test)
 
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt])

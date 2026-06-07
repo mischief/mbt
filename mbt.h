@@ -2,11 +2,11 @@
 #ifndef MBT_H
 #define MBT_H
 
-#include <mbt/event.h>
-#include <mbt/conn.h>
-#include <mbt/session.h>
-#include <mbt/torrent.h>
-#include <mbt/storage.h>
-#include <mbt/log.h>
+#include "event.h"
+#include "conn.h"
+#include "session.h"
+#include "torrent.h"
+#include "storage.h"
+#include "log.h"
 
 #endif
