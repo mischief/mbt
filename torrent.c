@@ -163,6 +163,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 			pi->blocks_have = 0;
 		pi->requested = 0;
 		pi->last_activity = 0;
+		free(pi->data);
 		pi->data = NULL;
 		reset_count++;
 	}
