@@ -74,6 +74,9 @@ int mbt_torrent_peer_count(struct mbt_torrent *t);
 int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);
 int mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece);
 int mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece);
+
+/* Bulk piece state query: 0=pending, 1=active(requested), 2=have */
+void mbt_torrent_piece_map(struct mbt_torrent *t, uint8_t *out, uint32_t count);
 int mbt_torrent_file_count(struct mbt_torrent *t);
 const struct mbt_file *mbt_torrent_file(struct mbt_torrent *t, int index);
 

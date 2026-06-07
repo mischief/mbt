@@ -1104,6 +1104,20 @@ mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece)
 	return t->pieces[piece].requested >= t->pieces[piece].length;
 }
 
+void
+mbt_torrent_piece_map(struct mbt_torrent *t, uint8_t *out, uint32_t count)
+{
+	uint32_t n = count < t->piece_count ? count : t->piece_count;
+	for (uint32_t i = 0; i < n; i++) {
+		if (mbt_bitmap_isset(t->have, i) > 0)
+			out[i] = 2;
+		else if (t->pieces && t->pieces[i].state == MBT_PIECE_ACTIVE)
+			out[i] = 1;
+		else
+			out[i] = 0;
+	}
+}
+
 int
 mbt_torrent_file_count(struct mbt_torrent *t)
 {
