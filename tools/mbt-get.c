@@ -271,6 +271,7 @@ main(int argc, char *argv[])
 	rv = mbt_session_run(session);
 
 	mbt_session_free(session);
+	mbt_ev_destroy(cfg.ev);
 	curl_global_cleanup();
 	return rv < 0 ? 1 : 0;
 }
