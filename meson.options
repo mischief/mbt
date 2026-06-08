@@ -1,1 +1,2 @@
 option('event_backend', type: 'combo', choices: ['sd-event', 'libevent'], value: 'sd-event', description: 'Event loop backend')
+option('tests', type: 'boolean', value: true, description: 'Build and run tests')
