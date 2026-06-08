@@ -18,6 +18,7 @@
 #include "mbt/peerdb.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "internal.h"
 #include "mbt/picker.h"
 
 enum {
@@ -252,7 +253,7 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 		if (!tp->peer) continue;
 		uint8_t remote_pex_id = mbt_peer_ut_pex_id(tp->peer);
 		if (!remote_pex_id) continue;
-		unsigned char hdr[2] = { 20, remote_pex_id };
+		unsigned char hdr[2] = { BT_EXTENSION, remote_pex_id };
 		size_t total = 2 + enc_len;
 		unsigned char *buf = malloc(total);
 		if (!buf) continue;
