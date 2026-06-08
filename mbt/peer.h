@@ -84,6 +84,7 @@ int mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_c
 
 void mbt_peer_set_our_metadata_size(struct mbt_peer *p, size_t sz);
 void mbt_peer_set_piece_count(struct mbt_peer *p, uint32_t count);
+uint8_t mbt_peer_ut_pex_id(struct mbt_peer *p);
 
 /* Free peer (closes connection) */
 void mbt_peer_free(struct mbt_peer *p);

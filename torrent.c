@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <arpa/inet.h>
 #include <time.h>
 
 #include <sha1.h>
@@ -96,6 +97,7 @@ struct mbt_torrent {
 	/* Request timeout */
 	struct mbt_ev_timer *timeout_timer;
 	struct mbt_ev_timer *choke_timer;
+	struct mbt_ev_timer *pex_timer;
 	int choke_round;  /* increments every 10s, optimistic every 3rd round (30s) */
 	int request_timeout_sec; /* 0 = disabled */
 
@@ -198,6 +200,71 @@ find_torrent_peer(struct mbt_torrent *t, struct mbt_peer *p)
 		if (tp->peer == p)
 			return tp;
 	return NULL;
+}
+
+/* --- PEX send (BEP 11) — broadcast connected peers every 60s --- */
+
+static void
+torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_torrent *t = v;
+
+	/* Build compact IPv4 "added" list from all connected peers */
+	uint8_t added[50 * 6]; /* max 50 peers per BEP 11 */
+	int count = 0;
+	for (struct torrent_peer *tp = t->peers; tp && count < 50; tp = tp->next) {
+		if (!tp->peer) continue;
+		const char *addr = mbt_peer_addr(tp->peer);
+		uint16_t port = mbt_peer_port(tp->peer);
+		struct in_addr in;
+		if (inet_pton(AF_INET, addr, &in) <= 0) continue;
+		memcpy(added + count * 6, &in, 4);
+		uint16_t nport = htons(port);
+		memcpy(added + count * 6 + 4, &nport, 2);
+		count++;
+	}
+
+	if (count == 0) goto done;
+
+	/* Build bencoded PEX message: d5:added<compact>e */
+	struct mbt_be_value *msg = NULL;
+	mbt_be_dict_new(&msg);
+	mbt_be_dict_append_string(msg, "added", added, count * 6);
+
+	unsigned char *enc; size_t enc_len;
+	if (mbt_be_value_encode(msg, &enc, &enc_len) < 0) {
+		mbt_be_value_free(msg);
+		goto done;
+	}
+	mbt_be_value_free(msg);
+
+	/* Send to all peers that support ut_pex (ext id 4 = our local id) */
+	unsigned char *pex_msg = malloc(2 + enc_len);
+	if (!pex_msg) { free(enc); goto done; }
+	pex_msg[0] = 20;
+	pex_msg[1] = 4; /* remote's ut_pex id — but we need THEIR id, not ours */
+
+	/* Actually: we need each peer's ut_pex_id. Use mbt_peer_send_msg with the
+	 * extension header. For simplicity, build per-peer: */
+	free(pex_msg);
+
+	for (struct torrent_peer *tp = t->peers; tp; tp = tp->next) {
+		if (!tp->peer) continue;
+		uint8_t remote_pex_id = mbt_peer_ut_pex_id(tp->peer);
+		if (!remote_pex_id) continue;
+		unsigned char hdr[2] = { 20, remote_pex_id };
+		size_t total = 2 + enc_len;
+		unsigned char *buf = malloc(total);
+		if (!buf) continue;
+		memcpy(buf, hdr, 2);
+		memcpy(buf + 2, enc, enc_len);
+		mbt_peer_send_msg(tp->peer, buf, total);
+		free(buf);
+	}
+	free(enc);
+
+done:
+	mbt_ev_timer_mod(timer, 60 * 1000000ULL);
 }
 
 /* --- Choking algorithm (BEP 3) --- */
@@ -846,6 +913,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	/* Start timeout scanner */
 	mbt_ev_timer_new(t->ev, &t->timeout_timer, 5 * 1000000ULL, torrent_timeout_cb, t);
 	mbt_ev_timer_new(t->ev, &t->choke_timer, 10 * 1000000ULL, torrent_choke_cb, t);
+	mbt_ev_timer_new(t->ev, &t->pex_timer, 60 * 1000000ULL, torrent_pex_cb, t);
 
 	*out = t;
 	return 0;
@@ -879,6 +947,8 @@ mbt_torrent_free(struct mbt_torrent *t)
 		mbt_ev_timer_free(t->timeout_timer);
 	if (t->choke_timer)
 		mbt_ev_timer_free(t->choke_timer);
+	if (t->pex_timer)
+		mbt_ev_timer_free(t->pex_timer);
 	mbt_peerdb_free(&t->peerdb);
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);

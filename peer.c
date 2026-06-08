@@ -778,6 +778,11 @@ mbt_peer_disconnect(struct mbt_peer *p)
 		peer_error(p, -ECONNABORTED);
 }
 
+uint8_t
+mbt_peer_ut_pex_id(struct mbt_peer *p)
+{
+	return p->ut_pex_id;
+}
 void
 mbt_peer_free(struct mbt_peer *p)
 {
