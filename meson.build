@@ -186,5 +186,8 @@ test('magnet_flow', magnet_flow_test, timeout: 15)
 multi_peer_test = executable('multi_peer_test', 'test/multi_peer_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('multi_peer', multi_peer_test, timeout: 15)
 
+choke_test = executable('choke_test', 'test/choke_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('choke', choke_test, timeout: 20)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)

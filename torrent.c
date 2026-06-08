@@ -46,6 +46,10 @@ struct torrent_peer {
 	int outstanding;       /* in-flight requests */
 	int hash_failures;     /* consecutive hash failures from this peer */
 	int banned;
+	uint64_t bytes_from;   /* bytes received from peer in current interval */
+	uint64_t bytes_to;     /* bytes sent to peer in current interval */
+	int peer_interested;   /* peer wants data from us */
+	int am_choking;        /* we are choking this peer */
 };
 
 struct mbt_torrent {
@@ -91,6 +95,8 @@ struct mbt_torrent {
 
 	/* Request timeout */
 	struct mbt_ev_timer *timeout_timer;
+	struct mbt_ev_timer *choke_timer;
+	int choke_round;  /* increments every 10s, optimistic every 3rd round (30s) */
 	int request_timeout_sec; /* 0 = disabled */
 
 	/* Endgame mode */
@@ -194,6 +200,58 @@ find_torrent_peer(struct mbt_torrent *t, struct mbt_peer *p)
 	return NULL;
 }
 
+/* --- Choking algorithm (BEP 3) --- */
+
+#define UNCHOKE_SLOTS 4
+
+static void
+torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_torrent *t = v;
+	t->choke_round++;
+
+	/* Count interested peers */
+	struct torrent_peer *tp;
+	struct torrent_peer *ranked[128];
+	int n = 0;
+	for (tp = t->peers; tp && n < 128; tp = tp->next)
+		if (tp->peer && tp->peer_interested)
+			ranked[n++] = tp;
+
+	/* Sort by bytes_from (descending) — reward uploaders */
+	for (int i = 0; i < n - 1; i++)
+		for (int j = i + 1; j < n; j++)
+			if (ranked[j]->bytes_from > ranked[i]->bytes_from) {
+				struct torrent_peer *tmp = ranked[i];
+				ranked[i] = ranked[j]; ranked[j] = tmp;
+			}
+
+	/* Unchoke top UNCHOKE_SLOTS */
+	for (int i = 0; i < n; i++) {
+		int should_unchoke = (i < UNCHOKE_SLOTS);
+
+		/* Optimistic unchoke: every 3rd round (30s), pick one random from the rest */
+		if (!should_unchoke && (t->choke_round % 3 == 0) && i == UNCHOKE_SLOTS)
+			should_unchoke = 1;
+
+		if (should_unchoke && ranked[i]->am_choking) {
+			mbt_peer_send_choke(ranked[i]->peer, 0);
+			ranked[i]->am_choking = 0;
+		} else if (!should_unchoke && !ranked[i]->am_choking) {
+			mbt_peer_send_choke(ranked[i]->peer, 1);
+			ranked[i]->am_choking = 1;
+		}
+	}
+
+	/* Reset counters for next interval */
+	for (tp = t->peers; tp; tp = tp->next) {
+		tp->bytes_from = 0;
+		tp->bytes_to = 0;
+	}
+
+	mbt_ev_timer_mod(timer, 10 * 1000000ULL);
+}
+
 static void
 on_active(struct mbt_peer *p, void *arg)
 {
@@ -208,7 +266,9 @@ on_active(struct mbt_peer *p, void *arg)
 	if (t->have && mbt_bitmap_count(t->have) > 0)
 		mbt_peer_send_bitfield(p, t->have);
 
-	/* Unchoke — simple strategy: unchoke everyone */
+	/* Start unchoked — the choke timer will regulate later */
+	struct torrent_peer *tp2 = find_torrent_peer(t, p);
+	if (tp2) tp2->am_choking = 0;
 	mbt_peer_send_choke(p, 0);
 
 	/* Always express interest */
@@ -338,6 +398,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	}
 	mbt_bitmap_set(pi->blocks, block_idx);
 	pi->received += len;
+	tp->bytes_from += len;
 	pi->last_activity = now_usec();
 
 	tp->outstanding--;
@@ -527,8 +588,9 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 static void
 on_interest(struct mbt_peer *p, int interested, void *arg)
 {
-	/* TODO: seeding — track who wants data from us */
-	(void)p; (void)interested; (void)arg;
+	struct mbt_torrent *t = arg;
+	struct torrent_peer *tp = find_torrent_peer(t, p);
+	if (tp) tp->peer_interested = interested;
 }
 
 static void
@@ -783,6 +845,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 
 	/* Start timeout scanner */
 	mbt_ev_timer_new(t->ev, &t->timeout_timer, 5 * 1000000ULL, torrent_timeout_cb, t);
+	mbt_ev_timer_new(t->ev, &t->choke_timer, 10 * 1000000ULL, torrent_choke_cb, t);
 
 	*out = t;
 	return 0;
@@ -814,6 +877,8 @@ mbt_torrent_free(struct mbt_torrent *t)
 
 	if (t->timeout_timer)
 		mbt_ev_timer_free(t->timeout_timer);
+	if (t->choke_timer)
+		mbt_ev_timer_free(t->choke_timer);
 	mbt_peerdb_free(&t->peerdb);
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);
