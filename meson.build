@@ -103,5 +103,16 @@ if get_option('tests')
   subdir('test')
 endif
 
+# Tools
+executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+executable('mbt-torrent', 'tools/mbt-torrent.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+
+libcurl_dep = dependency('libcurl', required: false)
+if libcurl_dep.found()
+  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [libcurl_dep])
+endif
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
