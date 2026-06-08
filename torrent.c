@@ -104,6 +104,7 @@ struct mbt_torrent {
 
 	/* Endgame mode */
 	int endgame;  /* 1 when all pieces are requested at least once */
+	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
 };
 
 enum {
@@ -209,6 +210,8 @@ static void
 torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct mbt_torrent *t = v;
+
+	if (t->is_private) goto done; /* BEP 27: no PEX for private torrents */
 
 	/* Build compact IPv4 "added" list from all connected peers */
 	uint8_t added[50 * 6]; /* max 50 peers per BEP 11 */
@@ -701,6 +704,7 @@ on_pex(struct mbt_peer *p, const char *addr, uint16_t port, void *arg)
 {
 	(void)p;
 	struct mbt_torrent *t = arg;
+	if (t->is_private) return; /* BEP 27: no PEX for private torrents */
 	/* Insert into peerdb */
 	mbt_peerdb_insert(&t->peerdb, addr, port, MBT_SOURCE_PEX);
 	mbt_log_debug(MBT_LOG_TORRENT, "PEX: %s:%hu", addr, port);
@@ -1013,6 +1017,11 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		return -EINVAL;
 	t->piece_length = (uint32_t)tmp->integer;
 
+
+	/* BEP 27: private flag */
+	tmp = mbt_be_find(be, "private");
+	if (tmp && tmp->type == BE_INTEGER && tmp->integer == 1)
+		t->is_private = 1;
 	/* Extract total length (single-file) or compute from files list */
 	tmp = mbt_be_find(be, "length");
 	if (tmp && tmp->type == BE_INTEGER) {
@@ -1236,6 +1245,12 @@ mbt_torrent_complete(struct mbt_torrent *t)
 	return t->piece_count > 0 && t->have_count == t->piece_count;
 }
 
+
+int
+mbt_torrent_is_private(struct mbt_torrent *t)
+{
+	return t->is_private;
+}
 uint32_t
 mbt_torrent_piece_count(struct mbt_torrent *t)
 {

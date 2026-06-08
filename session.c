@@ -116,6 +116,7 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 		return;
 
 	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (mbt_torrent_is_private(st->torrent)) continue; /* BEP 27 */
 		char hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
 		mbt_infohash_string(st->ih, hex, sizeof(hex));
 		mbt_lsd_announce(s->lsd, hex, s->listen_port);
@@ -154,7 +155,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 		}
 
 		/* DHT re-lookup every 5 min if incomplete and few peers */
-		if (s->dht && !mbt_torrent_complete(st->torrent)) {
+		if (s->dht && !mbt_torrent_complete(st->torrent) && !mbt_torrent_is_private(st->torrent)) {
 			time_t now = time(NULL);
 			if (now - st->last_dht_lookup >= 300) {
 				st->last_dht_lookup = now;
@@ -838,8 +839,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 	st->ih = mbt_infohash_ref(ih);
 	STAILQ_INSERT_TAIL(&s->torrents, st, next);
 
-	/* Start DHT lookup if enabled */
-	if (s->dht)
+	if (s->dht && st->torrent && !mbt_torrent_is_private(st->torrent))
 		mbt_session_dht_get_peers(s, ih);
 
 	return 0;

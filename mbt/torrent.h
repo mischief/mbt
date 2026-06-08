@@ -66,6 +66,7 @@ struct mbt_infohash *mbt_torrent_infohash(struct mbt_torrent *t);
 const char *mbt_torrent_name(struct mbt_torrent *t);
 float mbt_torrent_progress(struct mbt_torrent *t);
 int mbt_torrent_complete(struct mbt_torrent *t);
+int mbt_torrent_is_private(struct mbt_torrent *t);
 int mbt_torrent_has_metadata(struct mbt_torrent *t);
 uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
 uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);
