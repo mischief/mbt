@@ -48,7 +48,7 @@
 - [x] HAVE broadcast on piece completion
 - [x] Metadata retry from multiple peers (resilient to disconnects)
 - [x] Immediate piece reassignment on peer choke
-- [ ] Choking algorithm (top-4 + optimistic)
+- [x] Choking algorithm (BEP 3: top-4 + optimistic)
 - [ ] Announce event=completed / event=stopped to tracker
 
 ## Phase 4: Protocol extensions (mostly complete)
@@ -75,8 +75,8 @@
 ## Phase 6: Swarm quality + networking (next)
 
 - [ ] NAT-PMP / UPnP-IGD port mapping (auto-punch NAT)
-- [ ] Per-peer write buffering (EPOLLOUT queue, replace EAGAIN spin)
-- [ ] Choking algorithm (top-4 + optimistic every 30s)
+- [x] Per-peer write buffering (async EPOLLOUT queue, no more spin)
+- [x] Choking algorithm (BEP 3: top-4 + optimistic every 30s)
 - [ ] Anti-snubbing (peer silent 60s → request elsewhere)
 - [ ] Rarest-first picker with peer availability tracking
 - [ ] Upload/download rate limiting
@@ -87,12 +87,12 @@
 - [x] Integration: e2e localhost transfer, tracker server, DHT localhost, resume
 - [x] Metainfo roundtrip (create → encode → parse → verify)
 - [x] Toggle enable/disable DHT/LSD
-- [x] ASan clean (21/21), valgrind clean, 71% line coverage
+- [x] ASan clean (24/24), valgrind clean, 71%+ line coverage
 - [ ] Endgame mode test (few pieces, cancel duplicates)
 - [ ] Hash failure + peer ban test
-- [ ] Choke cycling + piece reassignment test
-- [ ] Magnet → metadata → download (full magnet flow, localhost)
-- [ ] Multi-seeder partial test (3 seeders, none has all pieces)
+- [x] Choke cycling + piece reassignment test
+- [x] Magnet → metadata → download (full magnet flow, localhost)
+- [x] Multi-seeder partial test (3 seeders, none has all pieces)
 - [ ] LSD localhost test (multicast on loopback)
 - [ ] Resume partial download test
 
