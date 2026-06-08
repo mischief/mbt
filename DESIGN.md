@@ -6,10 +6,14 @@ A C library (`libmbt`) providing composable BitTorrent primitives. Programs buil
 
 ## Use Cases (example programs)
 
-- `mbt-lsd` — LSD listener + auto-replicate (the original goal)
+- `mbt-lsd` — LSD listener + auto-replicate (LAN file distribution)
 - `mbt-get` — one-shot download by infohash/magnet
 - `mbt-seed` — seed a file/directory
-- `mbt-daemon` — long-running multi-torrent daemon (like transmission-daemon)
+- `mbt-tracker` — embeddable tracker (UDP + HTTP, shared store)
+- `mbt-daemon` — long-running multi-torrent daemon with DBus/control API
+- Enterprise file distribution (deploy updates via torrent to fleet)
+- NAS/seedbox appliance (headless, resource-constrained)
+- Desktop GUI client (GTK/Qt event loop integration)
 
 ## Architecture
 
@@ -81,6 +85,19 @@ A C library (`libmbt`) providing composable BitTorrent primitives. Programs buil
 5. **Silent by default.** No output unless caller sets a log callback.
 6. **Safe for release builds.** External input validated with error returns, not asserts.
 7. **`mbt_` namespace.** All public types and functions use the `mbt_` prefix.
+8. **Dual-stack networking.** All socket code must handle IPv4 and IPv6. No AF_INET-only assumptions.
+9. **Policy via callbacks.** The library never makes policy decisions — callers decide:
+   - Which incoming peers to accept or reject
+   - Which torrents to add, pause, or remove
+   - Per-torrent and per-peer resource limits
+   - Whether to allow DHT/PEX/LSD on a per-torrent basis
+   - Custom logging, metrics, and audit hooks
+10. **Observable.** Callers can inspect all runtime state: peer lists, piece maps, transfer rates, tracker status. Expose enough for a GUI, monitoring dashboard, or Prometheus exporter.
+11. **Embeddable.** The library must work correctly in:
+    - Headless daemons (long-running, no terminal)
+    - GUI applications (integrated event loop)
+    - Containers and orchestrated environments (no filesystem assumptions beyond what storage backend provides)
+    - Multi-tenant servers (multiple sessions, independent lifecycle)
 
 ## Build
 
