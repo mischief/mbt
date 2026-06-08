@@ -86,18 +86,21 @@ int
 mbt_storage_memory_open(void *ctx, struct mbt_torrent *t)
 {
 	struct mbt_storage_memory *m = ctx;
+	uint64_t old_len = m->total_length;
 	m->piece_length = mbt_torrent_piece_length(t);
 	m->piece_count = mbt_torrent_piece_count(t);
-	m->total_length = (uint64_t)m->piece_length * (m->piece_count - 1);
-	/* Last piece may be shorter */
 	uint64_t tl = 0;
 	for (int i = 0; i < mbt_torrent_file_count(t); i++)
 		tl += mbt_torrent_file(t, i)->length;
 	m->total_length = tl;
 
-	if (!m->data) {
-		m->data = calloc(1, m->total_length);
-		if (!m->data) return -ENOMEM;
+	/* Ensure buffer covers full torrent size */
+	uint8_t *p = realloc(m->data, m->total_length);
+	if (!p && m->total_length > 0) return -ENOMEM;
+	if (p) {
+		if (m->total_length > old_len)
+			memset(p + old_len, 0, m->total_length - old_len);
+		m->data = p;
 	}
 	if (!m->have) {
 		m->have = calloc(m->piece_count, 1);

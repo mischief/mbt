@@ -180,5 +180,11 @@ test('tracker_server', tracker_server_test, timeout: 15)
 metainfo_test = executable('metainfo_test', 'test/metainfo_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('metainfo', metainfo_test)
 
+magnet_flow_test = executable('magnet_flow_test', 'test/magnet_flow_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('magnet_flow', magnet_flow_test, timeout: 15)
+
+multi_peer_test = executable('multi_peer_test', 'test/multi_peer_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('multi_peer', multi_peer_test, timeout: 15)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
