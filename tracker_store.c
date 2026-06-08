@@ -1,10 +1,12 @@
 /*
- * tracker_store.c — shared peer storage for tracker servers
+ * tracker_store.c — shared peer storage for tracker servers (IPv4 + IPv6)
  */
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "mbt/tracker_server.h"
 
@@ -12,7 +14,7 @@
 #define TORRENT_BUCKETS 256
 
 struct ts_peer {
-	struct sockaddr_in addr;
+	struct sockaddr_storage addr;
 	time_t last_seen;
 };
 
@@ -29,13 +31,18 @@ struct mbt_tracker_store {
 	struct ts_torrent *torrents[TORRENT_BUCKETS];
 	int num_torrents;
 	int num_peers;
+	uint8_t secret[16]; /* for connection_id generation */
 };
+
+/* --- Lifecycle --- */
 
 int
 mbt_tracker_store_new(struct mbt_tracker_store **out)
 {
 	struct mbt_tracker_store *s = calloc(1, sizeof(*s));
 	if (!s) return -1;
+	/* Random secret for connection_id HMAC */
+	for (int i = 0; i < 16; i++) s->secret[i] = rand() & 0xff;
 	*out = s;
 	return 0;
 }
@@ -54,7 +61,52 @@ mbt_tracker_store_free(struct mbt_tracker_store *s)
 int mbt_tracker_store_num_torrents(struct mbt_tracker_store *s) { return s->num_torrents; }
 int mbt_tracker_store_num_peers(struct mbt_tracker_store *s) { return s->num_peers; }
 
-/* --- Internal helpers (used by UDP and HTTP servers) --- */
+/* --- Connection ID (BEP 15 spoofing protection) --- */
+
+#include <sha1.h>
+
+uint64_t
+mbt_tracker_store_make_connection_id(struct mbt_tracker_store *s,
+                                     const struct sockaddr_storage *addr)
+{
+	SHA1_CTX ctx;
+	uint8_t digest[20];
+	uint32_t time_slot = (uint32_t)(time(NULL) / 120); /* 2-min slots */
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, s->secret, 16);
+	SHA1Update(&ctx, (uint8_t *)&time_slot, 4);
+	SHA1Update(&ctx, (uint8_t *)addr, sizeof(*addr));
+	SHA1Final(digest, &ctx);
+
+	uint64_t cid;
+	memcpy(&cid, digest, 8);
+	return cid;
+}
+
+int
+mbt_tracker_store_validate_connection_id(struct mbt_tracker_store *s,
+                                         const struct sockaddr_storage *addr,
+                                         uint64_t cid)
+{
+	/* Check current and previous time slot (allows 2-4 min window) */
+	uint64_t expected = mbt_tracker_store_make_connection_id(s, addr);
+	if (cid == expected) return 1;
+
+	/* Try previous slot */
+	uint32_t prev_slot = (uint32_t)(time(NULL) / 120) - 1;
+	SHA1_CTX ctx; uint8_t digest[20];
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, s->secret, 16);
+	SHA1Update(&ctx, (uint8_t *)&prev_slot, 4);
+	SHA1Update(&ctx, (uint8_t *)addr, sizeof(*addr));
+	SHA1Final(digest, &ctx);
+	uint64_t prev_cid;
+	memcpy(&prev_cid, digest, 8);
+	return (cid == prev_cid);
+}
+
+/* --- Torrent/peer management --- */
 
 static unsigned
 hash_infohash(const uint8_t *ih)
@@ -91,13 +143,31 @@ mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih)
 	return t;
 }
 
+static int
+addr_equal(const struct sockaddr_storage *a, const struct sockaddr_storage *b)
+{
+	if (a->ss_family != b->ss_family) return 0;
+	if (a->ss_family == AF_INET) {
+		struct sockaddr_in *a4 = (struct sockaddr_in *)a;
+		struct sockaddr_in *b4 = (struct sockaddr_in *)b;
+		return a4->sin_addr.s_addr == b4->sin_addr.s_addr &&
+		       a4->sin_port == b4->sin_port;
+	}
+	if (a->ss_family == AF_INET6) {
+		struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)a;
+		struct sockaddr_in6 *b6 = (struct sockaddr_in6 *)b;
+		return memcmp(&a6->sin6_addr, &b6->sin6_addr, 16) == 0 &&
+		       a6->sin6_port == b6->sin6_port;
+	}
+	return 0;
+}
+
 void
 mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
-                           const struct sockaddr_in *addr, int is_seeder)
+                           const struct sockaddr_storage *addr, int is_seeder)
 {
 	for (int i = 0; i < t->peer_count; i++) {
-		if (t->peers[i].addr.sin_addr.s_addr == addr->sin_addr.s_addr &&
-		    t->peers[i].addr.sin_port == addr->sin_port) {
+		if (addr_equal(&t->peers[i].addr, addr)) {
 			t->peers[i].last_seen = time(NULL);
 			return;
 		}
@@ -111,19 +181,45 @@ mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
 }
 
 int
-mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *exclude,
-                            uint8_t *compact_out, int max_peers)
+mbt_tracker_store_get_peers_v4(struct ts_torrent *t, const struct sockaddr_storage *exclude,
+                               uint8_t *compact_out, int max_peers)
 {
 	int sent = 0;
 	for (int i = 0; i < t->peer_count && sent < max_peers; i++) {
-		if (exclude && t->peers[i].addr.sin_addr.s_addr == exclude->sin_addr.s_addr &&
-		    t->peers[i].addr.sin_port == exclude->sin_port)
-			continue;
-		memcpy(compact_out + sent * 6, &t->peers[i].addr.sin_addr, 4);
-		memcpy(compact_out + sent * 6 + 4, &t->peers[i].addr.sin_port, 2);
+		if (t->peers[i].addr.ss_family != AF_INET) continue;
+		if (exclude && addr_equal(&t->peers[i].addr, exclude)) continue;
+		struct sockaddr_in *a = (struct sockaddr_in *)&t->peers[i].addr;
+		memcpy(compact_out + sent * 6, &a->sin_addr, 4);
+		memcpy(compact_out + sent * 6 + 4, &a->sin_port, 2);
 		sent++;
 	}
 	return sent;
+}
+
+int
+mbt_tracker_store_get_peers_v6(struct ts_torrent *t, const struct sockaddr_storage *exclude,
+                               uint8_t *compact_out, int max_peers)
+{
+	int sent = 0;
+	for (int i = 0; i < t->peer_count && sent < max_peers; i++) {
+		if (t->peers[i].addr.ss_family != AF_INET6) continue;
+		if (exclude && addr_equal(&t->peers[i].addr, exclude)) continue;
+		struct sockaddr_in6 *a = (struct sockaddr_in6 *)&t->peers[i].addr;
+		memcpy(compact_out + sent * 18, &a->sin6_addr, 16);
+		memcpy(compact_out + sent * 18 + 16, &a->sin6_port, 2);
+		sent++;
+	}
+	return sent;
+}
+
+/* Legacy compat wrapper */
+int
+mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *exclude,
+                            uint8_t *compact_out, int max_peers)
+{
+	struct sockaddr_storage ss = {0};
+	if (exclude) { memcpy(&ss, exclude, sizeof(*exclude)); ss.ss_family = AF_INET; }
+	return mbt_tracker_store_get_peers_v4(t, exclude ? &ss : NULL, compact_out, max_peers);
 }
 
 int mbt_tracker_store_torrent_seeders(struct ts_torrent *t) { return t->seeders; }

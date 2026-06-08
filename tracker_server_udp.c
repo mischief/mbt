@@ -32,7 +32,6 @@ struct mbt_tracker_server {
 	int fd;
 	struct mbt_ev_io *io;
 	uint16_t port;
-	uint64_t connection_id;
 	struct mbt_tracker_store *store;
 	int owns_store;
 };
@@ -43,8 +42,11 @@ struct mbt_tracker_server {
 struct ts_torrent;
 struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
 struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
-void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t, const struct sockaddr_in *addr, int is_seeder);
+void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t, const struct sockaddr_storage *addr, int is_seeder);
 int mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *exclude, uint8_t *compact_out, int max_peers);
+int mbt_tracker_store_get_peers_v4(struct ts_torrent *t, const struct sockaddr_storage *exclude, uint8_t *compact_out, int max_peers);
+uint64_t mbt_tracker_store_make_connection_id(struct mbt_tracker_store *s, const struct sockaddr_storage *addr);
+int mbt_tracker_store_validate_connection_id(struct mbt_tracker_store *s, const struct sockaddr_storage *addr, uint64_t cid);
 int mbt_tracker_store_torrent_seeders(struct ts_torrent *t);
 int mbt_tracker_store_torrent_leechers(struct ts_torrent *t);
 int mbt_tracker_store_torrent_peer_count(struct ts_torrent *t);
@@ -55,15 +57,15 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	struct mbt_tracker_server *ts = v;
 	uint8_t buf[2048];
-	struct sockaddr_in from;
+	struct sockaddr_storage from;
 	socklen_t fromlen = sizeof(from);
 	(void)io; (void)events;
 
 	ssize_t n = recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fromlen);
 	if (n < 16) return;
 
-	uint64_t connection_id;
 	uint32_t action, transaction_id;
+	uint64_t connection_id;
 	memcpy(&connection_id, buf, 8);
 	memcpy(&action, buf + 8, 4);
 	memcpy(&transaction_id, buf + 12, 4);
@@ -78,7 +80,7 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		/* Connect request: return connection_id */
 		uint32_t a = htonl(ACTION_CONNECT);
 		uint32_t tid = htonl(transaction_id);
-		uint64_t cid = __builtin_bswap64(ts->connection_id);
+		uint64_t cid = __builtin_bswap64(mbt_tracker_store_make_connection_id(ts->store, &from));
 		memcpy(resp, &a, 4);
 		memcpy(resp + 4, &tid, 4);
 		memcpy(resp + 8, &cid, 8);
@@ -86,7 +88,7 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	} else if (action == ACTION_ANNOUNCE && n >= 98) {
 		/* Announce request */
-		if (connection_id != ts->connection_id)
+		if (!mbt_tracker_store_validate_connection_id(ts->store, &from, connection_id))
 			return;
 
 		uint8_t *ih = buf + 16;
@@ -109,8 +111,8 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		uint16_t peer_port;
 		memcpy(&peer_port, buf + 96, 2);
 
-		struct sockaddr_in peer_addr = from;
-		if (peer_port) peer_addr.sin_port = peer_port; /* already network order */
+		struct sockaddr_storage peer_addr = from;
+		if (peer_port) ((struct sockaddr_in *)&peer_addr)->sin_port = peer_port;
 
 		struct ts_torrent *t = mbt_tracker_store_get_or_create(ts->store, ih);
 		if (!t) return;
@@ -132,12 +134,12 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		resp_len = 20;
 
 		/* Append peers (compact: 6 bytes each) */
-		int sent = mbt_tracker_store_get_peers(t, &peer_addr, resp + resp_len, num_want);
+		int sent = mbt_tracker_store_get_peers_v4(t, &peer_addr, resp + resp_len, num_want);
 		resp_len += sent * 6;
 
 	} else if (action == ACTION_SCRAPE && n >= 36) {
 		/* Scrape */
-		if (connection_id != ts->connection_id)
+		if (!mbt_tracker_store_validate_connection_id(ts->store, &from, connection_id))
 			return;
 
 		uint32_t a = htonl(ACTION_SCRAPE);
@@ -176,7 +178,6 @@ mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint1
 
 	ts->ev = ev;
 	ts->port = port;
-	ts->connection_id = 0xDEADBEEF01020304ULL; /* fixed for simplicity */
 
 	ts->fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (ts->fd < 0) { free(ts); return -errno; }
