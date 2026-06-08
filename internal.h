@@ -26,4 +26,19 @@
 #define RESERVED_FAST      0x04  /* ext[7] bit 2 */
 #define RESERVED_EXTENSION 0x10  /* ext[5] bit 4 */
 
+/* Random number helpers (use getentropy, POSIX 2024) */
+#include <unistd.h>
+#include <stdint.h>
+
+static inline uint32_t mbt_random32(void) {
+	uint32_t v;
+	getentropy(&v, sizeof(v));
+	return v;
+}
+
+static inline uint32_t mbt_random_uniform(uint32_t upper) {
+	if (upper == 0) return 0;
+	return mbt_random32() % upper;
+}
+
 #endif

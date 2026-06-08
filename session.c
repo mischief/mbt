@@ -24,6 +24,7 @@
 #include "mbt/lsd.h"
 #include "mbt/dht.h"
 #include "mbt/metainfo.h"
+#include "internal.h"
 #include "mbt/magnet.h"
 #include "mbt/tracker.h"
 
@@ -254,7 +255,7 @@ session_generate_peer_id(uint8_t *id)
 {
 	/* -MB0001- followed by 12 random bytes */
 	memcpy(id, "-MB0001-", 8);
-	arc4random_buf(id + 8, 12);
+	getentropy(id + 8, 12);
 }
 
 static struct session_torrent *

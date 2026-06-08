@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "mbt/picker.h"
+#include "internal.h"
 #include "mbt/torrent.h"
 #include "mbt/bitmap.h"
 #include "mbt/peer.h"
@@ -41,7 +42,7 @@ mbt_picker_random(struct mbt_torrent *t, void *peer, void *ctx)
 		return -1;
 
 	/* Start at random offset, scan forward */
-	size_t start = arc4random_uniform(bits);
+	size_t start = mbt_random_uniform(bits);
 	for (size_t i = 0; i < bits; i++) {
 		size_t idx = (start + i) % bits;
 		if (mbt_bitmap_isset(peer_bits, idx) > 0

@@ -12,6 +12,7 @@
 #include "mbt/event.h"
 #include "mbt/infohash.h"
 #include "mbt/tracker.h"
+#include "internal.h"
 #include "mbt/log.h"
 
 /* BEP 15 constants */
@@ -62,7 +63,7 @@ udp_send_connect(struct udp_tracker *ut)
 	uint64_t magic = htobe64(UDP_TRACKER_MAGIC);
 	uint32_t action = htobe32(ACTION_CONNECT);
 
-	ut->transaction_id = arc4random();
+	ut->transaction_id = mbt_random32();
 	uint32_t tid = htobe32(ut->transaction_id);
 
 	memcpy(buf, &magic, 8);
@@ -86,7 +87,7 @@ udp_send_announce(struct udp_tracker *ut)
 
 	uint64_t cid = htobe64(ut->connection_id);
 	uint32_t action = htobe32(ACTION_ANNOUNCE);
-	ut->transaction_id = arc4random();
+	ut->transaction_id = mbt_random32();
 	uint32_t tid = htobe32(ut->transaction_id);
 
 	memcpy(buf, &cid, 8);                         /* connection_id */
@@ -106,7 +107,7 @@ udp_send_announce(struct udp_tracker *ut)
 	memcpy(buf + 80, &event, 4);                  /* event */
 	/* buf[84..87] = IP (0 = default) */
 	/* buf[88..91] = key (random) */
-	uint32_t key = htobe32(arc4random());
+	uint32_t key = htobe32(mbt_random32());
 	memcpy(buf + 88, &key, 4);
 
 	int32_t numwant = htobe32(200);
