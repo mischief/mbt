@@ -37,8 +37,6 @@
 - [x] DHT (BEP 5) — full Kademlia: routing, lookup, announce, storage, stable ID
 - [x] DHT periodic re-lookup (5 min), runtime enable/disable
 - [x] LSD listener + announcer (opt-in, runtime toggle)
-- [ ] PEX send — 60s timer, batch added/dropped peers
-- [ ] Built-in async HTTP tracker client (replace blocking callback)
 
 ## Phase 3: Seeding + incoming (complete)
 
@@ -51,7 +49,6 @@
 - [x] Metadata retry from multiple peers (resilient to disconnects)
 - [x] Immediate piece reassignment on peer choke
 - [x] Choking algorithm (BEP 3: top-4 + optimistic every 30s)
-- [ ] Announce event=completed / event=stopped to tracker
 
 ## Phase 4: Protocol extensions (mostly complete)
 
@@ -60,7 +57,6 @@
 - [x] REJECT handling — instant piece failover
 - [x] Drop unsolicited/duplicate piece data
 - [x] Named protocol constants (no magic numbers)
-- [ ] Private torrents (BEP 27) — disable DHT/PEX/LSD when private=1
 
 ## Phase 5: API polish (complete)
 
@@ -77,12 +73,20 @@
 
 ## Phase 6: Production hardening (next)
 
-- [ ] Dual-stack networking (IPv6 throughout: session, tracker, DHT)
+### Immediate (spec compliance, small)
+
+### Short-term (infrastructure)
 - [ ] Configurable timers (all hardcoded intervals exposed via config)
-- [ ] NAT-PMP / UPnP-IGD port mapping
+- [ ] NAT-PMP / UPnP-IGD port mapping (built-in)
+- [ ] Dual-stack networking (IPv6 throughout: session, tracker, DHT)
+
+### Medium-term (swarm quality)
 - [ ] Anti-snubbing (peer silent 60s → request elsewhere)
 - [ ] Rarest-first picker with peer availability tracking
 - [ ] Upload/download rate limiting
+
+### Longer-term (enterprise/embedding)
+- [ ] Event + policy callback infrastructure on session/tracker configs
 - [ ] Tracker policy callbacks (accept/reject announce, infohash whitelist)
 - [ ] Tracker resource limits (max peers/torrent, max torrents, eviction)
 - [ ] Session peer accept/reject callback
