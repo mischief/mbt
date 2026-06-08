@@ -189,5 +189,14 @@ test('multi_peer', multi_peer_test, timeout: 15)
 choke_test = executable('choke_test', 'test/choke_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('choke', choke_test, timeout: 20)
 
+lsd_test = executable('lsd_test', 'test/lsd_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('lsd', lsd_test, timeout: 5)
+
+partial_resume_test = executable('partial_resume_test', 'test/partial_resume_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('partial_resume', partial_resume_test, timeout: 15)
+
+picker_full_test = executable('picker_full_test', 'test/picker_full_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('picker_full', picker_full_test)
+
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
