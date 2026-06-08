@@ -35,7 +35,7 @@ main(int argc, char *argv[])
 		switch (c) {
 		case 'd':
 			mbt_log_set(mbt_log_stderr, NULL);
-			mbt_log_set_debug(0xff);
+			mbt_log_set_debug(MBT_LOG_ALL);
 			break;
 		case 'o':
 			outdir = optarg;

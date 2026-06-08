@@ -64,6 +64,9 @@ comp_str(enum mbt_log_component comp)
 	case MBT_LOG_DHT:     return "dht";
 	case MBT_LOG_STORAGE: return "storage";
 	case MBT_LOG_PICKER:  return "picker";
+	case MBT_LOG_TRACKER: return "tracker";
+	case MBT_LOG_TRACKERD: return "trackerd";
+	default: break;
 	}
 	return "mbt";
 }

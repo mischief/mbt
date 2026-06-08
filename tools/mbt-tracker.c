@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
 	if (!use_udp && !use_http) { use_udp = 1; use_http = 1; }
 
 	mbt_log_set(mbt_log_stderr, NULL);
-	mbt_log_set_debug(0xff);
+	mbt_log_set_debug(MBT_LOG_ALL);
 
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);

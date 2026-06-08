@@ -92,7 +92,7 @@ int main(void)
 
 	mbt_ev_new_default(&ev);
 	mbt_log_set(mbt_log_stderr, NULL);
-	mbt_log_set_debug(0xff);
+	mbt_log_set_debug(MBT_LOG_ALL);
 
 	/* Start local tracker */
 	struct mbt_tracker_server *tracker;
