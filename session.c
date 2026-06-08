@@ -648,7 +648,6 @@ dht_peers_cb(const char *addr, uint16_t port, void *arg)
 	struct session_torrent *st = session_find(ctx->session, ctx->ih);
 	if (st) {
 		mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), addr, port, MBT_SOURCE_DHT);
-		mbt_log_debug(MBT_LOG_DHT, "DHT peer: %s:%hu", addr, port);
 	}
 }
 
