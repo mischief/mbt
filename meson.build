@@ -1,4 +1,4 @@
-project('mbt', 'c', version: '0.1', default_options: ['c_std=c23', 'warning_level=3'])
+project('mbt', 'c', version: '0.1', default_options: ['c_std=c23', 'warning_level=3'], license: 'ISC')
 
 add_project_arguments('-D_DEFAULT_SOURCE', language: 'c')
 add_project_arguments('-Werror', language: 'c')
