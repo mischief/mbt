@@ -98,6 +98,7 @@ A C library (`libmbt`) providing composable BitTorrent primitives. Programs buil
     - GUI applications (integrated event loop)
     - Containers and orchestrated environments (no filesystem assumptions beyond what storage backend provides)
     - Multi-tenant servers (multiple sessions, independent lifecycle)
+12. **Configurable timers.** All internal timers (request timeout, choke interval, DHT refresh, maintenance tick, LSD announce, tracker re-announce) must be configurable by the caller. This enables fast-running tests and tuning for specific deployment environments.
 
 ## Build
 
