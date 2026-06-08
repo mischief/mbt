@@ -92,6 +92,12 @@ A C library (`libmbt`) providing composable BitTorrent primitives. Programs buil
    - Per-torrent and per-peer resource limits
    - Whether to allow DHT/PEX/LSD on a per-torrent basis
    - Custom logging, metrics, and audit hooks
+
+   Callbacks are split into two categories:
+   - **Event callbacks** (`void (*on_event)(...)`) — informational, fire-and-forget. Caller observes but cannot influence the outcome.
+   - **Policy callbacks** (`int (*should_accept)(...)`) — synchronous decision points. Caller returns accept/reject before the library proceeds.
+
+   Both live on config structs as optional fields. NULL = default behavior (accept all, allow all). Organized as named sub-structs (`cfg.events.*`, `cfg.policy.*`) so intent is clear.
 10. **Observable.** Callers can inspect all runtime state: peer lists, piece maps, transfer rates, tracker status. Expose enough for a GUI, monitoring dashboard, or Prometheus exporter.
 11. **Embeddable.** The library must work correctly in:
     - Headless daemons (long-running, no terminal)
