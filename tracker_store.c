@@ -125,3 +125,7 @@ mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *excl
 	}
 	return sent;
 }
+
+int mbt_tracker_store_torrent_seeders(struct ts_torrent *t) { return t->seeders; }
+int mbt_tracker_store_torrent_leechers(struct ts_torrent *t) { return t->leechers; }
+int mbt_tracker_store_torrent_peer_count(struct ts_torrent *t) { return t->peer_count; }

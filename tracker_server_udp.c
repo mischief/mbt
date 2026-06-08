@@ -27,103 +27,28 @@
 #define CONNECT_MAGIC 0x41727101980ULL
 
 /* Peer entry */
-struct ts_peer {
-	struct sockaddr_in addr;
-	time_t last_seen;
-};
-
-/* Per-torrent peer list */
-#define MAX_PEERS_PER_TORRENT 200
-struct ts_torrent {
-	uint8_t infohash[20];
-	struct ts_peer peers[MAX_PEERS_PER_TORRENT];
-	int peer_count;
-	int seeders;
-	int leechers;
-	struct ts_torrent *next;
-};
-
-/* Tracker server */
-#define TORRENT_BUCKETS 256
 struct mbt_tracker_server {
 	struct mbt_ev *ev;
 	int fd;
 	struct mbt_ev_io *io;
 	uint16_t port;
-	uint64_t connection_id; /* simple: same for all clients */
-	struct ts_torrent *torrents[TORRENT_BUCKETS];
-	int num_torrents;
-	int num_peers;
+	uint64_t connection_id;
+	struct mbt_tracker_store *store;
+	int owns_store;
 };
 
 /* --- Hash table helpers --- */
 
-static unsigned
-hash_infohash(const uint8_t *ih)
-{
-	unsigned h = 0;
-	for (int i = 0; i < 20; i++)
-		h = h * 31 + ih[i];
-	return h % TORRENT_BUCKETS;
-}
+/* Forward declarations from tracker_store.c */
+struct ts_torrent;
+struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
+struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
+void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t, const struct sockaddr_in *addr, int is_seeder);
+int mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *exclude, uint8_t *compact_out, int max_peers);
+int mbt_tracker_store_torrent_seeders(struct ts_torrent *t);
+int mbt_tracker_store_torrent_leechers(struct ts_torrent *t);
+int mbt_tracker_store_torrent_peer_count(struct ts_torrent *t);
 
-static struct ts_torrent *
-find_torrent(struct mbt_tracker_server *ts, const uint8_t *ih)
-{
-	unsigned bucket = hash_infohash(ih);
-	struct ts_torrent *t = ts->torrents[bucket];
-	while (t) {
-		if (memcmp(t->infohash, ih, 20) == 0)
-			return t;
-		t = t->next;
-	}
-	return NULL;
-}
-
-static struct ts_torrent *
-get_or_create_torrent(struct mbt_tracker_server *ts, const uint8_t *ih)
-{
-	struct ts_torrent *t = find_torrent(ts, ih);
-	if (t) return t;
-
-	t = calloc(1, sizeof(*t));
-	if (!t) return NULL;
-	memcpy(t->infohash, ih, 20);
-
-	unsigned bucket = hash_infohash(ih);
-	t->next = ts->torrents[bucket];
-	ts->torrents[bucket] = t;
-	ts->num_torrents++;
-	return t;
-}
-
-static void
-torrent_add_peer(struct mbt_tracker_server *ts, struct ts_torrent *t,
-                 const struct sockaddr_in *addr, int is_seeder)
-{
-	/* Update existing */
-	for (int i = 0; i < t->peer_count; i++) {
-		if (t->peers[i].addr.sin_addr.s_addr == addr->sin_addr.s_addr &&
-		    t->peers[i].addr.sin_port == addr->sin_port) {
-			t->peers[i].last_seen = time(NULL);
-			return;
-		}
-	}
-
-	/* Add new */
-	if (t->peer_count >= MAX_PEERS_PER_TORRENT)
-		return;
-
-	t->peers[t->peer_count].addr = *addr;
-	t->peers[t->peer_count].last_seen = time(NULL);
-	t->peer_count++;
-	ts->num_peers++;
-
-	if (is_seeder) t->seeders++;
-	else t->leechers++;
-}
-
-/* --- UDP protocol handling --- */
 
 static void
 tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
@@ -187,18 +112,18 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		struct sockaddr_in peer_addr = from;
 		if (peer_port) peer_addr.sin_port = peer_port; /* already network order */
 
-		struct ts_torrent *t = get_or_create_torrent(ts, ih);
+		struct ts_torrent *t = mbt_tracker_store_get_or_create(ts->store, ih);
 		if (!t) return;
 
 		int is_seeder = (left == 0);
-		torrent_add_peer(ts, t, &peer_addr, is_seeder);
+		mbt_tracker_store_add_peer(ts->store, t, &peer_addr, is_seeder);
 
 		/* Build response */
 		uint32_t a = htonl(ACTION_ANNOUNCE);
 		uint32_t tid = htonl(transaction_id);
 		uint32_t interval = htonl(120);
-		uint32_t leechers = htonl(t->leechers);
-		uint32_t seeders = htonl(t->seeders);
+		uint32_t leechers = htonl(mbt_tracker_store_torrent_leechers(t));
+		uint32_t seeders = htonl(mbt_tracker_store_torrent_seeders(t));
 		memcpy(resp, &a, 4);
 		memcpy(resp + 4, &tid, 4);
 		memcpy(resp + 8, &interval, 4);
@@ -207,17 +132,8 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		resp_len = 20;
 
 		/* Append peers (compact: 6 bytes each) */
-		int sent = 0;
-		for (int i = 0; i < t->peer_count && sent < num_want; i++) {
-			/* Don't return the requester to themselves */
-			if (t->peers[i].addr.sin_addr.s_addr == from.sin_addr.s_addr &&
-			    t->peers[i].addr.sin_port == peer_addr.sin_port)
-				continue;
-			memcpy(resp + resp_len, &t->peers[i].addr.sin_addr, 4);
-			memcpy(resp + resp_len + 4, &t->peers[i].addr.sin_port, 2);
-			resp_len += 6;
-			sent++;
-		}
+		int sent = mbt_tracker_store_get_peers(t, &peer_addr, resp + resp_len, num_want);
+		resp_len += sent * 6;
 
 	} else if (action == ACTION_SCRAPE && n >= 36) {
 		/* Scrape */
@@ -233,10 +149,10 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		int num_hashes = (n - 16) / 20;
 		for (int i = 0; i < num_hashes && resp_len + 12 <= (ssize_t)sizeof(resp); i++) {
 			uint8_t *ih = buf + 16 + i * 20;
-			struct ts_torrent *t = find_torrent(ts, ih);
-			uint32_t s = htonl(t ? t->seeders : 0);
-			uint32_t c = htonl(t ? t->peer_count : 0);
-			uint32_t l = htonl(t ? t->leechers : 0);
+			struct ts_torrent *t = mbt_tracker_store_find(ts->store, ih);
+			uint32_t s = htonl(t ? mbt_tracker_store_torrent_seeders(t) : 0);
+			uint32_t c = htonl(t ? mbt_tracker_store_torrent_peer_count(t) : 0);
+			uint32_t l = htonl(t ? mbt_tracker_store_torrent_leechers(t) : 0);
 			memcpy(resp + resp_len, &s, 4);
 			memcpy(resp + resp_len + 4, &c, 4);
 			memcpy(resp + resp_len + 8, &l, 4);
@@ -253,9 +169,10 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 int
 mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint16_t port, struct mbt_tracker_store *store)
 {
-	(void)store; /* TODO: use shared store */
 	struct mbt_tracker_server *ts = calloc(1, sizeof(*ts));
 	if (!ts) return -ENOMEM;
+
+	if (store) { ts->store = store; ts->owns_store = 0; } else { mbt_tracker_store_new(&ts->store); ts->owns_store = 1; }
 
 	ts->ev = ev;
 	ts->port = port;
@@ -287,25 +204,18 @@ mbt_tracker_server_free(struct mbt_tracker_server *ts)
 	if (!ts) return;
 	if (ts->io) mbt_ev_io_free(ts->io);
 	if (ts->fd >= 0) close(ts->fd);
-	for (int i = 0; i < TORRENT_BUCKETS; i++) {
-		struct ts_torrent *t = ts->torrents[i];
-		while (t) {
-			struct ts_torrent *next = t->next;
-			free(t);
-			t = next;
-		}
-	}
+	if (ts->store && ts->owns_store) mbt_tracker_store_free(ts->store);
 	free(ts);
 }
 
 int
 mbt_tracker_server_num_torrents(struct mbt_tracker_server *ts)
 {
-	return ts->num_torrents;
+	return mbt_tracker_store_num_torrents(ts->store);
 }
 
 int
 mbt_tracker_server_num_peers(struct mbt_tracker_server *ts)
 {
-	return ts->num_peers;
+	return mbt_tracker_store_num_peers(ts->store);
 }

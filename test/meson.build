@@ -74,3 +74,6 @@ test('partial_resume', partial_resume_test, timeout: 15)
 
 picker_full_test = executable('picker_full_test', 'picker_full_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('picker_full', picker_full_test, timeout: 15)
+
+tracker_shared_test = executable('tracker_shared_test', 'tracker_shared_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tracker_shared', tracker_shared_test, timeout: 15)
