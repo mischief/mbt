@@ -23,10 +23,16 @@ struct mbt_tracker_request {
 	uint64_t downloaded;
 	uint64_t uploaded;
 	uint64_t left;
+	int event;                /* 0=none, 1=completed, 2=started, 3=stopped */
 	mbt_tracker_peer_cb peer_cb;
 	mbt_tracker_done_cb done_cb;
 	void *arg;
 };
+
+#define MBT_TRACKER_EVENT_NONE      0
+#define MBT_TRACKER_EVENT_COMPLETED 1
+#define MBT_TRACKER_EVENT_STARTED   2
+#define MBT_TRACKER_EVENT_STOPPED   3
 
 /* --- HTTP hook (caller-provided) --- */
 

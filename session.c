@@ -39,6 +39,7 @@ struct session_torrent {
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
 	time_t last_dht_lookup;
+	int completed_announced; /* sent event=completed to tracker */
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -137,6 +138,19 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 				break;
 			pe->state = MBT_PEERDB_CONNECTING;
 			mbt_session_add_peer(s, st->ih, pe->addr, pe->port);
+		}
+
+		/* Announce event=completed once when torrent finishes */
+		if (mbt_torrent_complete(st->torrent) && !st->completed_announced &&
+		    st->tracker_count > 0) {
+			st->completed_announced = 1;
+			struct mbt_tracker_request treq = {
+				.ev = s->ev, .ih = st->ih, .peer_id = s->peer_id,
+				.listen_port = s->listen_port, .left = 0,
+				.event = MBT_TRACKER_EVENT_COMPLETED,
+			};
+			for (int i = 0; i < st->tracker_count; i++)
+				mbt_tracker_announce(st->trackers[i], &treq, s->http, s->http_arg);
 		}
 
 		/* DHT re-lookup every 5 min if incomplete and few peers */
@@ -461,6 +475,21 @@ mbt_session_free(struct mbt_session *s)
 		free(pc);
 	}
 
+	/* Announce event=stopped to all trackers */
+	struct session_torrent *sst;
+	STAILQ_FOREACH(sst, &s->torrents, next) {
+		if (sst->tracker_count > 0) {
+			struct mbt_tracker_request treq = {
+				.ev = s->ev, .ih = sst->ih, .peer_id = s->peer_id,
+				.listen_port = s->listen_port, .left = 0,
+				.event = MBT_TRACKER_EVENT_STOPPED,
+				.arg = s,
+			};
+			for (int i = 0; i < sst->tracker_count; i++)
+				mbt_tracker_announce(sst->trackers[i], &treq, s->http, s->http_arg);
+		}
+	}
+
 	/* Free torrents */
 	struct session_torrent *st;
 	while ((st = STAILQ_FIRST(&s->torrents))) {
@@ -738,12 +767,23 @@ session_do_announce(struct mbt_session *s, struct session_torrent *st)
 	if (st->tracker_count == 0)
 		return;
 
+	struct mbt_torrent *t = st->torrent;
+	uint64_t left = 0;
+	int event = MBT_TRACKER_EVENT_NONE;
+
+	if (t && mbt_torrent_piece_count(t) > 0) {
+		uint64_t total = (uint64_t)mbt_torrent_piece_length(t) * mbt_torrent_piece_count(t);
+		uint64_t have = (uint64_t)mbt_torrent_piece_length(t) * mbt_torrent_have_count(t);
+		left = (total > have) ? total - have : 0;
+	}
+
 	struct mbt_tracker_request treq = {
 		.ev = s->ev,
 		.ih = st->ih,
 		.peer_id = s->peer_id,
 		.listen_port = s->listen_port,
-		.left = 0,
+		.left = left,
+		.event = event,
 		.peer_cb = session_tracker_peer_cb,
 		.done_cb = session_tracker_done_cb,
 		.arg = s,

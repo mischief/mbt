@@ -101,7 +101,7 @@ udp_send_announce(struct udp_tracker *ut)
 	memcpy(buf + 64, &left, 8);                   /* left */
 	memcpy(buf + 72, &ul, 8);                     /* uploaded */
 
-	uint32_t event = htobe32(EVENT_STARTED);
+	uint32_t event = htobe32(ut->req.event != 0 ? (uint32_t)ut->req.event : (uint32_t)EVENT_STARTED);
 	memcpy(buf + 80, &event, 4);                  /* event */
 	/* buf[84..87] = IP (0 = default) */
 	/* buf[88..91] = key (random) */
