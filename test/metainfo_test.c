@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/metainfo_test.c — unit test for mbt_metainfo API
  */

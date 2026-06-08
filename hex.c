@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 #include <ctype.h>
 #include <stdlib.h>
 #include <errno.h>

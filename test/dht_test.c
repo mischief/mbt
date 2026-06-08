@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/dht_test.c — self-contained DHT test on localhost
  *

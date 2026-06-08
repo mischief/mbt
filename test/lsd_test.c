@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/lsd_test.c — LSD advertiser + listener on localhost
  */

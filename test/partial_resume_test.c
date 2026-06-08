@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/partial_resume_test.c — resume with only some pieces on disk
  *

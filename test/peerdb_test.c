@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/peerdb_test.c — exercise mbt_peerdb
  */

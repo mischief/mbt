@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * mbt-torrent: create, inspect, and convert .torrent files
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /* Internal definitions shared between library source files. Not installed. */
 #ifndef MBT_INTERNAL_H
 #define MBT_INTERNAL_H

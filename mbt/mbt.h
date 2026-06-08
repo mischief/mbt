@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /* libmbt — BitTorrent toolkit library */
 #ifndef MBT_H
 #define MBT_H

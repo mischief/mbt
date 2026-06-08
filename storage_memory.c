@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * storage_memory.c — in-memory storage backend for testing
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * tracker_server_udp.c — BEP 15 UDP tracker server
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 #include <sys/param.h> /* MIN */
 
 #include <stdio.h>

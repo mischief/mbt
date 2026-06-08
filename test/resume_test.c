@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/resume_test.c — verify resume path with memory storage
  */

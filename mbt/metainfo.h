@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 #ifndef MBT_METAINFO_H
 #define MBT_METAINFO_H
 

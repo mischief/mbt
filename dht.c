@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * dht.c — BitTorrent DHT (BEP 5) implementation
  *

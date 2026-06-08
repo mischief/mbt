@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * mbt-tracker: standalone UDP + HTTP tracker daemon
  * Usage: mbt-tracker [-u udp_port] [-h http_port]

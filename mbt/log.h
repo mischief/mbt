@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 #ifndef MBT_LOG_H
 #define MBT_LOG_H
 

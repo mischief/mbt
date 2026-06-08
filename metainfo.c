@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * metainfo.c — .torrent file parsing, creation, and serialization
  */

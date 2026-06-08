@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * tracker_store.c — shared peer storage for tracker servers (IPv4 + IPv6)
  */

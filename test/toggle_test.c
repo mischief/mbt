@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/toggle_test.c — enable/disable DHT and LSD without torrents
  */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 #pragma once
 
 #include <sys/queue.h>

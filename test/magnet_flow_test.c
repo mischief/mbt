@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * test/magnet_flow_test.c — magnet → tracker → metadata → download
  *

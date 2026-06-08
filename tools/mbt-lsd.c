@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * mbt-lsd: listen for Local Service Discovery announcements
  * and automatically start downloading any discovered torrents.

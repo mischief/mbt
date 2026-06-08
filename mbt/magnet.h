@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 #ifndef MBT_MAGNET_H
 #define MBT_MAGNET_H
 

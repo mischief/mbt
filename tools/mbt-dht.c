@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * mbt-dht: standalone DHT lookup tool
  * Usage: mbt-dht <infohash_hex>
