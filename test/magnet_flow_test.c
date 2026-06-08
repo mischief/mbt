@@ -77,7 +77,7 @@ int main(void)
 
 	/* Tracker */
 	struct mbt_tracker_server *tracker;
-	rv = mbt_tracker_server_new(&tracker, ev, 17969); assert(rv == 0);
+	rv = mbt_tracker_server_new(&tracker, ev, 17969, NULL); assert(rv == 0);
 
 	/* Seeder */
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();

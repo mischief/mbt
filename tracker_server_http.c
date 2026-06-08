@@ -31,6 +31,7 @@ int mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *
 struct mbt_tracker_http {
 	struct mbt_ev *ev;
 	struct mbt_tracker_store *store;
+	int owns_store;
 	int fd;
 	struct mbt_ev_io *io;
 	uint16_t port;
@@ -156,13 +157,13 @@ http_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 /* --- Public API --- */
 
 int
-mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev, uint16_t port)
+mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev, uint16_t port, struct mbt_tracker_store *store)
 {
 	struct mbt_tracker_http *th = calloc(1, sizeof(*th));
 	if (!th) return -ENOMEM;
 
 	th->ev = ev;
-	mbt_tracker_store_new(&th->store);
+	if (store) { th->store = store; th->owns_store = 0; } else { mbt_tracker_store_new(&th->store); th->owns_store = 1; }
 	th->port = port;
 
 	th->fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -197,7 +198,7 @@ mbt_tracker_http_free(struct mbt_tracker_http *th)
 	if (!th) return;
 	if (th->io) mbt_ev_io_free(th->io);
 	if (th->fd >= 0) close(th->fd);
-	if (th->store) mbt_tracker_store_free(th->store);
+	if (th->store && th->owns_store) mbt_tracker_store_free(th->store);
 	free(th);
 }
 

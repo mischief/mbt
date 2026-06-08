@@ -49,13 +49,13 @@ int main(int argc, char *argv[])
 	struct mbt_tracker_http *http = NULL;
 
 	if (use_udp) {
-		rv = mbt_tracker_server_new(&udp, ev, udp_port);
+		rv = mbt_tracker_server_new(&udp, ev, udp_port, NULL);
 		if (rv < 0) errx(1, "UDP tracker: %s", strerror(-rv));
 		fprintf(stderr, "UDP tracker on port %hu\n", udp_port);
 	}
 
 	if (use_http) {
-		rv = mbt_tracker_http_new(&http, ev, http_port);
+		rv = mbt_tracker_http_new(&http, ev, http_port, NULL);
 		if (rv < 0) errx(1, "HTTP tracker: %s", strerror(-rv));
 		fprintf(stderr, "HTTP tracker on port %hu\n", http_port);
 	}

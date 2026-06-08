@@ -251,8 +251,9 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 /* --- Public API --- */
 
 int
-mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint16_t port)
+mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint16_t port, struct mbt_tracker_store *store)
 {
+	(void)store; /* TODO: use shared store */
 	struct mbt_tracker_server *ts = calloc(1, sizeof(*ts));
 	if (!ts) return -ENOMEM;
 

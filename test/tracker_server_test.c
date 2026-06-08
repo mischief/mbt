@@ -96,7 +96,7 @@ int main(void)
 
 	/* Start local tracker */
 	struct mbt_tracker_server *tracker;
-	rv = mbt_tracker_server_new(&tracker, ev, 16969);
+	rv = mbt_tracker_server_new(&tracker, ev, 16969, NULL);
 	assert(rv == 0);
 
 	/* Build .torrent */
