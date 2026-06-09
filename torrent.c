@@ -910,7 +910,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	memcpy(t->peer_id, cfg->peer_id, 20);
 	t->storage_ops = cfg->storage_ops;
 	t->storage_ctx = cfg->storage_ctx;
-	t->picker = cfg->picker ? cfg->picker : mbt_picker_random;
+	t->picker = cfg->picker ? cfg->picker : mbt_picker_rarest;
 	t->picker_ctx = cfg->picker_ctx;
 	t->request_timeout_sec = cfg->request_timeout_sec ? cfg->request_timeout_sec : 15;
 
@@ -1276,6 +1276,13 @@ mbt_torrent_peer_count(struct mbt_torrent *t)
 	return t->peer_count;
 }
 
+struct mbt_peer *
+mbt_torrent_peer_at(struct mbt_torrent *t, int idx)
+{
+	struct torrent_peer *tp = t->peers;
+	for (int i = 0; tp && i < idx; i++) tp = tp->next;
+	return tp ? tp->peer : NULL;
+}
 int
 mbt_torrent_has_metadata(struct mbt_torrent *t)
 {

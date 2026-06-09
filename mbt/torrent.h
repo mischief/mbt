@@ -73,6 +73,7 @@ uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
 uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);
 uint32_t mbt_torrent_have_count(struct mbt_torrent *t);
 int mbt_torrent_peer_count(struct mbt_torrent *t);
+struct mbt_peer *mbt_torrent_peer_at(struct mbt_torrent *t, int idx);
 int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);
 int mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece);
 int mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece);

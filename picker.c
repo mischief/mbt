@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: ISC
+#include <limits.h>
 #include <stdlib.h>
 
 #include "mbt/picker.h"
@@ -57,6 +58,47 @@ mbt_picker_random(struct mbt_torrent *t, void *peer, void *ctx)
 int
 mbt_picker_rarest(struct mbt_torrent *t, void *peer, void *ctx)
 {
-	/* TODO: needs peer availability counts */
-	return mbt_picker_random(t, peer, ctx);
+	(void)ctx;
+	struct mbt_bitmap *peer_bits = mbt_peer_bitfield((struct mbt_peer *)peer);
+	if (!peer_bits) return -1;
+
+	uint32_t bits = mbt_torrent_piece_count(t);
+	if (bits == 0) return -1;
+
+	/* Phase 1: random first piece (until we have at least one) */
+	if (mbt_torrent_have_count(t) == 0)
+		return mbt_picker_random(t, peer, ctx);
+
+	/* Phase 3: endgame — allow duplicate requests */
+	/* (handled by drive_peer when endgame flag is set) */
+
+	/* Phase 2: rarest first — scan candidates, pick lowest availability */
+	int best = -1;
+	int best_avail = INT_MAX;
+	int npeer = mbt_torrent_peer_count(t);
+
+	for (uint32_t i = 0; i < bits; i++) {
+		if (mbt_bitmap_isset(peer_bits, i) <= 0)
+			continue;
+		if (mbt_torrent_has_piece(t, i))
+			continue;
+		if (mbt_torrent_piece_fully_requested(t, i))
+			continue;
+
+		/* Count how many peers have this piece */
+		int avail = 0;
+		for (int j = 0; j < npeer; j++) {
+			struct mbt_peer *pp = mbt_torrent_peer_at(t, j);
+			struct mbt_bitmap *pb = pp ? mbt_peer_bitfield(pp) : NULL;
+			if (pb && mbt_bitmap_isset(pb, i) > 0)
+				avail++;
+		}
+
+		if (avail < best_avail || (avail == best_avail && (mbt_random_uniform(2) == 0))) {
+			best_avail = avail;
+			best = (int)i;
+		}
+	}
+
+	return best;
 }
