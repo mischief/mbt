@@ -133,6 +133,9 @@ int main(void)
 	run_with_picker(mbt_picker_random, "random");
 	/* Random just needs to complete (order varies) */
 
+	run_with_picker(mbt_picker_rarest, "rarest");
+	/* Rarest just needs to complete (single seeder = uniform availability) */
+
 	fprintf(stderr, "picker_full_test: PASS\n");
 	return 0;
 }

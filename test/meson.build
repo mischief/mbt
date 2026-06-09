@@ -80,3 +80,6 @@ test('tracker_shared', tracker_shared_test, timeout: 15)
 
 pcp_test = executable('pcp_test', 'pcp_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('pcp', pcp_test, timeout: 10)
+
+rarest_test = executable('rarest_test', 'rarest_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('rarest', rarest_test, timeout: 20)
