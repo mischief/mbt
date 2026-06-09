@@ -2,6 +2,8 @@
 #ifndef MBT_MAGNET_H
 #define MBT_MAGNET_H
 
+#include "export.h"
+
 #include <netinet/in.h>
 #include <stdint.h>
 
@@ -26,9 +28,9 @@ struct mbt_magnet {
 };
 
 /* Parse a magnet URI. Returns 0 on success, <0 on error. */
-int mbt_magnet_parse(const char *uri, struct mbt_magnet *out);
+MBT_API int mbt_magnet_parse(const char *uri, struct mbt_magnet *out);
 
 /* Free internals (display_name, trackers). Does not free the struct itself. */
-void mbt_magnet_free(struct mbt_magnet *m);
+MBT_API void mbt_magnet_free(struct mbt_magnet *m);
 
 #endif

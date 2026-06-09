@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: ISC
 #pragma once
 
+#include "export.h"
 #include <sys/queue.h>
 
 enum {
@@ -25,10 +26,10 @@ struct mbt_infohash
 	};
 };
 
-int mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str);
-struct mbt_infohash* mbt_infohash_ref(struct mbt_infohash *ih);
-void mbt_infohash_unref(struct mbt_infohash *ih);
-void mbt_mbt_infohash_unrefp(struct mbt_infohash **ih);
-int mbt_infohash_string(struct mbt_infohash *ih, char *buf, size_t sz);
-int mbt_infohash_cmp(struct mbt_infohash *a, struct mbt_infohash *b);
+MBT_API int mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str);
+MBT_API struct mbt_infohash* mbt_infohash_ref(struct mbt_infohash *ih);
+MBT_API void mbt_infohash_unref(struct mbt_infohash *ih);
+MBT_API void mbt_infohash_unrefp(struct mbt_infohash **ih);
+MBT_API int mbt_infohash_string(struct mbt_infohash *ih, char *buf, size_t sz);
+MBT_API int mbt_infohash_cmp(struct mbt_infohash *a, struct mbt_infohash *b);
 

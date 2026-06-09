@@ -2,6 +2,8 @@
 #ifndef MBT_LOG_H
 #define MBT_LOG_H
 
+#include "export.h"
+
 #include <stdarg.h>
 #include <stdint.h>
 
@@ -31,19 +33,19 @@ typedef void (*mbt_log_fn)(enum mbt_log_level level, enum mbt_log_component comp
                            const char *fmt, va_list ap, void *arg);
 
 /* Set log callback. NULL = silent (default). */
-void mbt_log_set(mbt_log_fn fn, void *arg);
+MBT_API void mbt_log_set(mbt_log_fn fn, void *arg);
 
 /* Set which components emit DEBUG messages (bitmask). Default: 0 (none). */
-void mbt_log_set_debug(uint32_t component_mask);
+MBT_API void mbt_log_set_debug(uint32_t component_mask);
 
 /* Built-in callbacks */
-void mbt_log_stderr(enum mbt_log_level level, enum mbt_log_component comp,
+MBT_API void mbt_log_stderr(enum mbt_log_level level, enum mbt_log_component comp,
                     const char *fmt, va_list ap, void *arg);
-void mbt_log_syslog(enum mbt_log_level level, enum mbt_log_component comp,
+MBT_API void mbt_log_syslog(enum mbt_log_level level, enum mbt_log_component comp,
                     const char *fmt, va_list ap, void *arg);
 
 /* Internal — used by library code via macros below */
-void mbt_log_emit(enum mbt_log_level level, enum mbt_log_component comp,
+MBT_API void mbt_log_emit(enum mbt_log_level level, enum mbt_log_component comp,
                   const char *fmt, ...);
 
 #define mbt_log_error(comp, ...) mbt_log_emit(MBT_LOG_ERROR, (comp), __VA_ARGS__)

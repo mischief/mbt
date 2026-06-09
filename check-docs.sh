@@ -1,7 +1,7 @@
 #!/bin/sh
 # check-docs.sh — verify all exported symbols are documented in man pages
-# Returns 0 if all documented, 1 if undocumented symbols exist.
-# Prints coverage stats regardless.
+# Also validates MBT_API annotation coverage.
+# Returns 0 always (informational). Change to exit 1 to gate on coverage.
 set -e
 
 LIBSO="${1:-build/libmbt.so}"
@@ -30,6 +30,15 @@ UNDOCUMENTED=$(comm -23 /tmp/mbt_exported.txt /tmp/mbt_documented.txt | wc -l)
 
 echo "doc coverage: $DOCUMENTED/$TOTAL symbols documented ($UNDOCUMENTED remaining)"
 
+# Validate MBT_API: check for public function decls missing MBT_API
+MISSING_API=$(grep -rhn '^[a-z].*mbt_.*(' mbt/*.h 2>/dev/null \
+    | grep -v 'MBT_API\|typedef\|#define\|static\|export.h' || true)
+if [ -n "$MISSING_API" ]; then
+    echo ""
+    echo "WARNING: function declarations missing MBT_API:"
+    echo "$MISSING_API"
+fi
+
 if [ "$UNDOCUMENTED" -gt 0 ]; then
     echo ""
     echo "undocumented:"
@@ -37,5 +46,4 @@ if [ "$UNDOCUMENTED" -gt 0 ]; then
 fi
 
 rm -f /tmp/mbt_exported.txt /tmp/mbt_documented.txt
-# Don't fail CI yet — just report. Change to `exit 1` when coverage is complete.
 exit 0

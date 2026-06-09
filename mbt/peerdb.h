@@ -2,6 +2,8 @@
 #ifndef MBT_PEERDB_H
 #define MBT_PEERDB_H
 
+#include "export.h"
+
 #include <sys/tree.h>
 #include <netinet/in.h>
 #include <stdint.h>
@@ -40,28 +42,28 @@ struct mbt_peer_entry {
 RB_HEAD(mbt_peerdb, mbt_peer_entry);
 
 /* Initialize an empty peer database */
-void mbt_peerdb_init(struct mbt_peerdb *db);
+MBT_API void mbt_peerdb_init(struct mbt_peerdb *db);
 
 /* Insert or update a peer. Returns the entry (existing or new). */
-struct mbt_peer_entry *mbt_peerdb_insert(struct mbt_peerdb *db,
+MBT_API struct mbt_peer_entry *mbt_peerdb_insert(struct mbt_peerdb *db,
                                          const char *addr, uint16_t port,
                                          int source);
 
 /* Find a peer by addr:port. Returns NULL if not found. */
-struct mbt_peer_entry *mbt_peerdb_find(struct mbt_peerdb *db,
+MBT_API struct mbt_peer_entry *mbt_peerdb_find(struct mbt_peerdb *db,
                                        const char *addr, uint16_t port);
 
 /* Select the best peer to connect to. Returns NULL if none available.
  * Picks KNOWN peers, preferring recent last_seen, low failures. */
-struct mbt_peer_entry *mbt_peerdb_select(struct mbt_peerdb *db);
+MBT_API struct mbt_peer_entry *mbt_peerdb_select(struct mbt_peerdb *db);
 
 /* Count peers in a given state */
-int mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peerdb_state state);
+MBT_API int mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peerdb_state state);
 
 /* Count total peers */
-int mbt_peerdb_total(struct mbt_peerdb *db);
+MBT_API int mbt_peerdb_total(struct mbt_peerdb *db);
 
 /* Free all entries */
-void mbt_peerdb_free(struct mbt_peerdb *db);
+MBT_API void mbt_peerdb_free(struct mbt_peerdb *db);
 
 #endif

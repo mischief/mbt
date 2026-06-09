@@ -2,6 +2,8 @@
 #ifndef MBT_TRACKER_H
 #define MBT_TRACKER_H
 
+#include "export.h"
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -55,14 +57,14 @@ typedef int (*mbt_http_fn)(struct mbt_http_request *req,
 /* --- Announce functions --- */
 
 /* UDP tracker (BEP 15). Async, uses mbt_ev internally. */
-int mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req);
+MBT_API int mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req);
 
 /* HTTP tracker (BEP 3). Uses the provided HTTP callback (blocking). */
-int mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
+MBT_API int mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
                               mbt_http_fn http, void *http_arg);
 
 /* Dispatch: picks UDP or HTTP based on URL scheme. */
-int mbt_tracker_announce(const char *url, struct mbt_tracker_request *req,
+MBT_API int mbt_tracker_announce(const char *url, struct mbt_tracker_request *req,
                          mbt_http_fn http, void *http_arg);
 
 #endif

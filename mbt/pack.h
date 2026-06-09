@@ -2,6 +2,8 @@
 #ifndef MBT_PACK_H
 #define MBT_PACK_H
 
+#include "export.h"
+
 /*
  * Wire format pack/unpack helpers.
  *
@@ -13,7 +15,7 @@
  * Returns number of bytes consumed/produced.
  */
 
-int mbt_pack(unsigned char *out, char *v, ...);
-int mbt_unpack(unsigned char *in, char *v, ...);
+MBT_API int mbt_pack(unsigned char *out, char *v, ...);
+MBT_API int mbt_unpack(unsigned char *in, char *v, ...);
 
 #endif

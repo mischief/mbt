@@ -55,7 +55,7 @@ mbt_infohash_unref(struct mbt_infohash *ih)
 }
 
 void
-mbt_mbt_infohash_unrefp(struct mbt_infohash **ih)
+mbt_infohash_unrefp(struct mbt_infohash **ih)
 {
 	if(!*ih)
 		return;

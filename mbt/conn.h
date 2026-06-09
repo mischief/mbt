@@ -2,6 +2,8 @@
 #ifndef MBT_CONN_H
 #define MBT_CONN_H
 
+#include "export.h"
+
 #include <stddef.h>
 #include <sys/types.h>
 
@@ -29,15 +31,15 @@ struct mbt_conn {
  * Create a connection from an already-connected fd.
  * The conn takes ownership of fd.
  */
-int mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
+MBT_API int mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
                  mbt_conn_read_cb readcb, mbt_conn_event_cb eventcb, void *arg);
 
 /* Change callbacks (e.g. after handing conn to a peer) */
-void mbt_conn_set_callbacks(struct mbt_conn *c, mbt_conn_read_cb readcb,
+MBT_API void mbt_conn_set_callbacks(struct mbt_conn *c, mbt_conn_read_cb readcb,
                             mbt_conn_event_cb eventcb, void *arg);
 
 /* Get remote peer address (via getpeername). Returns 0 on success. */
-int mbt_conn_peer_addr(struct mbt_conn *c, char *buf, size_t buflen, uint16_t *port);
+MBT_API int mbt_conn_peer_addr(struct mbt_conn *c, char *buf, size_t buflen, uint16_t *port);
 
 /* Inline convenience wrappers */
 static inline void

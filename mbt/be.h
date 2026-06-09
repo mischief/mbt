@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: ISC
+#include "export.h"
 #include <sys/uio.h>
 #include <sys/queue.h>
 #include <inttypes.h>
@@ -29,23 +30,23 @@ struct mbt_be_value
 	};
 };
 
-void mbt_be_value_free(struct mbt_be_value *v);
-void mbt_be_value_freep(struct mbt_be_value **v);
-int mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out);
+MBT_API void mbt_be_value_free(struct mbt_be_value *v);
+MBT_API void mbt_be_value_freep(struct mbt_be_value **v);
+MBT_API int mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out);
 
-int mbt_be_pp(struct mbt_be_value *be, void *arg);
+MBT_API int mbt_be_pp(struct mbt_be_value *be, void *arg);
 
-void mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *arg), void *arg);
-struct mbt_be_value *mbt_be_find(struct mbt_be_value *be, const char *key);
+MBT_API void mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *arg), void *arg);
+MBT_API struct mbt_be_value *mbt_be_find(struct mbt_be_value *be, const char *key);
 
-int mbt_be_dict_new(struct mbt_be_value **out);
-int mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value);
-int mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num);
-int mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf, size_t len);
-void mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len);
-void mbt_be_list_new(struct mbt_be_value **out);
-void mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val);
+MBT_API int mbt_be_dict_new(struct mbt_be_value **out);
+MBT_API int mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value);
+MBT_API int mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num);
+MBT_API int mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf, size_t len);
+MBT_API void mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len);
+MBT_API void mbt_be_list_new(struct mbt_be_value **out);
+MBT_API void mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val);
 
-int
+MBT_API int
 mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len);
 

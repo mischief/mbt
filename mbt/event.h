@@ -2,6 +2,8 @@
 #ifndef MBT_EVENT_H
 #define MBT_EVENT_H
 
+#include "export.h"
+
 #include <stdint.h>
 
 struct mbt_ev;
@@ -38,16 +40,16 @@ struct mbt_ev {
 
 /* sd-event backend */
 #ifdef HAVE_SD_EVENT
-int mbt_ev_sd_new(struct mbt_ev **out);
+MBT_API int mbt_ev_sd_new(struct mbt_ev **out);
 struct sd_event;
-int mbt_ev_sd_new_from(struct mbt_ev **out, struct sd_event *loop);
+MBT_API int mbt_ev_sd_new_from(struct mbt_ev **out, struct sd_event *loop);
 #endif
 
 /* libevent backend */
 #ifdef HAVE_LIBEVENT
-int mbt_ev_libevent_new(struct mbt_ev **out);
+MBT_API int mbt_ev_libevent_new(struct mbt_ev **out);
 struct event_base;
-int mbt_ev_libevent_new_from(struct mbt_ev **out, struct event_base *base);
+MBT_API int mbt_ev_libevent_new_from(struct mbt_ev **out, struct event_base *base);
 #endif
 
 /* Create event loop using the compiled-in backend */

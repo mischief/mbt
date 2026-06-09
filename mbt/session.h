@@ -2,6 +2,8 @@
 #ifndef MBT_SESSION_H
 #define MBT_SESSION_H
 
+#include "export.h"
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -33,44 +35,44 @@ struct mbt_session_config {
 };
 
 /* Session lifecycle */
-int mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg);
-void mbt_session_free(struct mbt_session *s);
+MBT_API int mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg);
+MBT_API void mbt_session_free(struct mbt_session *s);
 
 /*
  * Sensible defaults: platform event backend, file storage at `path`,
  * random piece picker, listen on port 6881.
  */
-int mbt_session_default(struct mbt_session **out, const char *path);
+MBT_API int mbt_session_default(struct mbt_session **out, const char *path);
 
 /* Event loop — only needed if caller doesn't run their own */
-int mbt_session_run(struct mbt_session *s);
-void mbt_session_stop(struct mbt_session *s);
+MBT_API int mbt_session_run(struct mbt_session *s);
+MBT_API void mbt_session_stop(struct mbt_session *s);
 
 /* Add torrents */
-int mbt_session_add_torrent_file(struct mbt_session *s, const char *path);
-int mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len);
-int mbt_session_add_magnet(struct mbt_session *s, const char *uri);
-int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih);
+MBT_API int mbt_session_add_torrent_file(struct mbt_session *s, const char *path);
+MBT_API int mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len);
+MBT_API int mbt_session_add_magnet(struct mbt_session *s, const char *uri);
+MBT_API int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih);
 
 /* Remove/query */
-int mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih);
-struct mbt_torrent *mbt_session_find_torrent(struct mbt_session *s, struct mbt_infohash *ih);
-int mbt_session_torrent_count(struct mbt_session *s);
-struct mbt_torrent *mbt_session_torrent_first(struct mbt_session *s);
-struct mbt_torrent *mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after);
+MBT_API int mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih);
+MBT_API struct mbt_torrent *mbt_session_find_torrent(struct mbt_session *s, struct mbt_infohash *ih);
+MBT_API int mbt_session_torrent_count(struct mbt_session *s);
+MBT_API struct mbt_torrent *mbt_session_torrent_first(struct mbt_session *s);
+MBT_API struct mbt_torrent *mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after);
 
 /* Peer discovery — enable/disable sources */
-int mbt_session_enable_lsd(struct mbt_session *s);
-void mbt_session_disable_lsd(struct mbt_session *s);
-int mbt_session_enable_dht(struct mbt_session *s);
-void mbt_session_disable_dht(struct mbt_session *s);
-int mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, uint16_t port);
-void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih);
-int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
+MBT_API int mbt_session_enable_lsd(struct mbt_session *s);
+MBT_API void mbt_session_disable_lsd(struct mbt_session *s);
+MBT_API int mbt_session_enable_dht(struct mbt_session *s);
+MBT_API void mbt_session_disable_dht(struct mbt_session *s);
+MBT_API int mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, uint16_t port);
+MBT_API void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih);
+MBT_API int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                          const char *addr, uint16_t port);
 
 /* Manually trigger re-announce to all trackers (or specific torrent if ih != NULL) */
-int mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih);
+MBT_API int mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih);
 
 /* Callbacks for session-level events (optional) */
 struct mbt_session_callbacks {
@@ -82,6 +84,6 @@ struct mbt_session_callbacks {
 	void *arg;
 };
 
-int mbt_session_set_callbacks(struct mbt_session *s, struct mbt_session_callbacks *cb);
+MBT_API int mbt_session_set_callbacks(struct mbt_session *s, struct mbt_session_callbacks *cb);
 
 #endif

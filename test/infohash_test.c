@@ -73,11 +73,11 @@ test_unrefp(void)
 	struct mbt_infohash *ih = NULL;
 
 	mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, "611F70899D4E1D6A9C39CFC925F103DFEF630328");
-	mbt_mbt_infohash_unrefp(&ih);
+	mbt_infohash_unrefp(&ih);
 
 	/* ih is now dangling (unrefp doesn't NULL it), test NULL path */
 	ih = NULL;
-	mbt_mbt_infohash_unrefp(&ih);
+	mbt_infohash_unrefp(&ih);
 }
 
 static void
