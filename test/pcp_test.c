@@ -16,6 +16,7 @@
 
 static struct mbt_ev *ev;
 static int mapping_received;
+static int server_request_count;
 static char got_addr[64];
 static uint16_t got_port;
 
@@ -49,8 +50,10 @@ stub_server_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	resp[1] |= 0x80; /* R=1 (response) */
 	resp[3] = 0;      /* Result = SUCCESS */
 
-	/* Lifetime = 7200 */
-	uint32_t lt = htonl(7200);
+	server_request_count++;
+
+	/* Lifetime = 2s (short for refresh testing) */
+	uint32_t lt = htonl(2);
 	memcpy(resp + 4, &lt, 4);
 
 	/* Epoch time */
@@ -75,11 +78,13 @@ static void
 on_mapped(const char *addr, uint16_t port, uint32_t lifetime, void *arg)
 {
 	(void)arg;
-	mapping_received = 1;
+	mapping_received++;
 	snprintf(got_addr, sizeof(got_addr), "%s", addr);
 	got_port = port;
-	fprintf(stderr, "  mapped: %s:%hu (lifetime %u)\n", addr, port, lifetime);
-	mbt_ev_stop(ev);
+	fprintf(stderr, "  mapped (#%d): %s:%hu (lifetime %u)\n", mapping_received, addr, port, lifetime);
+	/* Stop after second mapping (proves refresh worked) */
+	if (mapping_received >= 2)
+		mbt_ev_stop(ev);
 }
 
 static void timeout_cb(struct mbt_ev_timer *t, void *a) { (void)t; (void)a; mbt_ev_stop(ev); }
@@ -107,7 +112,7 @@ int main(void)
 	assert(rv == 0);
 
 	/* Request TCP mapping for port 6881 */
-	rv = mbt_pcp_map(pcp, 6 /* TCP */, 6881, 7200, on_mapped, NULL);
+	rv = mbt_pcp_map(pcp, 6 /* TCP */, 6881, 2, on_mapped, NULL);
 	assert(rv == 0);
 
 	/* Timeout */
@@ -116,11 +121,12 @@ int main(void)
 
 	mbt_ev_run(ev);
 
-	assert(mapping_received);
+	assert(mapping_received >= 2);
+	assert(server_request_count >= 2);
 	assert(strcmp(got_addr, "203.0.113.42") == 0);
 	assert(got_port == 7881); /* 6881 + 1000 */
 
-	fprintf(stderr, "pcp_test: PASS\n");
+	fprintf(stderr, "pcp_test: PASS (refresh verified, %d requests)\n", server_request_count);
 
 	mbt_ev_timer_free(to);
 	mbt_pcp_free(pcp);
