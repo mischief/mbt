@@ -425,6 +425,10 @@ parse_compact_nodes(struct mbt_dht *d, const uint8_t *data, size_t len, struct d
 		memcpy(&addr.sin_addr, p + 20, 4);
 		memcpy(&addr.sin_port, p + 24, 2); /* already network order */
 
+		/* Skip bogus nodes */
+		if (addr.sin_addr.s_addr == 0 || addr.sin_port == 0)
+			continue;
+
 		routing_add(d, p, &addr);
 		if (lk)
 			lookup_add_node(lk, p, &addr);
