@@ -23,14 +23,18 @@ if [ -n "$LEAKED" ]; then
 fi
 echo "OK: all exported symbols are mbt_*"
 
-# 3. Clang + ASan (static lib)
+# 3. Documentation coverage (informational, not gating)
+echo "--- doc coverage ---"
+./check-docs.sh
+
+# 4. Clang + ASan (static lib)
 echo "--- clang + ASan ---"
 rm -rf build
 CC=clang meson setup build -Devent_backend=$BACKEND -Db_sanitize=address -Ddefault_library=static
 ninja -C build
 meson test -C build
 
-# 4. Valgrind
+# 5. Valgrind
 echo "--- valgrind ---"
 rm -rf build
 meson setup build -Devent_backend=$BACKEND

@@ -1,0 +1,179 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_SESSION 3
+.Os
+.Sh NAME
+.Nm mbt_session_new ,
+.Nm mbt_session_default ,
+.Nm mbt_session_free ,
+.Nm mbt_session_run ,
+.Nm mbt_session_stop ,
+.Nm mbt_session_add_torrent_file ,
+.Nm mbt_session_add_torrent_buf ,
+.Nm mbt_session_add_magnet ,
+.Nm mbt_session_add_infohash ,
+.Nm mbt_session_remove_torrent ,
+.Nm mbt_session_find_torrent ,
+.Nm mbt_session_torrent_count ,
+.Nm mbt_session_torrent_first ,
+.Nm mbt_session_torrent_next ,
+.Nm mbt_session_enable_dht ,
+.Nm mbt_session_disable_dht ,
+.Nm mbt_session_dht_bootstrap ,
+.Nm mbt_session_dht_get_peers ,
+.Nm mbt_session_enable_lsd ,
+.Nm mbt_session_disable_lsd ,
+.Nm mbt_session_add_peer ,
+.Nm mbt_session_reannounce ,
+.Nm mbt_session_set_callbacks
+.Nd BitTorrent session management
+.Sh SYNOPSIS
+.In mbt/session.h
+.Ft int
+.Fn mbt_session_new "struct mbt_session **out" "struct mbt_session_config *cfg"
+.Ft int
+.Fn mbt_session_default "struct mbt_session **out" "const char *path"
+.Ft void
+.Fn mbt_session_free "struct mbt_session *s"
+.Ft int
+.Fn mbt_session_run "struct mbt_session *s"
+.Ft void
+.Fn mbt_session_stop "struct mbt_session *s"
+.Ft int
+.Fn mbt_session_add_torrent_file "struct mbt_session *s" "const char *path"
+.Ft int
+.Fn mbt_session_add_torrent_buf "struct mbt_session *s" "const void *data" "size_t len"
+.Ft int
+.Fn mbt_session_add_magnet "struct mbt_session *s" "const char *uri"
+.Ft int
+.Fn mbt_session_add_infohash "struct mbt_session *s" "struct mbt_infohash *ih"
+.Ft int
+.Fn mbt_session_remove_torrent "struct mbt_session *s" "struct mbt_infohash *ih"
+.Ft "struct mbt_torrent *"
+.Fn mbt_session_find_torrent "struct mbt_session *s" "struct mbt_infohash *ih"
+.Ft int
+.Fn mbt_session_torrent_count "struct mbt_session *s"
+.Ft "struct mbt_torrent *"
+.Fn mbt_session_torrent_first "struct mbt_session *s"
+.Ft "struct mbt_torrent *"
+.Fn mbt_session_torrent_next "struct mbt_session *s" "struct mbt_torrent *after"
+.Ft int
+.Fn mbt_session_enable_dht "struct mbt_session *s"
+.Ft void
+.Fn mbt_session_disable_dht "struct mbt_session *s"
+.Ft int
+.Fn mbt_session_dht_bootstrap "struct mbt_session *s" "const char *addr" "uint16_t port"
+.Ft void
+.Fn mbt_session_dht_get_peers "struct mbt_session *s" "struct mbt_infohash *ih"
+.Ft int
+.Fn mbt_session_enable_lsd "struct mbt_session *s"
+.Ft void
+.Fn mbt_session_disable_lsd "struct mbt_session *s"
+.Ft int
+.Fn mbt_session_add_peer "struct mbt_session *s" "struct mbt_infohash *ih" "const char *addr" "uint16_t port"
+.Ft int
+.Fn mbt_session_reannounce "struct mbt_session *s" "struct mbt_infohash *ih"
+.Ft int
+.Fn mbt_session_set_callbacks "struct mbt_session *s" "struct mbt_session_callbacks *cb"
+.Sh DESCRIPTION
+A session manages one or more BitTorrent downloads and seeds.
+It owns the event loop integration, listening socket, DHT node, and LSD
+announcer.
+Torrents added to a session share these resources.
+.Pp
+.Fn mbt_session_new
+creates a session with explicit configuration.
+The
+.Fa cfg
+structure controls storage backend, piece picker, listen port,
+timeouts, and optional HTTP tracker callback.
+.Pp
+.Fn mbt_session_default
+creates a session with sensible defaults: file storage at
+.Fa path ,
+rarest-first picker, listen on port 6881.
+.Pp
+.Fn mbt_session_free
+destroys the session and all its torrents.
+.Pp
+.Fn mbt_session_run
+enters the event loop.
+Returns when
+.Fn mbt_session_stop
+is called or an error occurs.
+Callers that run their own event loop do not need to call this.
+.Ss Adding torrents
+.Fn mbt_session_add_torrent_file
+loads a
+.Pa .torrent
+file from disk.
+.Fn mbt_session_add_torrent_buf
+parses bencoded metainfo from a buffer.
+.Fn mbt_session_add_magnet
+adds a torrent by magnet URI; metadata is fetched from peers
+via BEP 9.
+.Fn mbt_session_add_infohash
+adds a bare infohash with no metadata or trackers (useful with DHT).
+.Pp
+All add functions return 0 on success or a negative errno on failure.
+.Ss Torrent enumeration
+.Fn mbt_session_torrent_count
+returns the number of active torrents.
+.Fn mbt_session_torrent_first
+and
+.Fn mbt_session_torrent_next
+iterate them.
+.Fn mbt_session_find_torrent
+looks up a torrent by infohash.
+.Fn mbt_session_remove_torrent
+removes and frees a torrent.
+.Ss Peer discovery
+.Fn mbt_session_enable_dht
+starts the DHT node (BEP 5) on the session's listen port.
+.Fn mbt_session_dht_bootstrap
+adds a known node for initial routing table population.
+.Fn mbt_session_dht_get_peers
+initiates a DHT lookup for a specific infohash.
+.Fn mbt_session_enable_lsd
+enables Local Service Discovery (BEP 14) multicast announcements.
+.Fn mbt_session_add_peer
+manually adds a peer address for a torrent.
+.Ss Tracker interaction
+.Fn mbt_session_reannounce
+forces a re-announce to all trackers.
+If
+.Fa ih
+is non-NULL, only the matching torrent is re-announced.
+.Ss Callbacks
+.Fn mbt_session_set_callbacks
+registers optional session-level event handlers:
+.Bl -tag -width on_torrent_complete
+.It Fn on_torrent_complete
+All pieces verified.
+.It Fn on_torrent_error
+Fatal error on a torrent.
+.It Fn on_lsd_announce
+LSD discovery of a peer.
+Return 1 to auto-add, 0 to ignore.
+.El
+.Sh RETURN VALUES
+Functions returning
+.Ft int
+return 0 on success or a negative errno value on failure.
+Functions returning a pointer return NULL on failure.
+.Sh EXAMPLES
+.Bd -literal
+struct mbt_session *s;
+mbt_session_default(&s, "/tmp/downloads");
+mbt_session_enable_dht(s);
+mbt_session_dht_bootstrap(s, "router.bittorrent.com", 6881);
+mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...");
+mbt_session_run(s);
+mbt_session_free(s);
+.Ed
+.Sh SEE ALSO
+.Xr mbt_torrent 3 ,
+.Xr mbt_pcp 3 ,
+.Xr mbt_dht 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org
