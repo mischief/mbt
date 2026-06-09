@@ -66,6 +66,22 @@ mbt_tracker_store_free(struct mbt_tracker_store *s)
 int mbt_tracker_store_num_torrents(struct mbt_tracker_store *s) { return s->num_torrents; }
 int mbt_tracker_store_num_peers(struct mbt_tracker_store *s) { return s->num_peers; }
 
+void
+mbt_tracker_store_stats(struct mbt_tracker_store *s, struct mbt_tracker_stats *out)
+{
+	out->torrents = s->num_torrents;
+	out->peers = s->num_peers;
+	out->seeders = 0;
+	out->leechers = 0;
+	for (int i = 0; i < TORRENT_BUCKETS; i++) {
+		struct ts_torrent *t;
+		SLIST_FOREACH(t, &s->torrents[i], entry) {
+			out->seeders += t->seeders;
+			out->leechers += t->leechers;
+		}
+	}
+}
+
 /* --- Connection ID (BEP 15 spoofing protection) --- */
 
 #include <sha1.h>

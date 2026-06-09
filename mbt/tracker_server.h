@@ -14,6 +14,14 @@ void mbt_tracker_store_free(struct mbt_tracker_store *s);
 int mbt_tracker_store_num_torrents(struct mbt_tracker_store *s);
 int mbt_tracker_store_num_peers(struct mbt_tracker_store *s);
 
+struct mbt_tracker_stats {
+	uint32_t torrents;
+	uint32_t peers;
+	uint32_t seeders;
+	uint32_t leechers;
+};
+void mbt_tracker_store_stats(struct mbt_tracker_store *s, struct mbt_tracker_stats *out);
+
 /* --- UDP tracker server (BEP 15) --- */
 struct mbt_tracker_server;
 
