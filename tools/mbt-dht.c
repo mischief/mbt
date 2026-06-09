@@ -36,9 +36,20 @@ on_done(void *arg)
 int
 main(int argc, char *argv[])
 {
-	int rv;
+	int rv, ch;
 
-	if (argc < 2) {
+	while ((ch = getopt(argc, argv, "h")) != -1) {
+		switch (ch) {
+		case 'h':
+		default:
+			fprintf(stderr, "usage: mbt-dht <infohash_hex>\n");
+			return ch == 'h' ? 0 : 1;
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc < 1) {
 		fprintf(stderr, "usage: mbt-dht <infohash_hex>\n");
 		return 1;
 	}
@@ -47,9 +58,9 @@ main(int argc, char *argv[])
 	mbt_log_set_debug(MBT_LOG_DHT);
 
 	struct mbt_infohash *ih;
-	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, argv[1]);
+	rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, argv[0]);
 	if (rv < 0)
-		errx(1, "invalid infohash: %s", argv[1]);
+		errx(1, "invalid infohash: %s", argv[0]);
 
 #ifdef HAVE_SD_EVENT
 	rv = mbt_ev_sd_new(&ev);

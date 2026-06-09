@@ -169,7 +169,7 @@ main(int argc, char *argv[])
 	int listen_port = 6881;
 	mbt_picker_fn picker = mbt_picker_sequential;
 
-	while ((ch = getopt(argc, argv, "dDSLl:o:p:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dhDSLl:o:p:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -202,6 +202,7 @@ main(int argc, char *argv[])
 				return 1;
 			}
 			break;
+		case 'h':
 		default:
 			usage(argv[0]);
 		}

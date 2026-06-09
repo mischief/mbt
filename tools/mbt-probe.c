@@ -18,13 +18,25 @@
 
 int main(int argc, char *argv[])
 {
-	if (argc < 3) {
+	int ch;
+	while ((ch = getopt(argc, argv, "h")) != -1) {
+		switch (ch) {
+		case 'h':
+		default:
+			fprintf(stderr, "usage: mbt-probe <infohash_hex> <ip:port>\n");
+			return ch == 'h' ? 0 : 1;
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc < 2) {
 		fprintf(stderr, "usage: mbt-probe <infohash_hex> <ip:port>\n");
 		return 1;
 	}
 
 	/* Parse infohash */
-	const char *hash_hex = argv[1];
+	const char *hash_hex = argv[0];
 	uint8_t hash[20];
 	if (strlen(hash_hex) != 40) errx(1, "infohash must be 40 hex chars");
 	mbt_hex_decode(hash, 20, hash_hex);
@@ -32,7 +44,7 @@ int main(int argc, char *argv[])
 	/* Parse ip:port */
 	char ip[64];
 	int port;
-	if (sscanf(argv[2], "%63[^:]:%d", ip, &port) != 2)
+	if (sscanf(argv[1], "%63[^:]:%d", ip, &port) != 2)
 		errx(1, "bad address format (expected ip:port)");
 
 	/* Connect */

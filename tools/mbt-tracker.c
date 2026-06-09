@@ -25,13 +25,14 @@ int main(int argc, char *argv[])
 	uint16_t http_port = 6969;
 	int use_udp = 0, use_http = 0;
 
-	while ((ch = getopt(argc, argv, "u:h:")) != -1) {
+	while ((ch = getopt(argc, argv, "hu:H:")) != -1) {
 		switch (ch) {
 		case 'u': udp_port = atoi(optarg); use_udp = 1; break;
-		case 'h': http_port = atoi(optarg); use_http = 1; break;
+		case 'H': http_port = atoi(optarg); use_http = 1; break;
+		case 'h':
 		default:
-			fprintf(stderr, "usage: mbt-tracker [-u udp_port] [-h http_port]\n");
-			return 1;
+			fprintf(stderr, "usage: mbt-tracker [-u udp_port] [-H http_port]\n");
+			return ch == 'h' ? 0 : 1;
 		}
 	}
 

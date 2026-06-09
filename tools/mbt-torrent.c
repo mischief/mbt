@@ -154,6 +154,9 @@ main(int argc, char *argv[])
 {
 	if (argc < 2) usage();
 
+	if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
+		usage();
+
 	if (strcmp(argv[1], "create") == 0)
 		return cmd_create(argc - 1, argv + 1);
 	else if (strcmp(argv[1], "show") == 0) {

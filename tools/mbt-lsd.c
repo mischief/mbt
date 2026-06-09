@@ -32,7 +32,7 @@ main(int argc, char *argv[])
 	int rv, c;
 	const char *outdir = ".";
 
-	while ((c = getopt(argc, argv, "do:")) != -1) {
+	while ((c = getopt(argc, argv, "dho:")) != -1) {
 		switch (c) {
 		case 'd':
 			mbt_log_set(mbt_log_stderr, NULL);
@@ -41,9 +41,10 @@ main(int argc, char *argv[])
 		case 'o':
 			outdir = optarg;
 			break;
+		case 'h':
 		default:
-			fprintf(stderr, "Usage: %s [-d] [-o dir]\n", argv[0]);
-			return 1;
+			fprintf(stderr, "usage: %s [-d] [-o dir]\n", argv[0]);
+			return c == 'h' ? 0 : 1;
 		}
 	}
 
