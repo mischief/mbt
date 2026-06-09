@@ -49,6 +49,7 @@ struct mbt_pcp {
 	/* Retransmit state */
 	uint64_t rt_usec; /* current retransmit timeout */
 	int awaiting_response;
+	int retries;
 
 	mbt_pcp_cb cb;
 	void *cb_arg;
@@ -147,7 +148,15 @@ pcp_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	uint16_t aport;
 	memcpy(&aport, pkt + 42, 2);
 	p->external_port = ntohs(aport);
+	/* Cap lifetime to 24 hours (RFC 6887 Section 15) */
+	if (lifetime > 86400) lifetime = 86400;
 	p->assigned_lifetime = lifetime;
+
+	/* Validate external port */
+	if (p->external_port == 0) {
+		mbt_log_warn(MBT_LOG_SESSION, "PCP: server returned port 0");
+		return;
+	}
 
 	/* Decode external IP (offset 44, 128 bits) */
 	uint8_t *eip = pkt + 44;
@@ -159,6 +168,7 @@ pcp_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	}
 
 	p->awaiting_response = 0;
+	p->retries = 0;
 
 	mbt_log_info(MBT_LOG_SESSION, "PCP: mapped %s:%hu (lifetime %us)",
 	             p->external_addr, p->external_port, lifetime);
@@ -181,6 +191,12 @@ pcp_timer_cb(struct mbt_ev_timer *timer, void *v)
 
 	if (p->awaiting_response) {
 		/* Retransmit: exponential backoff */
+		p->retries++;
+		if (p->retries > 10) {
+			mbt_log_warn(MBT_LOG_SESSION, "PCP: no response after %d retries, giving up", p->retries);
+			p->awaiting_response = 0;
+			return; /* stop retransmitting, timer won't re-arm */
+		}
 		p->rt_usec = p->rt_usec * 2;
 		if (p->rt_usec > 1024 * 1000000ULL)
 			p->rt_usec = 1024 * 1000000ULL;
@@ -265,6 +281,7 @@ mbt_pcp_map(struct mbt_pcp *p, uint8_t protocol, uint16_t internal_port,
 	p->cb = cb;
 	p->cb_arg = arg;
 	p->awaiting_response = 0;
+	p->retries = 0;
 
 	/* Start immediately */
 	if (!p->timer)
