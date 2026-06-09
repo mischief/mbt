@@ -255,7 +255,7 @@ session_generate_peer_id(uint8_t *id)
 {
 	/* -MB0001- followed by 12 random bytes */
 	memcpy(id, "-MB0001-", 8);
-	getentropy(id + 8, 12);
+	if (getentropy(id + 8, 12) < 0) {}
 }
 
 static struct session_torrent *

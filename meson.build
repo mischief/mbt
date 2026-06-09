@@ -9,6 +9,7 @@ checkargs = '''
 -Wno-gnu-case-range
 -Wno-unused-parameter
 -Wno-unused-function
+-Wno-unused-result
 -Wno-gnu-statement-expression-from-macro-expansion
 '''.split()
 foreach a : checkargs
@@ -116,3 +117,4 @@ endif
 
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
+executable('mbt-probe', 'tools/mbt-probe.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
