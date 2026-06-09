@@ -2,6 +2,7 @@
 /*
  * tracker_store.c — shared peer storage for tracker servers (IPv4 + IPv6)
  */
+#include <sys/queue.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -20,16 +21,16 @@ struct ts_peer {
 };
 
 struct ts_torrent {
+	SLIST_ENTRY(ts_torrent) entry;
 	uint8_t infohash[20];
 	struct ts_peer peers[MAX_PEERS_PER_TORRENT];
 	int peer_count;
 	int seeders;
 	int leechers;
-	struct ts_torrent *next;
 };
 
 struct mbt_tracker_store {
-	struct ts_torrent *torrents[TORRENT_BUCKETS];
+	SLIST_HEAD(, ts_torrent) torrents[TORRENT_BUCKETS];
 	int num_torrents;
 	int num_peers;
 	uint8_t secret[16]; /* for connection_id generation */
@@ -53,8 +54,11 @@ mbt_tracker_store_free(struct mbt_tracker_store *s)
 {
 	if (!s) return;
 	for (int i = 0; i < TORRENT_BUCKETS; i++) {
-		struct ts_torrent *t = s->torrents[i];
-		while (t) { struct ts_torrent *next = t->next; free(t); t = next; }
+		while (!SLIST_EMPTY(&s->torrents[i])) {
+			struct ts_torrent *t = SLIST_FIRST(&s->torrents[i]);
+			SLIST_REMOVE_HEAD(&s->torrents[i], entry);
+			free(t);
+		}
 	}
 	free(s);
 }
@@ -138,11 +142,9 @@ struct ts_torrent *
 mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih)
 {
 	unsigned bucket = hash_infohash(ih);
-	struct ts_torrent *t = s->torrents[bucket];
-	while (t) {
+	struct ts_torrent *t;
+	SLIST_FOREACH(t, &s->torrents[bucket], entry)
 		if (memcmp(t->infohash, ih, 20) == 0) return t;
-		t = t->next;
-	}
 	return NULL;
 }
 
@@ -155,8 +157,7 @@ mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih)
 	if (!t) return NULL;
 	memcpy(t->infohash, ih, 20);
 	unsigned bucket = hash_infohash(ih);
-	t->next = s->torrents[bucket];
-	s->torrents[bucket] = t;
+	SLIST_INSERT_HEAD(&s->torrents[bucket], t, entry);
 	s->num_torrents++;
 	return t;
 }
