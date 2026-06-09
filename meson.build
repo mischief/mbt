@@ -64,6 +64,7 @@ bt_src = [
   'tracker_server_udp.c',
   'tracker_server_http.c',
   'tracker_store.c',
+  'pcp.c',
   'dht.c',
 ] + ev_src
 
@@ -90,6 +91,7 @@ install_headers(
   'mbt/pack.h',
   'mbt/peer.h',
   'mbt/peerdb.h',
+  'mbt/pcp.h',
   'mbt/picker.h',
   'mbt/session.h',
   'mbt/storage.h',

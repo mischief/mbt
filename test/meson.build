@@ -77,3 +77,6 @@ test('picker_full', picker_full_test, timeout: 15)
 
 tracker_shared_test = executable('tracker_shared_test', 'tracker_shared_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_shared', tracker_shared_test, timeout: 15)
+
+pcp_test = executable('pcp_test', 'pcp_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('pcp', pcp_test, timeout: 10)
