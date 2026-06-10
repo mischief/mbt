@@ -36,6 +36,8 @@ test('conn', conn_test)
 ratelimit_test = executable('ratelimit_test', 'ratelimit_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('ratelimit', ratelimit_test)
 
+bitfield_test = executable('bitfield_test', 'bitfield_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('bitfield', bitfield_test)
 header_test = executable('header_test', 'header_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('header', header_test)
 

@@ -1271,9 +1271,19 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 				}
 			}
 			free(buf);
-			if (t->have_count > 0)
+			if (t->have_count > 0) {
 				mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
 				             t->have_count, t->piece_count);
+				/* Announce resumed pieces to already-connected peers */
+				struct torrent_peer *tp;
+				SLIST_FOREACH(tp, &t->peers, entry) {
+					if (tp->banned || !tp->peer) continue;
+					for (uint32_t i = 0; i < t->piece_count; i++) {
+						if (mbt_bitmap_isset(t->have, i) > 0)
+							mbt_peer_send_have(tp->peer, i);
+					}
+				}
+			}
 			if (t->have_count == t->piece_count) {
 				mbt_log_info(MBT_LOG_TORRENT, "all pieces verified, nothing to download");
 				if (t->cb.on_complete)
