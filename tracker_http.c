@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include <stdlib.h>
+#include <sys/socket.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>

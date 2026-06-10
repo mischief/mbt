@@ -16,8 +16,8 @@
 #include "mbt/log.h"
 
 /* BEP 15 constants */
+#define UDP_TRACKER_MAGIC 0x41727101980ULL
 enum {
-	UDP_TRACKER_MAGIC = 0x41727101980ULL,
 	ACTION_CONNECT  = 0,
 	ACTION_ANNOUNCE = 1,
 	EVENT_STARTED   = 2,
