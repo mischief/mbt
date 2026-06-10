@@ -876,8 +876,8 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		return; /* complete — nothing to request */
 
 	/* Throttle requests if download rate exceeded */
-	uint64_t d1 = mbt_ratelimit_delay(t->download_limit, t->piece_length);
-	uint64_t d2 = mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), t->piece_length);
+	uint64_t d1 = mbt_ratelimit_delay(t->download_limit, BLOCK_SIZE);
+	uint64_t d2 = mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), BLOCK_SIZE);
 	uint64_t d = d1 > d2 ? d1 : d2;
 	if (d > 0) {
 		if (!t->ratelimit_timer)
