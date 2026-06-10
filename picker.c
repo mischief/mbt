@@ -75,6 +75,7 @@ mbt_picker_rarest(struct mbt_torrent *t, void *peer, void *ctx)
 	/* Phase 2: rarest first — scan candidates, pick lowest availability */
 	int best = -1;
 	int best_avail = INT_MAX;
+	int ties = 0;
 	int npeer = mbt_torrent_peer_count(t);
 
 	for (uint32_t i = 0; i < bits; i++) {
@@ -94,9 +95,14 @@ mbt_picker_rarest(struct mbt_torrent *t, void *peer, void *ctx)
 				avail++;
 		}
 
-		if (avail < best_avail || (avail == best_avail && (mbt_random_uniform(2) == 0))) {
+		if (avail < best_avail) {
 			best_avail = avail;
 			best = (int)i;
+			ties = 1;
+		} else if (avail == best_avail) {
+			ties++;
+			if (mbt_random_uniform(ties) == 0)
+				best = (int)i;
 		}
 	}
 
