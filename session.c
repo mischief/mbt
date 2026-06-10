@@ -213,8 +213,8 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 		/* DHT re-lookup every 5 min if incomplete and few peers */
 		if (s->dht && !mbt_torrent_complete(st->torrent) && !mbt_torrent_is_private(st->torrent)) {
 			time_t now = time(NULL);
-			/* Re-lookup aggressively (30s) when few peers, otherwise dht_refresh */
-			int interval = mbt_torrent_peer_count(st->torrent) < 5 ? 30 : s->timers.dht_refresh;
+			/* Re-lookup aggressively (10s) when few peers, otherwise dht_refresh */
+			int interval = mbt_torrent_peer_count(st->torrent) < 5 ? 10 : s->timers.dht_refresh;
 			if (now - st->last_dht_lookup >= interval) {
 				st->last_dht_lookup = now;
 				mbt_session_dht_get_peers(s, st->ih);
