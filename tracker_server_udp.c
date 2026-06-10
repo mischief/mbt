@@ -18,6 +18,7 @@
 #include "mbt/tracker_server.h"
 #include "mbt/event.h"
 #include "mbt/log.h"
+#include "net.h"
 
 /* BEP 15 protocol constants */
 #define ACTION_CONNECT  0
@@ -30,8 +31,7 @@
 /* Peer entry */
 struct mbt_tracker_server {
 	struct mbt_ev *ev;
-	int fd;
-	struct mbt_ev_io *io;
+	struct mbt_listener listener;
 	uint16_t port;
 	struct mbt_tracker_store *store;
 	int owns_store;
@@ -180,20 +180,8 @@ mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint1
 	ts->ev = ev;
 	ts->port = port;
 
-	ts->fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (ts->fd < 0) { free(ts); return -errno; }
-
-	struct sockaddr_in sa = {
-		.sin_family = AF_INET,
-		.sin_port = htons(port),
-		.sin_addr.s_addr = INADDR_ANY,
-	};
-	if (bind(ts->fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		int e = errno; close(ts->fd); free(ts); return -e;
-	}
-
-	int rv = mbt_ev_io_new(ev, &ts->io, ts->fd, MBT_EV_READ, tracker_recv, ts);
-	if (rv < 0) { close(ts->fd); free(ts); return rv; }
+	int rv = mbt_listen_udp(&ts->listener, ev, port, tracker_recv, ts);
+	if (rv < 0) { free(ts); return rv; }
 
 	mbt_log_info(MBT_LOG_SESSION, "tracker server listening on UDP port %hu", port);
 	*out = ts;
@@ -204,8 +192,7 @@ void
 mbt_tracker_server_free(struct mbt_tracker_server *ts)
 {
 	if (!ts) return;
-	if (ts->io) mbt_ev_io_free(ts->io);
-	if (ts->fd >= 0) close(ts->fd);
+	mbt_listener_close(&ts->listener);
 	if (ts->store && ts->owns_store) mbt_tracker_store_free(ts->store);
 	free(ts);
 }

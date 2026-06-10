@@ -19,22 +19,22 @@
 #include "mbt/event.h"
 #include "mbt/be.h"
 #include "mbt/log.h"
+#include "net.h"
 
 /* Forward declarations from tracker_store.c */
 struct ts_torrent;
 struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
 struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
 void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
-                                const struct sockaddr_in *addr, int is_seeder);
-int mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *exclude,
+                                const struct sockaddr_storage *addr, int is_seeder);
+int mbt_tracker_store_get_peers_v4(struct ts_torrent *t, const struct sockaddr_storage *exclude,
                                 uint8_t *compact_out, int max_peers);
 
 struct mbt_tracker_http {
 	struct mbt_ev *ev;
 	struct mbt_tracker_store *store;
 	int owns_store;
-	int fd;
-	struct mbt_ev_io *io;
+	struct mbt_listener listener;
 	uint16_t port;
 };
 
@@ -56,7 +56,7 @@ urldecode_infohash(const char *s, uint8_t *out)
 }
 
 static void
-handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_in *from)
+handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *from)
 {
 	char buf[4096];
 	ssize_t n = recv(cfd, buf, sizeof(buf) - 1, 0);
@@ -107,8 +107,13 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_in *from)
 	if (numwant <= 0 || numwant > 50) numwant = 50;
 
 	/* Store peer */
-	struct sockaddr_in peer_addr = *from;
-	if (peer_port) peer_addr.sin_port = peer_port;
+	struct sockaddr_storage peer_addr = *from;
+	if (peer_port) {
+		if (peer_addr.ss_family == AF_INET6)
+			((struct sockaddr_in6 *)&peer_addr)->sin6_port = peer_port;
+		else
+			((struct sockaddr_in *)&peer_addr)->sin_port = peer_port;
+	}
 
 	struct ts_torrent *t = mbt_tracker_store_get_or_create(th->store, info_hash);
 	if (!t) { close(cfd); return; }
@@ -123,7 +128,7 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_in *from)
 
 	if (compact) {
 		uint8_t peers_compact[300]; /* 50 * 6 */
-		int count = mbt_tracker_store_get_peers(t, &peer_addr, peers_compact, numwant);
+		int count = mbt_tracker_store_get_peers_v4(t, &peer_addr, peers_compact, numwant);
 		mbt_be_dict_append_string(resp, "peers", peers_compact, count * 6);
 	}
 
@@ -145,7 +150,7 @@ static void
 http_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	struct mbt_tracker_http *th = v;
-	struct sockaddr_in from;
+	struct sockaddr_storage from;
 	socklen_t fromlen = sizeof(from);
 	(void)io; (void)events;
 
@@ -167,26 +172,8 @@ mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev, uint16_t 
 	if (store) { th->store = store; th->owns_store = 0; } else { mbt_tracker_store_new(&th->store); th->owns_store = 1; }
 	th->port = port;
 
-	th->fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (th->fd < 0) { free(th); return -errno; }
-
-	int yes = 1;
-	setsockopt(th->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-
-	struct sockaddr_in sa = {
-		.sin_family = AF_INET,
-		.sin_port = htons(port),
-		.sin_addr.s_addr = INADDR_ANY,
-	};
-	if (bind(th->fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		int e = errno; close(th->fd); free(th); return -e;
-	}
-	if (listen(th->fd, 16) < 0) {
-		int e = errno; close(th->fd); free(th); return -e;
-	}
-
-	int rv = mbt_ev_io_new(ev, &th->io, th->fd, MBT_EV_READ, http_accept_cb, th);
-	if (rv < 0) { close(th->fd); free(th); return rv; }
+	int rv = mbt_listen_tcp(&th->listener, ev, port, http_accept_cb, th);
+	if (rv < 0) { free(th); return rv; }
 
 	mbt_log_info(MBT_LOG_SESSION, "HTTP tracker listening on port %hu", port);
 	*out = th;
@@ -197,8 +184,7 @@ void
 mbt_tracker_http_free(struct mbt_tracker_http *th)
 {
 	if (!th) return;
-	if (th->io) mbt_ev_io_free(th->io);
-	if (th->fd >= 0) close(th->fd);
+	mbt_listener_close(&th->listener);
 	if (th->store && th->owns_store) mbt_tracker_store_free(th->store);
 	free(th);
 }
