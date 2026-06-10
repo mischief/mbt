@@ -87,7 +87,11 @@ on_mapped(const char *addr, uint16_t port, uint32_t lifetime, void *arg)
 		mbt_ev_stop(ev);
 }
 
-static void timeout_cb(struct mbt_ev_timer *t, void *a) { (void)t; (void)a; mbt_ev_stop(ev); }
+static void timeout_cb(struct mbt_ev_timer *t, void *a) {
+	(void)t; (void)a;
+	fprintf(stderr, "  TIMEOUT: mapping_received=%d server_requests=%d\n", mapping_received, server_request_count);
+	mbt_ev_stop(ev);
+}
 
 int main(void)
 {

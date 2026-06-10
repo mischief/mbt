@@ -6,6 +6,7 @@
  * Supports IPv4 and IPv6. Single mapping per instance.
  */
 #define _GNU_SOURCE
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -13,6 +14,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+
+#ifndef __linux__
+#include <sys/sysctl.h>
+#include <net/route.h>
+#define ROUNDUP(a) \
+	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
+#endif
 #include <stdio.h>
 #include <net/if.h>
 
@@ -110,9 +118,7 @@ send_map_request(struct mbt_pcp *p)
 		}
 	}
 
-	ssize_t rv = sendto(p->fd, pkt, 60, 0,
-	                    (struct sockaddr *)&p->gateway,
-	                    p->is_ipv6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in));
+	ssize_t rv = send(p->fd, pkt, 60, 0);
 	return rv < 0 ? -errno : 0;
 }
 
@@ -250,9 +256,40 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 		((struct sockaddr_in *)&p->gateway)->sin_port = htons(PCP_PORT);
 		((struct sockaddr_in *)&p->gateway)->sin_addr.s_addr = gw;
 #else
-		/* TODO: implement gateway detection for this platform */
-		free(p);
-		return -ENOSYS;
+		/* BSD: use sysctl routing table to find default gateway */
+		uint32_t gw = 0;
+		int mib[7] = { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0, 0 };
+		size_t buflen = 0;
+		if (sysctl(mib, 7, NULL, &buflen, NULL, 0) == 0 && buflen > 0) {
+			char *buf = malloc(buflen);
+			if (buf && sysctl(mib, 7, buf, &buflen, NULL, 0) == 0) {
+				char *next, *limit = buf + buflen;
+				for (next = buf; next < limit;) {
+					struct rt_msghdr *rtm = (struct rt_msghdr *)next;
+					if (rtm->rtm_msglen == 0) break;
+					next += rtm->rtm_msglen;
+					if (rtm->rtm_version != RTM_VERSION) continue;
+					if (!(rtm->rtm_flags & RTF_GATEWAY)) continue;
+					if (!(rtm->rtm_addrs & RTA_DST)) continue;
+					if (!(rtm->rtm_addrs & RTA_GATEWAY)) continue;
+					struct sockaddr *sa = (struct sockaddr *)((char *)rtm + rtm->rtm_hdrlen);
+					/* Skip if destination is not 0.0.0.0 */
+					if (sa->sa_family != AF_INET) continue;
+					if (((struct sockaddr_in *)sa)->sin_addr.s_addr != 0) continue;
+					/* Advance past DST to GATEWAY */
+					sa = (struct sockaddr *)((char *)sa + ROUNDUP(sa->sa_len));
+					if (sa->sa_family == AF_INET) {
+						gw = ((struct sockaddr_in *)sa)->sin_addr.s_addr;
+						break;
+					}
+				}
+			}
+			free(buf);
+		}
+		if (gw == 0) { free(p); return -ENOENT; }
+		p->gateway.ss_family = AF_INET;
+		((struct sockaddr_in *)&p->gateway)->sin_port = htons(PCP_PORT);
+		((struct sockaddr_in *)&p->gateway)->sin_addr.s_addr = gw;
 #endif
 	}
 
