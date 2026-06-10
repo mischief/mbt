@@ -92,4 +92,18 @@ MBT_API void mbt_torrent_set_download_rate(struct mbt_torrent *t, uint64_t bytes
 MBT_API uint64_t mbt_torrent_upload_rate(struct mbt_torrent *t);
 MBT_API uint64_t mbt_torrent_download_rate(struct mbt_torrent *t);
 
+/* Per-peer stats snapshot */
+struct mbt_peer_stats {
+	const char *addr;
+	uint16_t port;
+	int choked;       /* we are choked by them */
+	int interested;   /* we are interested */
+	int snubbed;
+	int outstanding;  /* in-flight requests */
+	int done_pct;     /* % of pieces this peer has (0-100) */
+	int hash_failures;
+};
+
+MBT_API int mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *out);
+
 #endif

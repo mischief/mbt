@@ -1496,3 +1496,30 @@ mbt_torrent_download_rate(struct mbt_torrent *t)
 {
 	return mbt_ratelimit_rate(t->download_limit);
 }
+
+int
+mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *out)
+{
+	struct torrent_peer *tp;
+	int i = 0;
+	SLIST_FOREACH(tp, &t->peers, entry) {
+		if (tp->banned || !tp->peer) continue;
+		if (i == idx) {
+			out->addr = mbt_peer_addr(tp->peer);
+			out->port = mbt_peer_port(tp->peer);
+			out->choked = mbt_peer_choked(tp->peer);
+			out->interested = mbt_peer_interested(tp->peer);
+			out->snubbed = tp->snubbed;
+			out->outstanding = tp->outstanding;
+			out->hash_failures = tp->hash_failures;
+			struct mbt_bitmap *bf = mbt_peer_bitfield(tp->peer);
+			if (bf && t->piece_count > 0)
+				out->done_pct = 100 * mbt_bitmap_count(bf) / t->piece_count;
+			else
+				out->done_pct = 0;
+			return 0;
+		}
+		i++;
+	}
+	return -1;
+}

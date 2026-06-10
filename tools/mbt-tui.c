@@ -123,13 +123,21 @@ draw_detail(void)
 	} else if (detail_view == 1) {
 		/* Peers */
 		int np = mbt_torrent_peer_count(t);
-		mvwprintw(win_detail, 1, 1, "Connected peers: %d", np);
+		mvwprintw(win_detail, 1, 1, "%-22s %5s %4s %4s %4s %s",
+		          "IP", "DONE", "REQ", "SNUB", "FAIL", "FLAGS");
 		int maxrow = getmaxy(win_detail) - 2;
 		for (int i = 0; i < np && i + 2 <= maxrow; i++) {
-			struct mbt_peer *p = mbt_torrent_peer_at(t, i);
-			if (!p) break;
-			mvwprintw(win_detail, i + 2, 1, "  %s:%hu",
-			          mbt_peer_addr(p), mbt_peer_port(p));
+			struct mbt_peer_stats ps;
+			if (mbt_torrent_peer_stats(t, i, &ps) < 0) break;
+			char flags[8] = "";
+			int fi = 0;
+			if (ps.choked) flags[fi++] = 'C';
+			if (ps.interested) flags[fi++] = 'I';
+			if (ps.snubbed) flags[fi++] = 'S';
+			flags[fi] = 0;
+			mvwprintw(win_detail, i + 2, 1, "%-22s %3d%% %4d %4s %4d %s",
+			          ps.addr, ps.done_pct, ps.outstanding,
+			          ps.snubbed ? "yes" : "", ps.hash_failures, flags);
 		}
 
 	} else if (detail_view == 2) {
