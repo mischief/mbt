@@ -268,7 +268,7 @@ mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req)
 		return rv;
 
 	/* Resolve hostname (blocking for now — TODO: async DNS) */
-	struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_DGRAM };
+	struct addrinfo hints = { .ai_socktype = SOCK_DGRAM };
 	struct addrinfo *res;
 
 	rv = getaddrinfo(host, NULL, &hints, &res);
@@ -288,11 +288,14 @@ mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req)
 	/* Set up destination address */
 	memcpy(&ut->addr, res->ai_addr, res->ai_addrlen);
 	ut->addrlen = res->ai_addrlen;
-	((struct sockaddr_in *)&ut->addr)->sin_port = htons(port);
+	if (ut->addr.ss_family == AF_INET6)
+		((struct sockaddr_in6 *)&ut->addr)->sin6_port = htons(port);
+	else
+		((struct sockaddr_in *)&ut->addr)->sin_port = htons(port);
 	freeaddrinfo(res);
 
-	/* Create UDP socket */
-	ut->fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	/* Create UDP socket matching resolved address family */
+	ut->fd = socket(ut->addr.ss_family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (ut->fd < 0) {
 		free(ut);
 		return -errno;
