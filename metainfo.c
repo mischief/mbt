@@ -174,11 +174,11 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 		if (files && files->type == BE_LIST) {
 			struct mbt_be_value *f;
 			int count = 0;
-			STAILQ_FOREACH(f, &files->listhead, next) count++;
+			TAILQ_FOREACH(f, &files->listhead, next) count++;
 			mi->files = calloc(count, sizeof(*mi->files));
 			mi->file_count = count;
 			int idx = 0;
-			STAILQ_FOREACH(f, &files->listhead, next) {
+			TAILQ_FOREACH(f, &files->listhead, next) {
 				struct mbt_be_value *fl = mbt_be_find(f, "length");
 				struct mbt_be_value *fp = mbt_be_find(f, "path");
 				if (fl) mi->files[idx].length = (uint64_t)fl->integer;
@@ -187,7 +187,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 					/* Join path components */
 					char path[4096] = {0};
 					struct mbt_be_value *comp;
-					STAILQ_FOREACH(comp, &fp->listhead, next) {
+					TAILQ_FOREACH(comp, &fp->listhead, next) {
 						if (path[0]) strcat(path, "/");
 						strncat(path, comp->string.iov_base, comp->string.iov_len);
 					}
@@ -207,10 +207,10 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 	struct mbt_be_value *al = mbt_be_find(be, "announce-list");
 	if (al && al->type == BE_LIST) {
 		struct mbt_be_value *tier;
-		STAILQ_FOREACH(tier, &al->listhead, next) {
+		TAILQ_FOREACH(tier, &al->listhead, next) {
 			if (tier->type != BE_LIST) continue;
 			struct mbt_be_value *url;
-			STAILQ_FOREACH(url, &tier->listhead, next) {
+			TAILQ_FOREACH(url, &tier->listhead, next) {
 				if (url->type == BE_STRING && mi->tracker_count < MAX_TRACKERS)
 					mi->trackers[mi->tracker_count++] = strndup(url->string.iov_base, url->string.iov_len);
 			}

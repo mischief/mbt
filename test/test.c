@@ -56,12 +56,12 @@ test_parse_list(void)
 	assert(rv == 14);
 	assert(be->type == BE_LIST);
 
-	struct mbt_be_value *first = STAILQ_FIRST(&be->listhead);
+	struct mbt_be_value *first = TAILQ_FIRST(&be->listhead);
 	assert(first);
 	assert(first->type == BE_STRING);
 	assert(memcmp(first->string.iov_base, "spam", 4) == 0);
 
-	struct mbt_be_value *second = STAILQ_NEXT(first, next);
+	struct mbt_be_value *second = TAILQ_NEXT(first, next);
 	assert(second);
 	assert(second->type == BE_STRING);
 	assert(memcmp(second->string.iov_base, "eggs", 4) == 0);

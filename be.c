@@ -50,9 +50,9 @@ mbt_be_value_free(struct mbt_be_value *v)
 
 		case BE_DICTIONARY:
 		case BE_LIST:
-			head = STAILQ_FIRST(&v->listhead);
+			head = TAILQ_FIRST(&v->listhead);
 			if(head){
-				STAILQ_REMOVE_HEAD(&v->listhead, next);
+				TAILQ_REMOVE(&v->listhead, head, next);
 				v = head;
 				continue;
 			}
@@ -90,7 +90,7 @@ be_alloc(int type, struct mbt_be_value *up, struct mbt_be_value **out)
 	v->type = type;
 	v->up = up;
 
-	STAILQ_INIT(&v->listhead);
+	TAILQ_INIT(&v->listhead);
 
 	*out = v;
 
@@ -188,17 +188,17 @@ be_insert(struct mbt_be_value *v, struct mbt_be_value *val)
 	if (v->type == BE_DICTIONARY && val->key) {
 		/* Insert sorted by key (BEP 3 requirement) */
 		struct mbt_be_value *cur, *prev = NULL;
-		STAILQ_FOREACH(cur, &v->listhead, next) {
+		TAILQ_FOREACH(cur, &v->listhead, next) {
 			if (cur->key && strcmp(val->key, cur->key) < 0)
 				break;
 			prev = cur;
 		}
 		if (!prev)
-			STAILQ_INSERT_HEAD(&v->listhead, val, next);
+			TAILQ_INSERT_HEAD(&v->listhead, val, next);
 		else
-			STAILQ_INSERT_AFTER(&v->listhead, prev, val, next);
+			TAILQ_INSERT_AFTER(&v->listhead, prev, val, next);
 	} else {
-		STAILQ_INSERT_TAIL(&v->listhead, val, next);
+		TAILQ_INSERT_TAIL(&v->listhead, val, next);
 	}
 	val->up = v;
 }
@@ -384,7 +384,7 @@ mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *ar
 	case BE_LIST:
 		[[fallthrough]];
 	case BE_DICTIONARY:
-		STAILQ_FOREACH(inner, &be->listhead, next){
+		TAILQ_FOREACH(inner, &be->listhead, next){
 			mbt_be_walk(inner, cb, arg);
 		}
 		break;
@@ -411,7 +411,7 @@ mbt_be_find(struct mbt_be_value *be, const char *key)
 	if(!be || !(be->type == BE_DICTIONARY))
 		return NULL;
 
-	STAILQ_FOREACH(inner, &be->listhead, next){
+	TAILQ_FOREACH(inner, &be->listhead, next){
 		if(strcmp(key, inner->key) == 0)
 			return inner;
 	}
@@ -493,7 +493,7 @@ mbt_be_list_new(struct mbt_be_value **out)
 {
 	struct mbt_be_value *v = calloc(1, sizeof(*v));
 	v->type = BE_LIST;
-	STAILQ_INIT(&v->listhead);
+	TAILQ_INIT(&v->listhead);
 	*out = v;
 }
 

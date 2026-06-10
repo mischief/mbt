@@ -15,14 +15,14 @@ enum {
 
 struct mbt_be_value;
 
-STAILQ_HEAD(mbt_be_value_head, mbt_be_value);
+TAILQ_HEAD(mbt_be_value_head, mbt_be_value);
 
 struct mbt_be_value
 {
 	int type;
 	struct mbt_be_value *up;
 	char *key;
-	STAILQ_ENTRY(mbt_be_value) next;
+	TAILQ_ENTRY(mbt_be_value) next;
 	union {
 		long long integer;
 		struct iovec string;

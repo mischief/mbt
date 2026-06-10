@@ -594,7 +594,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		/* Parse peers (values is a list of compact peer strings) */
 		if (values && values->type == BE_LIST && lk) {
 			struct mbt_be_value *val;
-			STAILQ_FOREACH(val, &values->listhead, next) {
+			TAILQ_FOREACH(val, &values->listhead, next) {
 				if (val->type == BE_STRING && val->string.iov_len >= 6)
 					parse_compact_peers(val->string.iov_base, val->string.iov_len,
 					                    lk->peers_cb, lk->arg);

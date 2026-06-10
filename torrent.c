@@ -1071,7 +1071,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		/* Count files */
 		struct mbt_be_value *f;
 		int count = 0;
-		STAILQ_FOREACH(f, &files->listhead, next)
+		TAILQ_FOREACH(f, &files->listhead, next)
 			if (f->type == BE_DICTIONARY) count++;
 
 		t->files = calloc(count, sizeof(struct mbt_file));
@@ -1080,7 +1080,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 
 		uint64_t offset = 0;
 		int idx = 0;
-		STAILQ_FOREACH(f, &files->listhead, next) {
+		TAILQ_FOREACH(f, &files->listhead, next) {
 			if (f->type != BE_DICTIONARY) continue;
 			struct mbt_be_value *flen = mbt_be_find(f, "length");
 			if (!flen || flen->type != BE_INTEGER) continue;
@@ -1092,7 +1092,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 				char pathbuf[1024] = {0};
 				size_t pos = 0;
 				struct mbt_be_value *comp;
-				STAILQ_FOREACH(comp, &path_list->listhead, next) {
+				TAILQ_FOREACH(comp, &path_list->listhead, next) {
 					if (comp->type != BE_STRING) continue;
 					if (pos > 0 && pos < sizeof(pathbuf) - 1)
 						pathbuf[pos++] = '/';
