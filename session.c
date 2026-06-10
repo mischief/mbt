@@ -555,8 +555,6 @@ mbt_session_free(struct mbt_session *s)
 		free(st);
 	}
 
-	if (s->lsd_io)
-		mbt_ev_io_free(s->lsd_io);
 	if (s->maintain_timer)
 		mbt_ev_timer_free(s->maintain_timer);
 
