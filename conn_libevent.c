@@ -62,6 +62,11 @@ conn_lev_set_watermark(struct mbt_conn *conn, size_t low)
 	struct conn_lev *c = (struct conn_lev *)conn;
 	c->watermark = low;
 	bufferevent_setwatermark(c->bev, EV_READ, low, 0);
+
+	/* Re-check: if data already buffered >= new watermark, fire read */
+	struct evbuffer *input = bufferevent_get_input(c->bev);
+	if (c->readcb && evbuffer_get_length(input) >= low)
+		c->readcb(&c->base, c->arg);
 }
 
 static size_t
