@@ -20,6 +20,7 @@
 #include "mbt/be.h"
 #include "mbt/torrent.h"
 #include "mbt/session.h"
+#include "mbt/pcp.h"
 #include "mbt/log.h"
 #include "mbt/lsd.h"
 #include "mbt/dht.h"
@@ -88,6 +89,11 @@ struct mbt_session {
 	/* DHT */
 	struct mbt_dht *dht;
 
+	/* PCP */
+	struct mbt_pcp *pcp;
+	struct mbt_ev_timer *pcp_retry_timer;
+	const char *pcp_gateway;
+
 	/* Listen socket */
 	int listen_fd;
 	struct mbt_ev_io *listen_io;
@@ -106,6 +112,49 @@ struct mbt_session {
 };
 
 /* --- Forward declarations --- */
+
+static void session_pcp_start(struct mbt_session *s);
+
+static void
+session_pcp_retry_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_session *s = v;
+	(void)timer;
+	session_pcp_start(s);
+}
+
+static void
+session_pcp_on_map(const char *addr, uint16_t port, uint32_t lifetime, void *arg)
+{
+	struct mbt_session *s = arg;
+	(void)lifetime;
+	mbt_log_info(MBT_LOG_SESSION, "PCP: external %s:%hu", addr, port);
+	/* Success — cancel retry timer */
+	if (s->pcp_retry_timer) {
+		mbt_ev_timer_free(s->pcp_retry_timer);
+		s->pcp_retry_timer = NULL;
+	}
+}
+
+static void
+session_pcp_start(struct mbt_session *s)
+{
+	if (!s->pcp) {
+		int rv = mbt_pcp_new(&s->pcp, s->ev, s->pcp_gateway);
+		if (rv < 0) {
+			mbt_log_debug(MBT_LOG_SESSION, "PCP: no gateway (%s), retry in 30s",
+			              strerror(-rv));
+			if (!s->pcp_retry_timer)
+				mbt_ev_timer_new(s->ev, &s->pcp_retry_timer,
+				                 30 * 1000000ULL, session_pcp_retry_cb, s);
+			else
+				mbt_ev_timer_mod(s->pcp_retry_timer, 30 * 1000000ULL);
+			return;
+		}
+	}
+	mbt_pcp_map(s->pcp, 6 /* TCP */, s->listen_port, 3600,
+	            session_pcp_on_map, s);
+}
 
 static void
 session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
@@ -455,6 +504,12 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, (uint64_t)s->timers.lsd_interval * 1000000ULL,
 		                 session_lsd_announce_cb, s);
 
+	/* PCP port mapping */
+	if (cfg->enable_pcp && s->listen_port > 0) {
+		s->pcp_gateway = cfg->pcp_gateway;
+		session_pcp_start(s);
+	}
+
 	*out = s;
 	return 0;
 }
@@ -477,6 +532,10 @@ mbt_session_free(struct mbt_session *s)
 		mbt_lsd_freep(&s->lsd);
 	if (s->dht)
 		mbt_dht_free(s->dht);
+	if (s->pcp_retry_timer)
+		mbt_ev_timer_free(s->pcp_retry_timer);
+	if (s->pcp)
+		mbt_pcp_free(s->pcp);
 
 	/* Free pending connects */
 	struct pending_connect *pc;

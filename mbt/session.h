@@ -31,6 +31,8 @@ struct mbt_session_config {
 	uint16_t listen_port;  /* 0 = don't listen for incoming */
 	int max_peers;         /* max peers per torrent (0 = default 30) */
 	int mbt_lsd_announce;      /* if nonzero, periodically multicast our infohashes via LSD */
+	int enable_pcp;        /* if nonzero, map listen_port via PCP (RFC 6887) */
+	const char *pcp_gateway; /* NULL = auto-detect */
 	mbt_http_fn http;      /* HTTP callback for HTTP/HTTPS trackers (NULL = disabled) */
 	void *http_arg;
 

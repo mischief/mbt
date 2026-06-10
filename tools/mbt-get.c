@@ -147,8 +147,10 @@ on_signal(int sig)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-dS] [-l port] [-o dir] [-p max_peers] [-s strategy] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "usage: %s [-dDPSL] [-l port] [-o dir] [-p max_peers] [-s strategy] <file.torrent | magnet:?...>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
+	fprintf(stderr, "  -D            enable DHT\n");
+	fprintf(stderr, "  -P            enable PCP port mapping\n");
 	fprintf(stderr, "  -l port       listen port (default: 6881)\n");
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
@@ -165,11 +167,12 @@ main(int argc, char *argv[])
 	int debug = 0;
 	int no_lsd = 0;
 	int use_dht = 0;
+	int use_pcp = 0;
 	int max_peers = 0;
 	int listen_port = 6881;
 	mbt_picker_fn picker = mbt_picker_sequential;
 
-	while ((ch = getopt(argc, argv, "dhDSLl:o:p:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dhDPSLl:o:p:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -182,6 +185,9 @@ main(int argc, char *argv[])
 			break;
 		case 'D':
 			use_dht = 1;
+			break;
+		case 'P':
+			use_pcp = 1;
 			break;
 		case 'l':
 			listen_port = atoi(optarg);
@@ -237,6 +243,7 @@ main(int argc, char *argv[])
 	cfg.picker = picker;
 	cfg.listen_port = listen_port;
 	cfg.http = curl_http_fn;
+	cfg.enable_pcp = use_pcp;
 	if (max_peers)
 		cfg.max_peers = max_peers;
 
