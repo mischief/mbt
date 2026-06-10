@@ -21,7 +21,6 @@
 #include "mbt/torrent.h"
 #include "mbt/session.h"
 #include "mbt/ratelimit.h"
-#include "mbt_internal.h"
 #include "mbt/pcp.h"
 #include "net.h"
 #include "mbt/log.h"
@@ -120,7 +119,6 @@ struct mbt_session {
 /* --- Forward declarations --- */
 
 static void session_pcp_start(struct mbt_session *s);
-void mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s);
 static void
 session_pcp_retry_cb(struct mbt_ev_timer *timer, void *v)
 {

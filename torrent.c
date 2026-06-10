@@ -19,7 +19,6 @@
 #include "mbt/peer.h"
 #include "mbt/torrent.h"
 #include "mbt/ratelimit.h"
-#include "mbt_internal.h"
 #include "mbt/bitmap.h"
 #include "mbt/peerdb.h"
 #include "mbt/be.h"

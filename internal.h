@@ -41,4 +41,12 @@ static inline uint32_t mbt_random_uniform(uint32_t upper) {
 	return mbt_random32() % upper;
 }
 
+/* Internal interfaces shared between session.c and torrent.c */
+struct mbt_ratelimit;
+struct mbt_session;
+struct mbt_torrent;
+struct mbt_ratelimit *mbt_session_get_upload_limit(struct mbt_session *s);
+struct mbt_ratelimit *mbt_session_get_download_limit(struct mbt_session *s);
+void mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s);
+
 #endif
