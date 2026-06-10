@@ -257,7 +257,7 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 		case '0': case '1': case '2': case '3': 
 		case '4': case '5': case '6': case '7': 
 		case '8': case '9':
-			rv = be_value_parse_string(p, sz, &key);
+			rv = be_value_parse_string(p, sz - chr, &key);
 			if(rv < 0){
 				mbt_be_value_free(v);
 				return rv;
