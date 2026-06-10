@@ -960,17 +960,21 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 
 		/* Request unrequested blocks for this piece */
 		size_t off;
+		int blocked = 0;
 		for (off = pi->requested; off < pi->length && tp->outstanding < limit; off += BLOCK_SIZE) {
 			uint32_t req_len = MIN(BLOCK_SIZE, pi->length - off);
 			if (mbt_ratelimit_delay(t->download_limit, req_len) > 0 ||
-			    mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), req_len) > 0)
+			    mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), req_len) > 0) {
+				blocked = 1;
 				break;
+			}
 			mbt_ratelimit_consume(t->download_limit, req_len);
 			mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), req_len);
 			mbt_peer_send_request(tp->peer, idx, off, req_len);
 			tp->outstanding++;
 		}
 		pi->requested = off;
+		if (blocked) break;
 	}
 
 }
