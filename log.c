@@ -121,12 +121,16 @@ const char *
 mbt_log_component_str(enum mbt_log_component comp)
 {
 	switch (comp) {
-	case MBT_LOG_SESSION: return "session";
-	case MBT_LOG_TORRENT: return "torrent";
-	case MBT_LOG_PEER:    return "peer";
-	case MBT_LOG_DHT:     return "dht";
-	case MBT_LOG_LSD:     return "lsd";
-	case MBT_LOG_TRACKER: return "tracker";
+	case MBT_LOG_SESSION:  return "session";
+	case MBT_LOG_TORRENT:  return "torrent";
+	case MBT_LOG_PEER:     return "peer";
+	case MBT_LOG_CONN:     return "conn";
+	case MBT_LOG_LSD:      return "lsd";
+	case MBT_LOG_DHT:      return "dht";
+	case MBT_LOG_STORAGE:  return "storage";
+	case MBT_LOG_PICKER:   return "picker";
+	case MBT_LOG_TRACKER:  return "tracker";
+	case MBT_LOG_TRACKERD: return "trackerd";
 	default: return "?";
 	}
 }
