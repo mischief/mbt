@@ -878,11 +878,11 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	uint64_t d2 = mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), BLOCK_SIZE);
 	uint64_t d = d1 > d2 ? d1 : d2;
 	if (d > 0) {
+		if (d < 10000) d = 10000; /* min 10ms to avoid busy-loop */
 		if (!t->ratelimit_timer)
 			mbt_ev_timer_new(t->ev, &t->ratelimit_timer, d, torrent_ratelimit_retry, t);
 		return;
 	}
-
 	int limit = 64; /* default pipeline — keeps memory bounded */
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0)
