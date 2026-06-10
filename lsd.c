@@ -25,6 +25,7 @@ mbt_lsd_freep(struct mbt_lsd **v)
 		return;
 
 	close(lsd->fd);
+	if (lsd->fd6 >= 0) close(lsd->fd6);
 	free(lsd);
 }
 
@@ -102,6 +103,30 @@ mbt_lsd_init(struct mbt_lsd **out, int setfl)
 		goto err;
 
 	lsd->fd = fd;
+	lsd->fd6 = -1;
+
+	/* Optional: IPv6 multicast (ff15::efc0:988f port 6771) */
+	{
+		int fd6 = socket(AF_INET6, SOCK_DGRAM, 0);
+		if (fd6 >= 0) {
+			fcntl(fd6, F_SETFD, FD_CLOEXEC);
+			if (setfl) fcntl(fd6, F_SETFL, setfl);
+			int y6 = 1;
+			setsockopt(fd6, SOL_SOCKET, SO_REUSEADDR, &y6, sizeof(y6));
+			setsockopt(fd6, IPPROTO_IPV6, IPV6_V6ONLY, &y6, sizeof(y6));
+			struct sockaddr_in6 sa6 = { .sin6_family = AF_INET6, .sin6_port = htons(6771) };
+			if (bind(fd6, (struct sockaddr *)&sa6, sizeof(sa6)) == 0) {
+				struct ipv6_mreq mreq6;
+				inet_pton(AF_INET6, "ff15::efc0:988f", &mreq6.ipv6mr_multiaddr);
+				mreq6.ipv6mr_interface = 0;
+				setsockopt(fd6, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq6, sizeof(mreq6));
+				lsd->fd6 = fd6;
+			} else {
+				close(fd6);
+			}
+		}
+	}
+
 	*out = lsd;
 
 	return 0;
@@ -261,8 +286,22 @@ mbt_lsd_announce(struct mbt_lsd *lsd, const char *infohash_hex, uint16_t port)
 	if (len < 0 || (size_t)len >= sizeof(buf))
 		return -ENOMEM;
 
-	ssize_t rv = sendto(lsd->fd, buf, len, 0, (struct sockaddr *)&dst, sizeof(dst));
-	if (rv < 0)
-		return -errno;
+	sendto(lsd->fd, buf, len, 0, (struct sockaddr *)&dst, sizeof(dst));
+
+	/* Also send on IPv6 multicast if available */
+	if (lsd->fd6 >= 0) {
+		struct sockaddr_in6 dst6 = { .sin6_family = AF_INET6, .sin6_port = htons(6771) };
+		inet_pton(AF_INET6, "ff15::efc0:988f", &dst6.sin6_addr);
+		char buf6[256];
+		int len6 = snprintf(buf6, sizeof(buf6),
+			"BT-SEARCH * HTTP/1.1\r\n"
+			"Host: [ff15::efc0:988f]:6771\r\n"
+			"Port: %hu\r\n"
+			"Infohash: %s\r\n"
+			"\r\n", port, infohash_hex);
+		if (len6 > 0 && (size_t)len6 < sizeof(buf6))
+			sendto(lsd->fd6, buf6, len6, 0, (struct sockaddr *)&dst6, sizeof(dst6));
+	}
+
 	return 0;
 }

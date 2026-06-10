@@ -7,7 +7,8 @@ struct mbt_lsd_frame_info;
 
 struct mbt_lsd
 {
-	int fd;
+	int fd;   /* IPv4 multicast */
+	int fd6;  /* IPv6 multicast (-1 if unavailable) */
 
 	int (*on_frame)(struct mbt_lsd_frame_info *lfi, void *v);
 	void *on_frame_arg;
