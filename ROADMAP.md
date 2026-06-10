@@ -99,6 +99,8 @@
 
 ### Medium-term (swarm quality)
 - [ ] Upload/download rate limiting
+- [ ] Tracker store: expire stale peers (no re-announce within 2× interval)
+- [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
 
 ### Longer-term (enterprise/embedding)
 - [ ] Event + policy callback infrastructure on session/tracker configs
