@@ -1020,6 +1020,10 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	struct mbt_be_value *tmp;
 	int rv;
 
+	/* Already have metadata parsed — skip */
+	if (t->pieces)
+		return 0;
+
 	/* Store raw metadata for BEP 9 serving */
 	if (!t->metadata) {
 		t->metadata = malloc(len);
