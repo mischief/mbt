@@ -183,7 +183,7 @@ test_tracker_v6(void)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&tr=udp://[::1]:19899/announce&x.pe=[::1]:19803", hex);
+	         "magnet:?xt=urn:btih:%s&tr=udp://[::1]:19899/announce", hex);
 	mbt_session_add_magnet(sL, magnet);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);

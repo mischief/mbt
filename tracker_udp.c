@@ -188,18 +188,24 @@ udp_on_read(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		leechers = be32toh(leechers);
 		seeders = be32toh(seeders);
 
-		/* Parse compact peer list (6 bytes per peer: 4 IP + 2 port) */
-		int peer_count = (n - 20) / 6;
+		/* Parse compact peer list — BEP 7: 18 bytes/peer if IPv6, 6 if IPv4 */
+		int peer_size = (ut->addr.ss_family == AF_INET6) ? 18 : 6;
+		int peer_count = (n - 20) / peer_size;
 		mbt_log_info(MBT_LOG_SESSION, "tracker: %d peers, %u seeders, %u leechers, interval %us",
 		             peer_count, seeders, leechers, interval);
 
 		for (int i = 0; i < peer_count; i++) {
-			uint8_t *p = buf + 20 + i * 6;
-			char addr[INET_ADDRSTRLEN];
+			uint8_t *p = buf + 20 + i * peer_size;
+			char addr[INET6_ADDRSTRLEN];
 			uint16_t port;
 
-			inet_ntop(AF_INET, p, addr, sizeof(addr));
-			memcpy(&port, p + 4, 2);
+			if (peer_size == 18) {
+				inet_ntop(AF_INET6, p, addr, sizeof(addr));
+				memcpy(&port, p + 16, 2);
+			} else {
+				inet_ntop(AF_INET, p, addr, sizeof(addr));
+				memcpy(&port, p + 4, 2);
+			}
 			port = be16toh(port);
 
 			if (ut->req.peer_cb)

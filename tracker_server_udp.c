@@ -46,6 +46,7 @@ struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uin
 void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t, const struct sockaddr_storage *addr, int is_seeder);
 int mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *exclude, uint8_t *compact_out, int max_peers);
 int mbt_tracker_store_get_peers_v4(struct ts_torrent *t, const struct sockaddr_storage *exclude, uint8_t *compact_out, int max_peers);
+int mbt_tracker_store_get_peers_v6(struct ts_torrent *t, const struct sockaddr_storage *exclude, uint8_t *compact_out, int max_peers);
 uint64_t mbt_tracker_store_make_connection_id(struct mbt_tracker_store *s, const struct sockaddr_storage *addr);
 int mbt_tracker_store_validate_connection_id(struct mbt_tracker_store *s, const struct sockaddr_storage *addr, uint64_t cid);
 int mbt_tracker_store_torrent_seeders(struct ts_torrent *t);
@@ -113,7 +114,12 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		memcpy(&peer_port, buf + 96, 2);
 
 		struct sockaddr_storage peer_addr = from;
-		if (peer_port) ((struct sockaddr_in *)&peer_addr)->sin_port = peer_port;
+		if (peer_port) {
+			if (peer_addr.ss_family == AF_INET6)
+				((struct sockaddr_in6 *)&peer_addr)->sin6_port = peer_port;
+			else
+				((struct sockaddr_in *)&peer_addr)->sin_port = peer_port;
+		}
 
 		struct ts_torrent *t = mbt_tracker_store_get_or_create(ts->store, ih);
 		if (!t) return;
@@ -134,9 +140,14 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		memcpy(resp + 16, &seeders, 4);
 		resp_len = 20;
 
-		/* Append peers (compact: 6 bytes each) */
-		int sent = mbt_tracker_store_get_peers_v4(t, &peer_addr, resp + resp_len, num_want);
-		resp_len += sent * 6;
+		/* Append peers — BEP 7: v6 clients get 18-byte entries */
+		if (from.ss_family == AF_INET6) {
+			int sent = mbt_tracker_store_get_peers_v6(t, &peer_addr, resp + resp_len, num_want);
+			resp_len += sent * 18;
+		} else {
+			int sent = mbt_tracker_store_get_peers_v4(t, &peer_addr, resp + resp_len, num_want);
+			resp_len += sent * 6;
+		}
 
 	} else if (action == ACTION_SCRAPE && n >= 36) {
 		/* Scrape */
