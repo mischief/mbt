@@ -25,6 +25,7 @@
 #include "mbt/be.h"
 #include "mbt/log.h"
 #include "mbt/hex.h"
+#include "net.h"
 
 /* --- Constants --- */
 #define K 8              /* nodes per bucket */
@@ -38,11 +39,29 @@
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
 
+/* Helper: format sockaddr_storage for logging (returns static buffer) */
+static const char *
+sa_str(const struct sockaddr_storage *sa, char *buf, size_t len)
+{
+	if (sa->ss_family == AF_INET6) {
+		struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)sa;
+		char tmp[INET6_ADDRSTRLEN];
+		inet_ntop(AF_INET6, &s6->sin6_addr, tmp, sizeof(tmp));
+		snprintf(buf, len, "[%s]:%hu", tmp, ntohs(s6->sin6_port));
+	} else {
+		struct sockaddr_in *s4 = (struct sockaddr_in *)sa;
+		char tmp[INET_ADDRSTRLEN];
+		inet_ntop(AF_INET, &s4->sin_addr, tmp, sizeof(tmp));
+		snprintf(buf, len, "%s:%hu", tmp, ntohs(s4->sin_port));
+	}
+	return buf;
+}
+
 /* --- Data structures --- */
 
 struct dht_node {
 	uint8_t id[20];
-	struct sockaddr_in addr;
+	struct sockaddr_storage addr;
 	time_t last_seen;
 	int pinged;  /* outstanding ping count */
 };
@@ -56,7 +75,7 @@ struct dht_bucket {
 /* A node encountered during lookup */
 struct lookup_node {
 	uint8_t id[20];
-	struct sockaddr_in addr;
+	struct sockaddr_storage addr;
 	uint8_t token[TOKEN_LEN]; /* token from get_peers response */
 	int token_len;
 	int queried;
@@ -77,8 +96,7 @@ struct dht_lookup {
 
 struct mbt_dht {
 	struct mbt_ev *ev;
-	int fd;
-	struct mbt_ev_io *io;
+	struct mbt_listener listener;
 	uint8_t id[20];  /* our node ID */
 	uint16_t port;
 
@@ -89,7 +107,7 @@ struct mbt_dht {
 #define DHT_MAX_STORED 64
 	struct {
 		uint8_t infohash[20];
-		struct sockaddr_in peers[8];
+		struct sockaddr_storage peers[8];
 		int peer_count;
 	} stored[DHT_MAX_STORED];
 	int stored_count;
@@ -172,7 +190,7 @@ make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 /* --- Routing table --- */
 
 static void
-routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_in *addr)
+routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr)
 {
 	if (memcmp(id, d->id, 20) == 0) return; /* don't add ourselves */
 
@@ -225,16 +243,20 @@ routing_closest(struct mbt_dht *d, const uint8_t *target, struct dht_node *out, 
 /* --- Send helpers --- */
 
 static int
-dht_send(struct mbt_dht *d, const struct sockaddr_in *addr,
+dht_send(struct mbt_dht *d, const struct sockaddr_storage *addr,
          const void *data, size_t len)
 {
-	ssize_t rv = sendto(d->fd, data, len, 0,
-	                    (struct sockaddr *)addr, sizeof(*addr));
+	socklen_t salen = (addr->ss_family == AF_INET6) ?
+		sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+	int fd = (addr->ss_family == AF_INET6) ? d->listener.fd6 : d->listener.fd4;
+	if (fd < 0) return -EAFNOSUPPORT;
+	ssize_t rv = sendto(fd, data, len, 0,
+	                    (const struct sockaddr *)addr, salen);
 	return rv < 0 ? -errno : 0;
 }
 
 static int
-dht_send_find_node(struct mbt_dht *d, const struct sockaddr_in *addr, const uint8_t *target)
+dht_send_find_node(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *target)
 {
 	struct mbt_be_value *msg = NULL, *a = NULL;
 	uint8_t txn[TXN_LEN];
@@ -258,7 +280,7 @@ dht_send_find_node(struct mbt_dht *d, const struct sockaddr_in *addr, const uint
 }
 
 static int
-dht_send_get_peers(struct mbt_dht *d, const struct sockaddr_in *addr, const uint8_t *infohash)
+dht_send_get_peers(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *infohash)
 {
 	struct mbt_be_value *msg = NULL, *a = NULL;
 	uint8_t txn[TXN_LEN];
@@ -282,7 +304,7 @@ dht_send_get_peers(struct mbt_dht *d, const struct sockaddr_in *addr, const uint
 }
 
 static int
-dht_send_announce(struct mbt_dht *d, const struct sockaddr_in *addr,
+dht_send_announce(struct mbt_dht *d, const struct sockaddr_storage *addr,
                   const uint8_t *infohash, uint16_t port,
                   const uint8_t *token, int token_len)
 {
@@ -311,7 +333,7 @@ dht_send_announce(struct mbt_dht *d, const struct sockaddr_in *addr,
 }
 
 static int
-dht_send_ping(struct mbt_dht *d, const struct sockaddr_in *addr)
+dht_send_ping(struct mbt_dht *d, const struct sockaddr_storage *addr)
 {
 	struct mbt_be_value *msg = NULL, *a = NULL;
 	uint8_t txn[TXN_LEN];
@@ -345,7 +367,7 @@ lookup_find_for_target(struct mbt_dht *d, const uint8_t *target)
 }
 
 static void
-lookup_add_node(struct dht_lookup *lk, const uint8_t *id, const struct sockaddr_in *addr)
+lookup_add_node(struct dht_lookup *lk, const uint8_t *id, const struct sockaddr_storage *addr)
 {
 	/* Dedup */
 	for (int i = 0; i < lk->node_count; i++)
@@ -379,9 +401,8 @@ lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 		lk->nodes[best].queried = 1;
 		lk->pending++;
 		dht_send_get_peers(d, &lk->nodes[best].addr, lk->target);
-		mbt_log_debug(MBT_LOG_DHT, "get_peers sent to %s:%hu",
-		              inet_ntoa(lk->nodes[best].addr.sin_addr),
-		              ntohs(lk->nodes[best].addr.sin_port));
+		{ char _b[64]; mbt_log_debug(MBT_LOG_DHT, "get_peers sent to %s",
+		              sa_str(&lk->nodes[best].addr, _b, sizeof(_b))); }
 		sent++;
 	}
 
@@ -419,14 +440,14 @@ parse_compact_nodes(struct mbt_dht *d, const uint8_t *data, size_t len, struct d
 	int count = len / NODE_COMPACT_LEN;
 	for (int i = 0; i < count; i++) {
 		const uint8_t *p = data + i * NODE_COMPACT_LEN;
-		struct sockaddr_in addr = {
-			.sin_family = AF_INET,
-		};
-		memcpy(&addr.sin_addr, p + 20, 4);
-		memcpy(&addr.sin_port, p + 24, 2); /* already network order */
+		struct sockaddr_storage addr = {0};
+		struct sockaddr_in *a4 = (struct sockaddr_in *)&addr;
+		a4->sin_family = AF_INET;
+		memcpy(&a4->sin_addr, p + 20, 4);
+		memcpy(&a4->sin_port, p + 24, 2); /* already network order */
 
 		/* Skip bogus nodes */
-		if (addr.sin_addr.s_addr == 0 || addr.sin_port == 0)
+		if (a4->sin_addr.s_addr == 0 || a4->sin_port == 0)
 			continue;
 
 		routing_add(d, p, &addr);
@@ -456,7 +477,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	struct mbt_dht *d = v;
 	uint8_t buf[1500];
-	struct sockaddr_in from;
+	struct sockaddr_storage from;
 	socklen_t fromlen = sizeof(from);
 	(void)io; (void)events;
 
@@ -494,8 +515,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			if (!d->lookups[i].active) continue;
 			for (int j = 0; j < d->lookups[i].node_count; j++) {
 				if (d->lookups[i].nodes[j].queried && !d->lookups[i].nodes[j].responded &&
-				    d->lookups[i].nodes[j].addr.sin_addr.s_addr == from.sin_addr.s_addr &&
-				    d->lookups[i].nodes[j].addr.sin_port == from.sin_port) {
+				    memcmp(&d->lookups[i].nodes[j].addr, &from, fromlen) == 0) {
 					d->lookups[i].nodes[j].responded = 1;
 					d->lookups[i].pending--;
 					/* Update node ID from response */
@@ -571,8 +591,8 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			uint8_t compact[K * NODE_COMPACT_LEN];
 			for (int i = 0; i < n; i++) {
 				memcpy(compact + i*26, closest[i].id, 20);
-				memcpy(compact + i*26 + 20, &closest[i].addr.sin_addr, 4);
-				memcpy(compact + i*26 + 24, &closest[i].addr.sin_port, 2);
+				memcpy(compact + i*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
+				memcpy(compact + i*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
 			}
 			struct mbt_be_value *resp = NULL, *rb = NULL;
 			mbt_be_dict_new(&resp);
@@ -611,8 +631,8 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 					mbt_be_list_new(&vals);
 					for (int j = 0; j < d->stored[i].peer_count; j++) {
 						uint8_t compact_peer[6];
-						memcpy(compact_peer, &d->stored[i].peers[j].sin_addr, 4);
-						memcpy(compact_peer + 4, &d->stored[i].peers[j].sin_port, 2);
+						memcpy(compact_peer, &((struct sockaddr_in *)&d->stored[i].peers[j])->sin_addr, 4);
+						memcpy(compact_peer + 4, &((struct sockaddr_in *)&d->stored[i].peers[j])->sin_port, 2);
 						struct mbt_be_value *pv;
 						mbt_be_string_new(&pv, compact_peer, 6);
 						mbt_be_list_append(vals, pv);
@@ -629,8 +649,8 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 				uint8_t compact_nodes[K * NODE_COMPACT_LEN];
 				for (int i = 0; i < n; i++) {
 					memcpy(compact_nodes + i*26, closest[i].id, 20);
-					memcpy(compact_nodes + i*26 + 20, &closest[i].addr.sin_addr, 4);
-					memcpy(compact_nodes + i*26 + 24, &closest[i].addr.sin_port, 2);
+					memcpy(compact_nodes + i*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
+					memcpy(compact_nodes + i*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
 				}
 				mbt_be_dict_append_string(rb, "nodes", compact_nodes, n * 26);
 			}
@@ -648,7 +668,10 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			struct mbt_be_value *port_v = mbt_be_find(a, "port");
 			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
 				goto out;
-			uint16_t aport = port_v ? (uint16_t)port_v->integer : ntohs(from.sin_port);
+			uint16_t from_port = (from.ss_family == AF_INET6) ?
+				ntohs(((struct sockaddr_in6 *)&from)->sin6_port) :
+				ntohs(((struct sockaddr_in *)&from)->sin_port);
+			uint16_t aport = port_v ? (uint16_t)port_v->integer : from_port;
 			/* Find or create storage slot */
 			int slot = -1;
 			for (int i = 0; i < d->stored_count; i++) {
@@ -661,8 +684,12 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 				d->stored[slot].peer_count = 0;
 			}
 			if (slot >= 0 && d->stored[slot].peer_count < 8) {
-				struct sockaddr_in pa = from;
-				pa.sin_port = htons(aport);
+				struct sockaddr_storage pa = from;
+				/* Override port with announced port */
+				if (pa.ss_family == AF_INET6)
+					((struct sockaddr_in6 *)&pa)->sin6_port = htons(aport);
+				else
+					((struct sockaddr_in *)&pa)->sin_port = htons(aport);
 				d->stored[slot].peers[d->stored[slot].peer_count++] = pa;
 			}
 			/* Respond */
@@ -719,22 +746,9 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	/* Derive stable node ID from machine-id, or fall back to random */
 	dht_init_node_id(d->id);
 
-	/* Bind UDP socket */
-	d->fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (d->fd < 0) { free(d); return -errno; }
-
-	struct sockaddr_in sa = {
-		.sin_family = AF_INET,
-		.sin_port = htons(port),
-		.sin_addr.s_addr = INADDR_ANY,
-	};
-	if (bind(d->fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		int e = errno; close(d->fd); free(d); return -e;
-	}
-
-	/* Register for reads */
-	int rv = mbt_ev_io_new(ev, &d->io, d->fd, MBT_EV_READ, dht_recv, d);
-	if (rv < 0) { close(d->fd); free(d); return rv; }
+	/* Bind dual-stack UDP sockets */
+	int rv = mbt_listen_udp(&d->listener, ev, port, dht_recv, d);
+	if (rv < 0) { free(d); return rv; }
 
 	/* Refresh timer */
 	mbt_ev_timer_new(ev, &d->refresh_timer, REFRESH_US, dht_refresh_cb, d);
@@ -755,24 +769,32 @@ mbt_dht_free(struct mbt_dht *d)
 		if (d->lookups[i].timer)
 			mbt_ev_timer_free(d->lookups[i].timer);
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
-	if (d->io) mbt_ev_io_free(d->io);
-	if (d->fd >= 0) close(d->fd);
+	mbt_listener_close(&d->listener);
 	free(d);
 }
 
 int
 mbt_dht_bootstrap(struct mbt_dht *d, const char *addr, uint16_t port)
 {
-	struct sockaddr_in sa = { .sin_family = AF_INET, .sin_port = htons(port) };
-	if (inet_pton(AF_INET, addr, &sa.sin_addr) <= 0) {
+	struct sockaddr_storage sa = {0};
+	struct sockaddr_in *s4 = (struct sockaddr_in *)&sa;
+	struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&sa;
+
+	if (inet_pton(AF_INET6, addr, &s6->sin6_addr) > 0) {
+		s6->sin6_family = AF_INET6;
+		s6->sin6_port = htons(port);
+	} else if (inet_pton(AF_INET, addr, &s4->sin_addr) > 0) {
+		s4->sin_family = AF_INET;
+		s4->sin_port = htons(port);
+	} else {
 		/* Try DNS resolution */
-		struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_DGRAM };
+		struct addrinfo hints = { .ai_socktype = SOCK_DGRAM };
 		struct addrinfo *res;
 		char portstr[8];
 		snprintf(portstr, sizeof(portstr), "%hu", port);
 		if (getaddrinfo(addr, portstr, &hints, &res) != 0)
 			return -EINVAL;
-		memcpy(&sa, res->ai_addr, sizeof(sa));
+		memcpy(&sa, res->ai_addr, res->ai_addrlen);
 		freeaddrinfo(res);
 	}
 
