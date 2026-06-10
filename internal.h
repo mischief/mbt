@@ -38,7 +38,7 @@ static inline uint32_t mbt_random32(void) {
 
 static inline uint32_t mbt_random_uniform(uint32_t upper) {
 	if (upper == 0) return 0;
-	return mbt_random32() % upper;
+	return arc4random_uniform(upper);
 }
 
 /* Internal interfaces shared between session.c and torrent.c */
