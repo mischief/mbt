@@ -470,9 +470,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	if (!tp) return;
 	struct torrent_peer *hp;
 
-	/* Account download against rate limiters */
-	mbt_ratelimit_consume(t->download_limit, len);
-	mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), len);
+	/* Download tokens consumed at request time (drive_peer) */
 
 	tp->last_recv = time(NULL);
 	if (tp->snubbed) {
@@ -927,6 +925,11 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 						/* Re-request all blocks */
 						for (size_t off = 0; off < epi->length && tp->outstanding < limit; off += BLOCK_SIZE) {
 							uint32_t req_len = MIN(BLOCK_SIZE, epi->length - off);
+							if (mbt_ratelimit_delay(t->download_limit, req_len) > 0 ||
+							    mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), req_len) > 0)
+								break;
+							mbt_ratelimit_consume(t->download_limit, req_len);
+							mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), req_len);
 							mbt_peer_send_request(tp->peer, i, off, req_len);
 							tp->outstanding++;
 						}
@@ -954,6 +957,11 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		size_t off;
 		for (off = pi->requested; off < pi->length && tp->outstanding < limit; off += BLOCK_SIZE) {
 			uint32_t req_len = MIN(BLOCK_SIZE, pi->length - off);
+			if (mbt_ratelimit_delay(t->download_limit, req_len) > 0 ||
+			    mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), req_len) > 0)
+				break;
+			mbt_ratelimit_consume(t->download_limit, req_len);
+			mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), req_len);
 			mbt_peer_send_request(tp->peer, idx, off, req_len);
 			tp->outstanding++;
 		}
