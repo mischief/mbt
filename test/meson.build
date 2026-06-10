@@ -94,4 +94,6 @@ endgame_test = executable('endgame_test', 'endgame_test.c', link_with: [libmbt],
 test('endgame', endgame_test, timeout: 20)
 
 swarm_test = executable('swarm_test', 'swarm_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('swarm', swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5'])
+test('swarm_direct', swarm_test, timeout: 60, is_parallel: false, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16'])
+test('swarm_tracker', swarm_test, timeout: 60, is_parallel: false, args: ['--seeders', '3', '--leechers', '10', '--pieces', '4', '--piece-size', '64', '--tracker'])
+test('swarm_single_seed', swarm_test, timeout: 60, is_parallel: false, args: ['--seeders', '1', '--leechers', '8', '--pieces', '20', '--piece-size', '8'])

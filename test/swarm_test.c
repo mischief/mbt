@@ -24,6 +24,7 @@
 #include "mbt/picker.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "mbt/tracker_server.h"
 
 #define PIECE_LEN 16384
 #define BASE_PORT 19700
@@ -48,36 +49,44 @@ int main(int argc, char *argv[])
 	int num_seeders = 2;
 	int num_leechers = 5;
 	int num_pieces = 8;
+	int piece_kib = 16;
+	int use_tracker = 0;
 
 	static struct option longopts[] = {
 		{"seeders", required_argument, NULL, 's'},
 		{"leechers", required_argument, NULL, 'l'},
 		{"pieces", required_argument, NULL, 'p'},
+		{"piece-size", required_argument, NULL, 'b'},
+		{"tracker", no_argument, NULL, 't'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 	int ch;
-	while ((ch = getopt_long(argc, argv, "s:l:p:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "s:l:p:b:th", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's': num_seeders = atoi(optarg); break;
 		case 'l': num_leechers = atoi(optarg); break;
 		case 'p': num_pieces = atoi(optarg); break;
+		case 'b': piece_kib = atoi(optarg); break;
+		case 't': use_tracker = 1; break;
 		case 'h':
 		default:
-			fprintf(stderr, "usage: swarm_test [--seeders N] [--leechers M] [--pieces P]\n");
+			fprintf(stderr, "usage: swarm_test [--seeders N] [--leechers M] [--pieces P] [--piece-size KiB] [--tracker]\n");
 			return ch == 'h' ? 0 : 1;
 		}
 	}
 
 	target_completions = num_leechers;
-	int total_len = PIECE_LEN * num_pieces;
+	uint16_t tracker_port = BASE_PORT - 1; /* 19699 */
+	int piece_len = piece_kib * 1024;
+	int total_len = piece_len * num_pieces;
 	uint8_t *data = malloc(total_len);
 	for (int i = 0; i < total_len; i++) data[i] = (i * 97 + 31) & 0xff;
 
 	uint8_t *pieces_hash = malloc(num_pieces * 20);
 	for (int i = 0; i < num_pieces; i++) {
 		SHA1_CTX ctx; SHA1Init(&ctx);
-		SHA1Update(&ctx, data + i * PIECE_LEN, PIECE_LEN);
+		SHA1Update(&ctx, data + i * piece_len, piece_len);
 		SHA1Final(pieces_hash + i * 20, &ctx);
 	}
 
@@ -87,8 +96,14 @@ int main(int argc, char *argv[])
 	mbt_be_dict_append(root, "info", info);
 	mbt_be_dict_append_number(info, "length", total_len);
 	mbt_be_dict_append_string(info, "name", "swarm_test.bin", 14);
-	mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
+	mbt_be_dict_append_number(info, "piece length", piece_len);
 	mbt_be_dict_append_string(info, "pieces", pieces_hash, num_pieces * 20);
+
+	if (use_tracker) {
+		char announce[128];
+		snprintf(announce, sizeof(announce), "udp://127.0.0.1:%d/announce", tracker_port);
+		mbt_be_dict_append_string(root, "announce", announce, strlen(announce));
+	}
 
 	unsigned char *encoded; size_t enc_len;
 	mbt_be_value_encode(root, &encoded, &enc_len);
@@ -107,12 +122,22 @@ int main(int argc, char *argv[])
 
 	mbt_ev_new_default(&ev);
 
-	/* Build peer list string for magnet */
+	/* Optional tracker */
+	struct mbt_tracker_server *tracker = NULL;
+ /* 19699 */
+	if (use_tracker) {
+		int rv = mbt_tracker_server_new(&tracker, ev, tracker_port, NULL);
+		if (rv < 0) { fprintf(stderr, "tracker: %s\n", strerror(-rv)); return 1; }
+	}
+
+	/* Build peer list string for magnet (only used when no tracker) */
 	char peers[4096] = "";
-	for (int i = 0; i < num_seeders; i++) {
-		char tmp2[64];
-		snprintf(tmp2, sizeof(tmp2), "&x.pe=127.0.0.1:%d", BASE_PORT + i);
-		strncat(peers, tmp2, sizeof(peers) - strlen(peers) - 1);
+	if (!use_tracker) {
+		for (int i = 0; i < num_seeders; i++) {
+			char tmp2[64];
+			snprintf(tmp2, sizeof(tmp2), "&x.pe=127.0.0.1:%d", BASE_PORT + i);
+			strncat(peers, tmp2, sizeof(peers) - strlen(peers) - 1);
+		}
 	}
 
 	/* Create seeders */
@@ -141,7 +166,12 @@ int main(int argc, char *argv[])
 		mbt_session_new(&leechers[i], &cfg);
 
 		char magnet[8192];
-		snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s%s", hex, peers);
+		if (use_tracker)
+			snprintf(magnet, sizeof(magnet),
+			         "magnet:?xt=urn:btih:%s&tr=udp://127.0.0.1:%d/announce",
+			         hex, tracker_port);
+		else
+			snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s%s", hex, peers);
 		mbt_session_add_magnet(leechers[i], magnet);
 
 		struct mbt_torrent *t = mbt_session_torrent_first(leechers[i]);
@@ -149,8 +179,9 @@ int main(int argc, char *argv[])
 		mbt_torrent_set_callbacks(t, &cb, NULL);
 	}
 
-	fprintf(stderr, "swarm: %d seeders, %d leechers, %d pieces (%d KB)\n",
-	        num_seeders, num_leechers, num_pieces, total_len / 1024);
+	fprintf(stderr, "swarm: %d seeders, %d leechers, %d pieces (%d KB, %d KiB/piece)%s\n",
+	        num_seeders, num_leechers, num_pieces, total_len / 1024, piece_kib,
+	        use_tracker ? " [tracker]" : " [direct]");
 
 	struct mbt_ev_timer *to;
 	mbt_ev_timer_new(ev, &to, 60 * 1000000ULL, timeout_cb, NULL);
@@ -170,6 +201,7 @@ int main(int argc, char *argv[])
 		mbt_storage_memory_destroy(lmem[i]);
 	}
 	free(seeders); free(leechers); free(smem); free(lmem);
+	if (tracker) mbt_tracker_server_free(tracker);
 	free(encoded); free(data); free(pieces_hash);
 	mbt_ev_destroy(ev);
 	return 0;
