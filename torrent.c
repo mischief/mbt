@@ -352,6 +352,11 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 	SLIST_FOREACH(tp, &t->peers, entry) {
 		tp->bytes_from = 0;
 		tp->bytes_to = 0;
+		/* Choke peers not interested in us */
+		if (tp->peer && !tp->banned && !tp->peer_interested && !tp->am_choking) {
+			mbt_peer_send_choke(tp->peer, 1);
+			tp->am_choking = 1;
+		}
 	}
 
 	mbt_ev_timer_mod(timer, (uint64_t)t->timers.choke_interval * 1000000ULL);
