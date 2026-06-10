@@ -20,11 +20,12 @@ endforeach
 
 deps = []
 
-libbsd_dep = dependency('libbsd-overlay')
-deps += libbsd_dep
-
-libmd_dep = dependency('libmd')
-deps += libmd_dep
+if host_machine.system() == 'linux'
+  libbsd_dep = dependency('libbsd-overlay')
+  deps += libbsd_dep
+  libmd_dep = dependency('libmd')
+  deps += libmd_dep
+endif
 
 # Event backend (one or the other)
 event_backend = get_option('event_backend')
