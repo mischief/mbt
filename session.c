@@ -370,6 +370,14 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	memcpy(hash, pa->hs + 28, 20);
 	memcpy(their_id, pa->hs + 48, 20);
 
+	/* Reject self-connections */
+	if (memcmp(their_id, s->peer_id, 20) == 0) {
+		close(pa->fd);
+		mbt_ev_io_free(pa->io);
+		free(pa);
+		return;
+	}
+
 	struct session_torrent *st;
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		if (memcmp(st->ih->hash_sha1, hash, 20) == 0)
