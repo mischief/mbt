@@ -20,9 +20,12 @@ static WINDOW *win_list, *win_detail, *win_cmd;
 static int selected;
 static int detail_view; /* 0=overview, 1=peers, 2=pieces */
 
-/* Rate tracking: snapshot have_count each refresh, compute delta */
+/* Rate tracking: sliding window */
 static uint32_t last_have;
 static float dl_rate_kbps;
+#define RATE_SLOTS 5
+static uint64_t rate_slots[RATE_SLOTS];
+static int rate_idx;
 static int quit;
 static char cmdbuf[512];
 static int cmdlen;
@@ -220,7 +223,7 @@ on_refresh(struct mbt_ev_timer *timer, void *arg)
 {
 	(void)arg;
 
-	/* Compute download rate from piece count delta */
+	/* Compute download rate from piece count delta (sliding window) */
 	uint32_t total_have = 0;
 	uint32_t piece_len = 0;
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
@@ -230,8 +233,14 @@ on_refresh(struct mbt_ev_timer *timer, void *arg)
 		t = mbt_session_torrent_next(session, t);
 	}
 	uint32_t delta = total_have - last_have;
-	dl_rate_kbps = (float)delta * piece_len / 1024.0f;
 	last_have = total_have;
+
+	rate_idx = (rate_idx + 1) % RATE_SLOTS;
+	rate_slots[rate_idx] = (uint64_t)delta * piece_len;
+
+	uint64_t sum = 0;
+	for (int i = 0; i < RATE_SLOTS; i++) sum += rate_slots[i];
+	dl_rate_kbps = (float)sum / RATE_SLOTS / 1024.0f;
 
 	draw_all();
 	mbt_ev_timer_mod(timer, 1000000); /* 1 sec */
