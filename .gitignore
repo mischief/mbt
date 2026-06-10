@@ -4,3 +4,7 @@ standards/
 ubuntu-25.10-desktop-amd64.iso
 .aider*
 .*.swp
+*.iso
+*.mp4
+*.srt
+*.jpg
