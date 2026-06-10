@@ -152,7 +152,7 @@ session_pcp_start(struct mbt_session *s)
 			return;
 		}
 	}
-	mbt_pcp_map(s->pcp, 6 /* TCP */, s->listen_port, 3600,
+	mbt_pcp_map(s->pcp, 6 /* TCP */, s->listen_port, 300,
 	            session_pcp_on_map, s);
 }
 
