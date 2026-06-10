@@ -96,7 +96,8 @@
 - [x] FreeBSD portability (sha.h compat, libmd linkage)
 - [ ] Rate limiting (upload/download caps)
 - [ ] Ephemeral ports for tests (listen_port=0, session reports bound port)
-
+- [ ] Track peer origin (tracker/DHT/PEX/LSD/incoming) on connected torrent_peer
+- [ ] Expose peer source in mbt_peer_stats and mbt-tui peer list
 ### Medium-term (swarm quality)
 - [ ] Upload/download rate limiting
 - [ ] Tracker store: expire stale peers (no re-announce within 2× interval)
