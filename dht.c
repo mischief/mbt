@@ -33,7 +33,8 @@
 #define MAX_LOOKUPS 8    /* concurrent get_peers lookups */
 #define TOKEN_LEN 8
 #define TXN_LEN 4
-#define NODE_COMPACT_LEN 26  /* 20 id + 4 ip + 2 port */
+#define NODE_COMPACT_LEN 26   /* 20 id + 4 ip + 2 port */
+#define NODE6_COMPACT_LEN 38  /* 20 id + 16 ip + 2 port */
 #define MAX_LOOKUP_NODES 64  /* nodes tracked per lookup */
 #define LOOKUP_TIMEOUT_US (10 * 1000000ULL) /* 10s per lookup */
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
@@ -472,10 +473,43 @@ parse_compact_nodes(struct mbt_dht *d, const uint8_t *data, size_t len, struct d
 	}
 }
 
+
+static void
+parse_compact_nodes6(struct mbt_dht *d, const uint8_t *data, size_t len, struct dht_lookup *lk)
+{
+	int count = len / NODE6_COMPACT_LEN;
+	for (int i = 0; i < count; i++) {
+		const uint8_t *p = data + i * NODE6_COMPACT_LEN;
+		struct sockaddr_storage addr = {0};
+		struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)&addr;
+		a6->sin6_family = AF_INET6;
+		memcpy(&a6->sin6_addr, p + 20, 16);
+		memcpy(&a6->sin6_port, p + 36, 2);
+
+		/* Skip bogus */
+		if (a6->sin6_port == 0) continue;
+		if (memcmp(&a6->sin6_addr, &in6addr_any, 16) == 0) continue;
+
+		routing_add(d, p, &addr);
+		if (lk)
+			lookup_add_node(lk, p, &addr);
+	}
+}
+
 static void
 parse_compact_peers(const uint8_t *data, size_t len,
                     mbt_dht_peers_cb cb, void *arg)
 {
+	if (len == 18) {
+		/* Single IPv6 peer: 16 addr + 2 port */
+		char addr[INET6_ADDRSTRLEN];
+		uint16_t port;
+		inet_ntop(AF_INET6, data, addr, sizeof(addr));
+		memcpy(&port, data + 16, 2);
+		port = ntohs(port);
+		if (port > 0) cb(addr, port, arg);
+		return;
+	}
 	int count = len / 6;
 	for (int i = 0; i < count; i++) {
 		char addr[INET_ADDRSTRLEN];
@@ -483,7 +517,7 @@ parse_compact_peers(const uint8_t *data, size_t len,
 		inet_ntop(AF_INET, data + i * 6, addr, sizeof(addr));
 		memcpy(&port, data + i * 6 + 4, 2);
 		port = ntohs(port);
-		if (port < 1024) continue; /* skip bogus ports */
+		if (port < 1024) continue;
 		cb(addr, port, arg);
 	}
 }
@@ -522,6 +556,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 		/* Check for nodes (find_node or get_peers response) */
 		struct mbt_be_value *nodes = mbt_be_find(r, "nodes");
+		struct mbt_be_value *nodes6 = mbt_be_find(r, "nodes6");
 		struct mbt_be_value *values = mbt_be_find(r, "values");
 		struct mbt_be_value *token = mbt_be_find(r, "token");
 
@@ -552,6 +587,8 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		/* Parse nodes */
 		if (nodes && nodes->type == BE_STRING)
 			parse_compact_nodes(d, nodes->string.iov_base, nodes->string.iov_len, lk);
+		if (nodes6 && nodes6->type == BE_STRING)
+			parse_compact_nodes6(d, nodes6->string.iov_base, nodes6->string.iov_len, lk);
 
 		/* Parse peers (values is a list of compact peer strings) */
 		if (values && values->type == BE_LIST && lk) {
@@ -605,10 +642,20 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			struct dht_node closest[K];
 			int n = routing_closest(d, target_v->string.iov_base, closest, K);
 			uint8_t compact[K * NODE_COMPACT_LEN];
+			uint8_t compact6[K * NODE6_COMPACT_LEN];
+			int n4 = 0, n6 = 0;
 			for (int i = 0; i < n; i++) {
-				memcpy(compact + i*26, closest[i].id, 20);
-				memcpy(compact + i*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
-				memcpy(compact + i*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
+				if (closest[i].addr.ss_family == AF_INET6) {
+					memcpy(compact6 + n6*38, closest[i].id, 20);
+					memcpy(compact6 + n6*38 + 20, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_addr, 16);
+					memcpy(compact6 + n6*38 + 36, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_port, 2);
+					n6++;
+				} else {
+					memcpy(compact + n4*26, closest[i].id, 20);
+					memcpy(compact + n4*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
+					memcpy(compact + n4*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
+					n4++;
+				}
 			}
 			struct mbt_be_value *resp = NULL, *rb = NULL;
 			mbt_be_dict_new(&resp);
@@ -616,7 +663,10 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			mbt_be_dict_append_string(resp, "y", "r", 1);
 			mbt_be_dict_new(&rb);
 			mbt_be_dict_append_string(rb, "id", d->id, 20);
-			mbt_be_dict_append_string(rb, "nodes", compact, n * 26);
+			if (n4 > 0)
+				mbt_be_dict_append_string(rb, "nodes", compact, n4 * 26);
+			if (n6 > 0)
+				mbt_be_dict_append_string(rb, "nodes6", compact6, n6 * 38);
 			mbt_be_dict_append(resp, "r", rb);
 			unsigned char *enc; size_t enc_len;
 			mbt_be_value_encode(resp, &enc, &enc_len);
@@ -646,12 +696,22 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 					struct mbt_be_value *vals;
 					mbt_be_list_new(&vals);
 					for (int j = 0; j < d->stored[i].peer_count; j++) {
-						uint8_t compact_peer[6];
-						memcpy(compact_peer, &((struct sockaddr_in *)&d->stored[i].peers[j])->sin_addr, 4);
-						memcpy(compact_peer + 4, &((struct sockaddr_in *)&d->stored[i].peers[j])->sin_port, 2);
-						struct mbt_be_value *pv;
-						mbt_be_string_new(&pv, compact_peer, 6);
-						mbt_be_list_append(vals, pv);
+						struct sockaddr_storage *pa = &d->stored[i].peers[j];
+						if (pa->ss_family == AF_INET6) {
+							uint8_t cp6[18];
+							memcpy(cp6, &((struct sockaddr_in6 *)pa)->sin6_addr, 16);
+							memcpy(cp6 + 16, &((struct sockaddr_in6 *)pa)->sin6_port, 2);
+							struct mbt_be_value *pv;
+							mbt_be_string_new(&pv, cp6, 18);
+							mbt_be_list_append(vals, pv);
+						} else {
+							uint8_t cp4[6];
+							memcpy(cp4, &((struct sockaddr_in *)pa)->sin_addr, 4);
+							memcpy(cp4 + 4, &((struct sockaddr_in *)pa)->sin_port, 2);
+							struct mbt_be_value *pv;
+							mbt_be_string_new(&pv, cp4, 6);
+							mbt_be_list_append(vals, pv);
+						}
 					}
 					mbt_be_dict_append(rb, "values", vals);
 					found_stored = 1;
@@ -663,12 +723,25 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 				struct dht_node closest[K];
 				int n = routing_closest(d, ih_v->string.iov_base, closest, K);
 				uint8_t compact_nodes[K * NODE_COMPACT_LEN];
+				uint8_t compact_nodes6[K * NODE6_COMPACT_LEN];
+				int cn4 = 0, cn6 = 0;
 				for (int i = 0; i < n; i++) {
-					memcpy(compact_nodes + i*26, closest[i].id, 20);
-					memcpy(compact_nodes + i*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
-					memcpy(compact_nodes + i*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
+					if (closest[i].addr.ss_family == AF_INET6) {
+						memcpy(compact_nodes6 + cn6*38, closest[i].id, 20);
+						memcpy(compact_nodes6 + cn6*38 + 20, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_addr, 16);
+						memcpy(compact_nodes6 + cn6*38 + 36, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_port, 2);
+						cn6++;
+					} else {
+						memcpy(compact_nodes + cn4*26, closest[i].id, 20);
+						memcpy(compact_nodes + cn4*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
+						memcpy(compact_nodes + cn4*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
+						cn4++;
+					}
 				}
-				mbt_be_dict_append_string(rb, "nodes", compact_nodes, n * 26);
+				if (cn4 > 0)
+					mbt_be_dict_append_string(rb, "nodes", compact_nodes, cn4 * 26);
+				if (cn6 > 0)
+					mbt_be_dict_append_string(rb, "nodes6", compact_nodes6, cn6 * 38);
 			}
 			mbt_be_dict_append(resp, "r", rb);
 			unsigned char *enc; size_t enc_len;

@@ -226,7 +226,7 @@ udp_on_timeout(struct mbt_ev_timer *timer, void *v)
 	udp_cleanup(ut);
 }
 
-/* Parse "udp://host:port/announce" */
+/* Parse "udp://host:port/announce" or "udp://[ipv6]:port/announce" */
 static int
 parse_udp_url(const char *url, char *host, size_t hostlen, uint16_t *port)
 {
@@ -234,24 +234,30 @@ parse_udp_url(const char *url, char *host, size_t hostlen, uint16_t *port)
 		return -EINVAL;
 
 	const char *h = url + 6;
-	const char *colon = strrchr(h, ':');
-	const char *slash = strchr(h, '/');
+	const char *colon;
+	size_t hlen;
 
-	if (!colon)
-		return -EINVAL;
-
-	/* Ensure colon is before slash (part of host:port, not path) */
-	if (slash && colon > slash)
-		return -EINVAL;
-
-	size_t hlen = (size_t)(colon - h);
-	if (hlen >= hostlen)
-		return -ENAMETOOLONG;
-
-	memcpy(host, h, hlen);
-	host[hlen] = '\0';
-
-	*port = (uint16_t)atoi(colon + 1);
+	if (h[0] == '[') {
+		/* IPv6 bracketed: [::1]:port */
+		const char *end = strchr(h, ']');
+		if (!end || end[1] != ':') return -EINVAL;
+		hlen = (size_t)(end - h - 1);
+		if (hlen >= hostlen) return -ENAMETOOLONG;
+		memcpy(host, h + 1, hlen);
+		host[hlen] = '\0';
+		*port = (uint16_t)atoi(end + 2);
+	} else {
+		/* IPv4 or hostname: host:port */
+		const char *slash = strchr(h, '/');
+		colon = strrchr(h, ':');
+		if (!colon) return -EINVAL;
+		if (slash && colon > slash) return -EINVAL;
+		hlen = (size_t)(colon - h);
+		if (hlen >= hostlen) return -ENAMETOOLONG;
+		memcpy(host, h, hlen);
+		host[hlen] = '\0';
+		*port = (uint16_t)atoi(colon + 1);
+	}
 	return 0;
 }
 
