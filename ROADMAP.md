@@ -81,15 +81,21 @@
 - [x] Configurable timers (all hardcoded intervals exposed via mbt_timers struct)
 - [x] NAT traversal — PCP client (RFC 6887, MAP opcode, auto-refresh)
 - [x] PCP wired into session (auto-map on startup, retry on failure, -P in mbt-get)
+- [x] PCP gateway auto-detect (Linux /proc/net/route, BSD sysctl routing table)
 - [x] Rarest-first picker (three-phase: random first → rarest → endgame)
 - [x] Anti-snubbing (peer silent → stop requesting, auto-unsnub on data)
 - [x] MBT_API visibility macro (-fvisibility=hidden, explicit exports)
-- [x] sys/queue.h refactor (SLIST for all linked lists)
+- [x] sys/queue.h refactor (SLIST for all linked lists, TAILQ for bencode)
 - [x] Tracker stats snapshot API (mbt_tracker_store_stats)
 - [x] DHT: reject bogus nodes (0.0.0.0, port 0)
 - [x] Dual-stack IPv6 (net.c helpers, all sockets v6 clean, IPV6_V6ONLY=1)
 - [x] Tracker re-announce jitter (prevents thundering herd)
+- [x] Libevent backend fix (re-fire readcb on watermark change)
+- [x] SIGPIPE-safe tracker HTTP (MSG_NOSIGNAL on send)
+- [x] OpenBSD portability (TAILQ for bencode dict, send() for connected UDP)
+- [x] FreeBSD portability (sha.h compat, libmd linkage)
 - [ ] Rate limiting (upload/download caps)
+- [ ] Ephemeral ports for tests (listen_port=0, session reports bound port)
 
 ### Medium-term (swarm quality)
 - [ ] Upload/download rate limiting
@@ -108,14 +114,16 @@
 - [x] Integration: e2e, tracker server (UDP), DHT localhost, resume, partial resume
 - [x] Magnet flow, multi-peer, choke cycling, LSD, picker coverage
 - [x] Shared tracker store test (UDP+HTTP same store)
-- [x] ASan clean (36/36), valgrind clean
+- [x] ASan clean (38/38), valgrind clean (38/38), zero leaks
 - [x] PCP client test (stub server, refresh verification)
 - [x] Rarest-first picker test (two-seeder, availability preference)
 - [x] Anti-snubbing test (dead seeder + working seeder)
 - [x] Hash failure + peer ban test (corrupt seeder, ban after 5)
 - [x] Endgame mode test (10 pieces, 2 seeders, endgame triggers)
 - [x] Swarm scaling test (parameterized: direct + tracker, up to 100 leechers)
-- [ ] IPv6 tracker test (announce over ::1)
+- [x] IPv6 test (peer-to-peer, tracker, DHT over ::1)
+- [x] Conn layer test (both backends: watermark, write, large transfer, callbacks)
+- [x] Passes on Linux (gcc + clang), OpenBSD 7.9 (amd64), FreeBSD 15.0 (amd64)
 - [ ] HTTP tracker client test (needs async client)
 
 ## Phase 8: Tools
