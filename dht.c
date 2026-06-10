@@ -57,6 +57,22 @@ sa_str(const struct sockaddr_storage *sa, char *buf, size_t len)
 	return buf;
 }
 
+static int
+sa_equal(const struct sockaddr_storage *a, const struct sockaddr_storage *b)
+{
+	if (a->ss_family != b->ss_family) return 0;
+	if (a->ss_family == AF_INET6) {
+		struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)a;
+		struct sockaddr_in6 *b6 = (struct sockaddr_in6 *)b;
+		return a6->sin6_port == b6->sin6_port &&
+		       memcmp(&a6->sin6_addr, &b6->sin6_addr, 16) == 0;
+	}
+	struct sockaddr_in *a4 = (struct sockaddr_in *)a;
+	struct sockaddr_in *b4 = (struct sockaddr_in *)b;
+	return a4->sin_port == b4->sin_port &&
+	       a4->sin_addr.s_addr == b4->sin_addr.s_addr;
+}
+
 /* --- Data structures --- */
 
 struct dht_node {
@@ -515,7 +531,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			if (!d->lookups[i].active) continue;
 			for (int j = 0; j < d->lookups[i].node_count; j++) {
 				if (d->lookups[i].nodes[j].queried && !d->lookups[i].nodes[j].responded &&
-				    memcmp(&d->lookups[i].nodes[j].addr, &from, fromlen) == 0) {
+				    sa_equal(&d->lookups[i].nodes[j].addr, &from)) {
 					d->lookups[i].nodes[j].responded = 1;
 					d->lookups[i].pending--;
 					/* Update node ID from response */
