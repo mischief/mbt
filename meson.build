@@ -65,6 +65,7 @@ bt_src = [
   'tracker_server_http.c',
   'tracker_store.c',
   'pcp.c',
+  'net.c',
   'dht.c',
 ] + ev_src
 

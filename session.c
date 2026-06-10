@@ -21,6 +21,7 @@
 #include "mbt/torrent.h"
 #include "mbt/session.h"
 #include "mbt/pcp.h"
+#include "net.h"
 #include "mbt/log.h"
 #include "mbt/lsd.h"
 #include "mbt/dht.h"
@@ -95,8 +96,7 @@ struct mbt_session {
 	const char *pcp_gateway;
 
 	/* Listen socket */
-	int listen_fd;
-	struct mbt_ev_io *listen_io;
+	struct mbt_listener listener;
 
 	/* Maintenance timer (refill peers from pool) */
 	struct mbt_ev_timer *maintain_timer;
@@ -327,7 +327,7 @@ struct pending_accept {
 	struct mbt_session *session;
 	int fd;
 	struct mbt_ev_io *io;
-	struct sockaddr_in addr;
+	struct sockaddr_storage addr;
 	unsigned char hs[HANDSHAKE_SIZE];
 	size_t hs_got;
 };
@@ -382,9 +382,18 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		return;
 	}
 
-	char paddr[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &pa->addr.sin_addr, paddr, sizeof(paddr));
-	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, ntohs(pa->addr.sin_port));
+	char paddr[INET6_ADDRSTRLEN];
+	uint16_t pport;
+	if (pa->addr.ss_family == AF_INET6) {
+		struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&pa->addr;
+		inet_ntop(AF_INET6, &s6->sin6_addr, paddr, sizeof(paddr));
+		pport = ntohs(s6->sin6_port);
+	} else {
+		struct sockaddr_in *s4 = (struct sockaddr_in *)&pa->addr;
+		inet_ntop(AF_INET, &s4->sin_addr, paddr, sizeof(paddr));
+		pport = ntohs(s4->sin_port);
+	}
+	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, pport);
 
 	mbt_ev_io_free(pa->io);
 
@@ -402,7 +411,7 @@ static void
 listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
 	struct mbt_session *s = v;
-	struct sockaddr_in addr;
+	struct sockaddr_storage addr;
 	socklen_t alen = sizeof(addr);
 	int cfd;
 	(void)io; (void)events;
@@ -415,7 +424,7 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	if (!pa) { close(cfd); return; }
 	pa->session = s;
 	pa->fd = cfd;
-	pa->addr = addr;
+	memcpy(&pa->addr, &addr, sizeof(pa->addr));
 
 	int rv = mbt_ev_io_new(s->ev, &pa->io, cfd, MBT_EV_READ, pending_accept_cb, pa);
 	if (rv < 0) { close(cfd); free(pa); return; }
@@ -423,34 +432,8 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 static int
 session_listen(struct mbt_session *s)
 {
-	int fd, rv, yes = 1;
-	struct sockaddr_in sa = {
-		.sin_family = AF_INET,
-		.sin_port = htons(s->listen_port),
-		.sin_addr.s_addr = INADDR_ANY,
-	};
-
-	fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (fd < 0)
-		return -errno;
-
-	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-
-	if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		rv = -errno;
-		close(fd);
-		return rv;
-	}
-
-	if (listen(fd, 16) < 0) {
-		rv = -errno;
-		close(fd);
-		return rv;
-	}
-
-	s->listen_fd = fd;
-	rv = mbt_ev_io_new(s->ev, &s->listen_io, fd, MBT_EV_READ, listen_accept_cb, s);
-	if (rv < 0) { close(fd); return rv; }
+	int rv = mbt_listen_tcp(&s->listener, s->ev, s->listen_port, listen_accept_cb, s);
+	if (rv < 0) return rv;
 
 	mbt_log_info(MBT_LOG_SESSION, "listening on port %hu", s->listen_port);
 	return 0;
@@ -520,10 +503,7 @@ mbt_session_free(struct mbt_session *s)
 	if (!s)
 		return;
 
-	if (s->listen_io)
-		mbt_ev_io_free(s->listen_io);
-	if (s->listen_fd > 0)
-		close(s->listen_fd);
+	mbt_listener_close(&s->listener);
 	if (s->lsd_announce_timer)
 		mbt_ev_timer_free(s->lsd_announce_timer);
 	if (s->lsd_io)
@@ -1097,7 +1077,6 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                      const char *addr, uint16_t port)
 {
 	int rv, fd;
-	struct sockaddr_in sa;
 	struct session_torrent *st;
 	struct pending_connect *pc;
 
@@ -1123,41 +1102,19 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 		return 0;
 
 	/* Set up non-blocking connect */
-	sa.sin_family = AF_INET;
-	rv = inet_pton(AF_INET, addr, &sa.sin_addr);
-	if (rv <= 0)
-		return -EINVAL;
-	sa.sin_port = htons(port);
+	fd = mbt_connect_tcp(addr, port);
+	if (fd < 0) {
+		mbt_log_warn(MBT_LOG_SESSION, "connect to %s:%hu failed: %s", addr, port, strerror(-fd));
+		return fd;
+	}
 
-	fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (fd < 0)
-		return -errno;
-
-	/* Enable TCP keepalive (detect dead connections faster) */
+	/* Enable TCP keepalive */
 	int yes = 1;
 	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
 
-	rv = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
-	if (rv < 0 && errno != EINPROGRESS) {
-		mbt_log_warn(MBT_LOG_SESSION, "connect to %s:%hu failed: %s", addr, port, strerror(errno));
-		close(fd);
-		return -errno;
-	}
-
 	mbt_log_debug(MBT_LOG_SESSION, "connecting to %s:%hu", addr, port);
 
-	if (rv == 0) {
-		/* Connected immediately (localhost) */
-		struct mbt_conn *conn;
-		rv = mbt_conn_new(s->ev, &conn, fd, NULL, NULL, NULL);
-		if (rv < 0) {
-			close(fd);
-			return rv;
-		}
-		return mbt_torrent_add_peer(st->torrent, conn);
-	}
-
-	/* EINPROGRESS — wait for writable */
+	/* Wait for writable (handles both instant connect and EINPROGRESS) */
 	pc = calloc(1, sizeof(*pc));
 	if (!pc) {
 		close(fd);
