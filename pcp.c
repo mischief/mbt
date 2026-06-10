@@ -230,11 +230,28 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 		p->gateway.ss_family = AF_INET;
 		((struct sockaddr_in *)&p->gateway)->sin_port = htons(PCP_PORT);
 	} else {
-		/* Default: try to use default gateway (common: x.x.x.1) */
-		/* Fallback: use 192.168.0.1 */
+		/* Auto-detect default gateway */
+#ifdef __linux__
+		uint32_t gw = 0;
+		FILE *fp = fopen("/proc/net/route", "r");
+		if (fp) {
+			char line[256];
+			while (fgets(line, sizeof(line), fp)) {
+				char iface[32];
+				unsigned dest, gwaddr;
+				if (sscanf(line, "%31s %x %x", iface, &dest, &gwaddr) == 3) {
+					if (dest == 0 && gwaddr != 0) { gw = gwaddr; break; }
+				}
+			}
+			fclose(fp);
+		}
+		if (gw == 0) { free(p); return -ENOENT; }
 		p->gateway.ss_family = AF_INET;
 		((struct sockaddr_in *)&p->gateway)->sin_port = htons(PCP_PORT);
-		inet_pton(AF_INET, "192.168.0.1", &((struct sockaddr_in *)&p->gateway)->sin_addr);
+		((struct sockaddr_in *)&p->gateway)->sin_addr.s_addr = gw;
+#else
+#error "PCP gateway auto-detection not implemented for this platform"
+#endif
 	}
 
 	int af = p->is_ipv6 ? AF_INET6 : AF_INET;
