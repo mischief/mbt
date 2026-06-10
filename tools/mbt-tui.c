@@ -12,6 +12,7 @@
 #include "mbt/event.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
+#include "mbt/peer.h"
 #include "mbt/storage.h"
 
 static struct mbt_ev *ev;
@@ -120,9 +121,16 @@ draw_detail(void)
 		waddch(win_detail, ']');
 
 	} else if (detail_view == 1) {
-		/* Peers — show what we can from torrent_peer_count */
-		mvwprintw(win_detail, 1, 1, "Connected peers: %d", peers);
-		mvwprintw(win_detail, 2, 1, "(detailed peer list requires API extension)");
+		/* Peers */
+		int np = mbt_torrent_peer_count(t);
+		mvwprintw(win_detail, 1, 1, "Connected peers: %d", np);
+		int maxrow = getmaxy(win_detail) - 2;
+		for (int i = 0; i < np && i + 2 <= maxrow; i++) {
+			struct mbt_peer *p = mbt_torrent_peer_at(t, i);
+			if (!p) break;
+			mvwprintw(win_detail, i + 2, 1, "  %s:%hu",
+			          mbt_peer_addr(p), mbt_peer_port(p));
+		}
 
 	} else if (detail_view == 2) {
 		/* Piece map */
