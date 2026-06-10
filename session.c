@@ -822,15 +822,18 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 		if (interval < 5) interval = 5;
 		if (interval > 900) interval = 900;
 		st->announce_interval = interval;
+		/* Add jitter: 75%-125% of interval to prevent thundering herd */
+		uint64_t base = (uint64_t)interval * 1000000ULL;
+		uint64_t jitter = base / 4;
+		uint64_t delay = base - jitter / 2 + mbt_random_uniform(jitter);
 		if (!st->reannounce_timer) {
 			mbt_ev_timer_new(s->ev, &st->reannounce_timer,
-			                 (uint64_t)interval * 1000000ULL,
-			                 session_reannounce_timer_cb, st);
+			                 delay, session_reannounce_timer_cb, st);
 		} else {
-			mbt_ev_timer_mod(st->reannounce_timer,
-			                 (uint64_t)interval * 1000000ULL);
+			mbt_ev_timer_mod(st->reannounce_timer, delay);
 		}
-		mbt_log_debug(MBT_LOG_SESSION, "next announce in %ds", interval);
+		mbt_log_debug(MBT_LOG_SESSION, "next announce in %llums",
+		              (unsigned long long)(delay / 1000));
 	}
 }
 
