@@ -139,7 +139,12 @@ handle_command(void)
 		int rv = mbt_session_add_torrent_file(session, cmdbuf);
 		if (rv < 0)
 			rv = mbt_session_add_magnet(session, cmdbuf);
-		/* TODO: raw infohash */
+		if (rv < 0 && cmdlen == 40) {
+			/* Try as raw SHA1 infohash hex */
+			char mag[256];
+			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", cmdbuf);
+			mbt_session_add_magnet(session, mag);
+		}
 	}
 	cmdbuf[0] = 0;
 	cmdlen = 0;
