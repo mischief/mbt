@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include "export.h"
+#include <sys/socket.h>
 #include <arpa/inet.h>
 
 struct mbt_lsd_frame_info;
