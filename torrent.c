@@ -114,6 +114,7 @@ struct mbt_torrent {
 	/* Endgame mode */
 	int endgame;  /* 1 when all pieces are requested at least once */
 	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
+	int max_pieces_per_peer;
 
 	/* Rate limiting */
 	struct mbt_ratelimit *upload_limit;
@@ -905,11 +906,12 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 					idx = i;
 					break;
 				}
-				owns_active = 1; /* fully requested, waiting for blocks */
+				owns_active++;
 			}
 		}
-		/* If peer already has a fully-requested piece in flight, wait for it */
-		if (idx < 0 && owns_active)
+		/* If peer has max active pieces all fully-requested, wait */
+		int max_pp = t->max_pieces_per_peer ? t->max_pieces_per_peer : 4;
+		if (idx < 0 && owns_active >= max_pp)
 			break;
 		/* If no existing piece, pick a new one */
 		if (idx < 0)
@@ -1488,6 +1490,7 @@ void
 mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s)
 {
 	t->session = s;
+	t->max_pieces_per_peer = mbt_session_max_pieces_per_peer(s);
 }
 
 void

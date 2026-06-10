@@ -96,6 +96,7 @@ int main(void)
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
 		.storage_ctx = memL, .listen_port = 19303,
 		.picker = mbt_picker_rarest,
+		.max_pieces_per_peer = 1, /* serialize for predictable pick order */
 	};
 	struct mbt_session *sL;
 	mbt_session_new(&sL, &cfgL);

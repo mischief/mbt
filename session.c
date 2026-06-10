@@ -78,6 +78,7 @@ struct mbt_session {
 	uint16_t listen_port;
 	struct mbt_timers timers;
 	int max_peers;
+	int max_pieces_per_peer;
 	mbt_http_fn http;
 	void *http_arg;
 	uint8_t peer_id[20];
@@ -478,6 +479,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (!s->timers.lsd_interval) s->timers.lsd_interval = 300;
 	if (!s->timers.tracker_interval) s->timers.tracker_interval = 1800;
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
+	s->max_pieces_per_peer = cfg->max_pieces_per_peer ? cfg->max_pieces_per_peer : 4;
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
 
@@ -1185,6 +1187,12 @@ struct mbt_ratelimit *
 mbt_session_get_download_limit(struct mbt_session *s)
 {
 	return s ? s->download_limit : NULL;
+}
+
+int
+mbt_session_max_pieces_per_peer(struct mbt_session *s)
+{
+	return s ? s->max_pieces_per_peer : 4;
 }
 
 void
