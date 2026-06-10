@@ -93,9 +93,10 @@ struct mbt_session {
 
 	/* PCP */
 	struct mbt_pcp *pcp;
+	struct mbt_pcp *pcp_udp;
 	struct mbt_ev_timer *pcp_retry_timer;
 	const char *pcp_gateway;
-
+	int enable_pcp;
 	/* Listen socket */
 	struct mbt_listener listener;
 
@@ -497,6 +498,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 
 	/* PCP port mapping */
 	if (cfg->enable_pcp && s->listen_port > 0) {
+		s->enable_pcp = 1;
 		s->pcp_gateway = cfg->pcp_gateway;
 		session_pcp_start(s);
 	}
@@ -524,6 +526,8 @@ mbt_session_free(struct mbt_session *s)
 		mbt_ev_timer_free(s->pcp_retry_timer);
 	if (s->pcp)
 		mbt_pcp_free(s->pcp);
+	if (s->pcp_udp)
+		mbt_pcp_free(s->pcp_udp);
 
 	/* Free pending connects */
 	struct pending_connect *pc;
@@ -717,6 +721,29 @@ mbt_session_enable_dht(struct mbt_session *s)
 	mbt_session_dht_bootstrap(s, "router.bittorrent.com", 6881);
 	mbt_session_dht_bootstrap(s, "dht.transmissionbt.com", 6881);
 
+	/* Map UDP port if PCP is active */
+	if (s->pcp_udp)
+		; /* already mapped */
+	else if (s->enable_pcp) {
+		mbt_pcp_new(&s->pcp_udp, s->ev, s->pcp_gateway);
+		if (s->pcp_udp)
+			mbt_pcp_map(s->pcp_udp, 17 /* UDP */, s->listen_port, 300, NULL, NULL);
+	}
+
+	return 0;
+}
+
+int
+mbt_session_enable_dht_local(struct mbt_session *s)
+{
+	if (s->dht)
+		return 0;
+
+	int rv = mbt_dht_new(&s->dht, s->ev, s->listen_port ? s->listen_port : 6881);
+	if (rv < 0)
+		return rv;
+
+	/* No bootstrap — relies on PORT messages from peers */
 	return 0;
 }
 void

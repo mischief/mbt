@@ -73,6 +73,7 @@ MBT_API struct mbt_torrent *mbt_session_torrent_next(struct mbt_session *s, stru
 MBT_API int mbt_session_enable_lsd(struct mbt_session *s);
 MBT_API void mbt_session_disable_lsd(struct mbt_session *s);
 MBT_API int mbt_session_enable_dht(struct mbt_session *s);
+MBT_API int mbt_session_enable_dht_local(struct mbt_session *s);
 MBT_API void mbt_session_disable_dht(struct mbt_session *s);
 MBT_API int mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, uint16_t port);
 MBT_API void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih);

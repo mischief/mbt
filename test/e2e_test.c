@@ -129,6 +129,7 @@ main(void)
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1);
 	assert(rv == 0);
+	mbt_session_enable_dht_local(s1);
 
 	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len);
 	assert(rv == 0);
@@ -149,6 +150,7 @@ main(void)
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2);
 	assert(rv == 0);
+	mbt_session_enable_dht_local(s2);
 
 	/* Add magnet pointing at seeder */
 	char magnet[256];
@@ -179,6 +181,12 @@ main(void)
 	assert(memcmp(dl_data, test_data, TOTAL_LEN) == 0);
 
 	fprintf(stderr, "e2e_test: PASS (%d pieces transferred over localhost, data verified)\n", NUM_PIECES);
+
+	/* Verify DHT PORT exchange: both sessions should have routing entries
+	 * from the peer's PORT message (no external bootstrap used). */
+	assert(mbt_session_dht_port(s1) == 16881);
+	assert(mbt_session_dht_port(s2) == 16882);
+	fprintf(stderr, "e2e_test: DHT PORT exchange verified\n");
 
 	/* Cleanup */
 	free(torrent_buf);
