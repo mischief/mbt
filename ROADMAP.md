@@ -94,7 +94,14 @@
 - [x] SIGPIPE-safe tracker HTTP (MSG_NOSIGNAL on send)
 - [x] OpenBSD portability (TAILQ for bencode dict, send() for connected UDP)
 - [x] FreeBSD portability (sha.h compat, libmd linkage)
-- [ ] Rate limiting (upload/download caps)
+- [x] BEP 5 PORT message (send/receive DHT port, bootstrap from peers)
+- [x] Async HTTP tracker callback API (non-blocking design)
+- [x] DHT query rate limiting (20/sec, burst 40)
+- [x] Multiple active pieces per peer (configurable, default 4)
+- [x] Self-connection rejection (peer_id comparison)
+- [x] HAVE broadcast for resumed pieces after metadata arrives
+- [x] Torrent state API (init/downloading/stalled/seeding)
+- [x] Rate limiting (token bucket, session + per-torrent, configurable at runtime)
 - [ ] Ephemeral ports for tests (listen_port=0, session reports bound port)
 - [ ] Track peer origin (tracker/DHT/PEX/LSD/incoming) on connected torrent_peer
 - [ ] Expose peer source in mbt_peer_stats and mbt-tui peer list
@@ -127,6 +134,7 @@
 - [x] IPv6 test (peer-to-peer, tracker, DHT over ::1)
 - [x] Conn layer test (both backends: watermark, write, large transfer, callbacks)
 - [x] Passes on Linux (gcc + clang), OpenBSD 7.9 (amd64), FreeBSD 15.0 (amd64)
+- [x] Bitfield test (magnet peer resumes from disk, verifies HAVE propagation)
 - [ ] HTTP tracker client test (needs async client)
 
 ## Phase 8: Tools
