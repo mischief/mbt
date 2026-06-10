@@ -13,6 +13,7 @@
 #define BT_REQUEST         6
 #define BT_PIECE           7
 #define BT_CANCEL          8
+#define BT_PORT            9
 #define BT_EXTENSION       20
 
 /* BEP 6 Fast Extension */

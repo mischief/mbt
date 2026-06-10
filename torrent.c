@@ -18,6 +18,7 @@
 #include "mbt/infohash.h"
 #include "mbt/peer.h"
 #include "mbt/torrent.h"
+#include "mbt/session.h"
 #include "mbt/ratelimit.h"
 #include "mbt/bitmap.h"
 #include "mbt/peerdb.h"
@@ -376,6 +377,13 @@ on_active(struct mbt_peer *p, void *arg)
 
 	/* Always express interest */
 	mbt_peer_send_interested(p, 1);
+
+	/* BEP 5: advertise our DHT port if DHT is active */
+	if (t->session && (mbt_peer_flags(p) & MBT_PEER_FLAG_DHT)) {
+		uint16_t dht_port = mbt_session_dht_port(t->session);
+		if (dht_port)
+			mbt_peer_send_port(p, dht_port);
+	}
 
 	/* If we need metadata, request it */
 	if (mbt_peer_metadata_size(p) > 0 && t->piece_count == 0) {
@@ -829,6 +837,16 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	t->peer_count--;
 }
 
+static void
+on_port(struct mbt_peer *p, uint16_t dht_port, void *arg)
+{
+	struct mbt_torrent *t = arg;
+	if (!t->session || dht_port == 0)
+		return;
+	/* Feed peer's DHT node into our routing table */
+	mbt_session_dht_bootstrap(t->session, mbt_peer_addr(p), dht_port);
+}
+
 static struct mbt_peer_callbacks torrent_peer_cbs = {
 	.on_active   = on_active,
 	.on_choke    = on_choke,
@@ -842,6 +860,7 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 	.on_reject   = on_reject,
 	.on_error    = on_error,
 	.on_pex      = on_pex,
+	.on_port     = on_port,
 };
 
 /* --- Drive piece requests --- */

@@ -743,6 +743,12 @@ mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, uint16_t port
 	return 0;
 }
 
+uint16_t
+mbt_session_dht_port(struct mbt_session *s)
+{
+	return (s && s->dht) ? s->listen_port : 0;
+}
+
 void
 mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih)
 {

@@ -426,6 +426,16 @@ peer_rx_message(struct mbt_peer *p)
 	}
 
 	default:
+		/* BEP 5: PORT message — peer's DHT port */
+		if (cmd == BT_PORT && p->msglen >= 2) {
+			uint8_t portbuf[2];
+			mbt_conn_read(p->conn, portbuf, 2);
+			p->msglen -= 2;
+			uint16_t dht_port = (portbuf[0] << 8) | portbuf[1];
+			if (p->cb.on_port)
+				p->cb.on_port(p, dht_port, p->cb_arg);
+			break;
+		}
 		/* BEP 6 Fast Extension messages */
 		if (cmd == BT_HAVE_ALL && (p->flags & MBT_PEER_FLAG_FAST)) {
 			/* HAVE_ALL — peer has everything */
@@ -887,6 +897,16 @@ mbt_peer_send_have(struct mbt_peer *p, uint32_t piece)
 	unsigned char buf[1 + 4];
 	int rv = mbt_pack(buf, "bl", (int)BT_HAVE, piece);
 	return peer_write_msg(p, buf, rv);
+}
+
+int
+mbt_peer_send_port(struct mbt_peer *p, uint16_t port)
+{
+	unsigned char buf[3];
+	buf[0] = BT_PORT;
+	buf[1] = port >> 8;
+	buf[2] = port & 0xff;
+	return peer_write_msg(p, buf, 3);
 }
 
 int
