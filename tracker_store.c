@@ -84,7 +84,7 @@ mbt_tracker_store_stats(struct mbt_tracker_store *s, struct mbt_tracker_stats *o
 
 /* --- Connection ID (BEP 15 spoofing protection) --- */
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 uint64_t
 mbt_tracker_store_make_connection_id(struct mbt_tracker_store *s,

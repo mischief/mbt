@@ -9,7 +9,7 @@
 #include <arpa/inet.h>
 #include <time.h>
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 #include "mbt/log.h"
 

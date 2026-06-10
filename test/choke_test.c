@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 #include "mbt/event.h"
 #include "mbt/session.h"

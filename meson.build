@@ -25,6 +25,8 @@ if host_machine.system() == 'linux'
   deps += libbsd_dep
   libmd_dep = dependency('libmd')
   deps += libmd_dep
+elif host_machine.system() == 'freebsd'
+  deps += cc.find_library('md')
 endif
 
 # Event backend (one or the other)

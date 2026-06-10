@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 #include "mbt/event.h"
 #include "mbt/conn.h"

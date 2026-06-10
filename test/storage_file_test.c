@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 #include "mbt/storage.h"
 #include "mbt/torrent.h"

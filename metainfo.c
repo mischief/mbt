@@ -12,7 +12,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 #include "mbt/metainfo.h"
 #include "mbt/infohash.h"

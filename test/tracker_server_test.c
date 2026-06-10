@@ -21,7 +21,7 @@
 #include "mbt/log.h"
 #include "mbt/infohash.h"
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 4

@@ -272,7 +272,7 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 					if (!(rtm->rtm_flags & RTF_GATEWAY)) continue;
 					if (!(rtm->rtm_addrs & RTA_DST)) continue;
 					if (!(rtm->rtm_addrs & RTA_GATEWAY)) continue;
-					struct sockaddr *sa = (struct sockaddr *)((char *)rtm + rtm->rtm_hdrlen);
+					struct sockaddr *sa = (struct sockaddr *)((char *)rtm + sizeof(struct rt_msghdr));
 					/* Skip if destination is not 0.0.0.0 */
 					if (sa->sa_family != AF_INET) continue;
 					if (((struct sockaddr_in *)sa)->sin_addr.s_addr != 0) continue;

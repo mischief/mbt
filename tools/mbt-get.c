@@ -18,7 +18,7 @@
 #include "mbt/be.h"
 #include "mbt/hex.h"
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 static struct mbt_session *session;
 static int seed_mode;

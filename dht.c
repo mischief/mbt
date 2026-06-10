@@ -18,7 +18,7 @@
 #include <time.h>
 #include <fcntl.h>
 
-#include <sha1.h>
+#include "mbt/sha1_compat.h"
 
 #include "mbt/dht.h"
 #include "mbt/event.h"
