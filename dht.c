@@ -26,6 +26,7 @@
 #include "mbt/be.h"
 #include "mbt/log.h"
 #include "mbt/hex.h"
+#include "mbt/ratelimit.h"
 #include "net.h"
 
 /* --- Constants --- */
@@ -138,6 +139,9 @@ struct mbt_dht {
 
 	/* Refresh timer */
 	struct mbt_ev_timer *refresh_timer;
+
+	/* Query rate limit (messages/sec as bytes, 1 msg = 1 token) */
+	struct mbt_ratelimit *send_limit;
 };
 
 /* --- Helpers --- */
@@ -276,6 +280,8 @@ dht_send(struct mbt_dht *d, const struct sockaddr_storage *addr,
 static int
 dht_send_find_node(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *target)
 {
+	if (!mbt_ratelimit_allow(d->send_limit, 1))
+		return 0;
 	struct mbt_be_value *msg = NULL, *a = NULL;
 	uint8_t txn[TXN_LEN];
 	make_txn(d, txn);
@@ -406,7 +412,8 @@ lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 	/* Send get_peers to the ALPHA closest un-queried nodes */
 	int sent = 0;
 	for (int i = 0; i < lk->node_count && sent < ALPHA; i++) {
-		/* Simple: iterate in order added (not sorted). Good enough for now. */
+		if (!mbt_ratelimit_allow(d->send_limit, 1))
+			break;
 		/* Find closest un-queried */
 		int best = -1;
 		for (int j = 0; j < lk->node_count; j++) {
@@ -843,6 +850,9 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	/* Refresh timer */
 	mbt_ev_timer_new(ev, &d->refresh_timer, REFRESH_US, dht_refresh_cb, d);
 
+	/* Rate limit: 20 queries/sec, burst of 40 */
+	mbt_ratelimit_new(&d->send_limit, 20, 40);
+
 	char hex[41];
 	mbt_hex_encode(d->id, 20, hex, sizeof(hex));
 	mbt_log_info(MBT_LOG_DHT, "DHT started, node_id=%s port=%hu", hex, port);
@@ -859,6 +869,7 @@ mbt_dht_free(struct mbt_dht *d)
 		if (d->lookups[i].timer)
 			mbt_ev_timer_free(d->lookups[i].timer);
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
+	mbt_ratelimit_free(d->send_limit);
 	mbt_listener_close(&d->listener);
 	free(d);
 }
