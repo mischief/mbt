@@ -430,6 +430,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (!s->timers.pex_interval) s->timers.pex_interval = 60;
 	if (!s->timers.request_timeout) s->timers.request_timeout = 15;
 	if (!s->timers.keepalive_interval) s->timers.keepalive_interval = 120;
+	if (!s->timers.snub_timeout) s->timers.snub_timeout = 60;
 	if (!s->timers.dht_refresh) s->timers.dht_refresh = 900;
 	if (!s->timers.lsd_interval) s->timers.lsd_interval = 300;
 	if (!s->timers.tracker_interval) s->timers.tracker_interval = 1800;

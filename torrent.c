@@ -50,10 +50,12 @@ struct torrent_peer {
 	int outstanding;       /* in-flight requests */
 	int hash_failures;     /* consecutive hash failures from this peer */
 	int banned;
+	int snubbed;           /* peer not sending data, skip in drive_peer */
 	uint64_t bytes_from;   /* bytes received from peer in current interval */
 	uint64_t bytes_to;     /* bytes sent to peer in current interval */
 	int peer_interested;   /* peer wants data from us */
 	int am_choking;        /* we are choking this peer */
+	time_t last_recv;      /* last time we received piece data */
 };
 
 struct mbt_torrent {
@@ -187,6 +189,23 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		SLIST_FOREACH(tp, &t->peers, entry) {
 			if (!tp->banned && !mbt_peer_choked(tp->peer))
 				torrent_drive_peer(t, tp);
+		}
+	}
+
+	/* Anti-snubbing: mark peers with no data received for snub_timeout */
+	{
+		time_t now_t = time(NULL);
+		struct torrent_peer *tp;
+		SLIST_FOREACH(tp, &t->peers, entry) {
+			if (tp->banned || tp->snubbed || !tp->peer)
+				continue;
+			if (tp->outstanding > 0 &&
+			    now_t - tp->last_recv >= t->timers.snub_timeout) {
+				tp->snubbed = 1;
+				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: snubbed (no data for %ds)",
+				              mbt_peer_addr(tp->peer), mbt_peer_port(tp->peer),
+				              t->timers.snub_timeout);
+			}
 		}
 	}
 
@@ -432,6 +451,13 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 	struct torrent_peer *hp;
+
+	tp->last_recv = time(NULL);
+	if (tp->snubbed) {
+		tp->snubbed = 0;
+		mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: un-snubbed",
+		              mbt_peer_addr(p), mbt_peer_port(p));
+	}
 
 	if (piece >= t->piece_count)
 		return;
@@ -801,6 +827,8 @@ static void
 torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
 	if (!t->pieces || mbt_peer_choked(tp->peer))
+		return;
+	if (tp->snubbed)
 		return;
 	if (t->have_count == t->piece_count)
 		return; /* complete — nothing to request */
@@ -1181,6 +1209,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn)
 	mbt_peer_set_our_metadata_size(peer, t->metadata_len);
 
 	tp->peer = peer;
+	tp->last_recv = time(NULL);
 	SLIST_INSERT_HEAD(&t->peers, tp, entry);
 	t->peer_count++;
 
@@ -1209,6 +1238,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 	}
 
 	tp->peer = peer;
+	tp->last_recv = time(NULL);
 	SLIST_INSERT_HEAD(&t->peers, tp, entry);
 	t->peer_count++;
 

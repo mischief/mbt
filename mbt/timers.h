@@ -8,6 +8,7 @@ struct mbt_timers {
 	int pex_interval;        /* default 60 */
 	int request_timeout;     /* default 15 */
 	int keepalive_interval;  /* default 120 */
+	int snub_timeout;        /* default 60 — no data from peer = snubbed */
 	int dht_refresh;         /* default 900 (15 min) */
 	int lsd_interval;        /* default 300 (5 min) */
 	int tracker_interval;    /* default 1800 (30 min) */
