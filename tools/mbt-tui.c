@@ -36,8 +36,13 @@ static void
 tui_log_cb(enum mbt_log_level level, enum mbt_log_component comp,
            const char *fmt, va_list ap, void *arg)
 {
-	(void)level; (void)comp; (void)arg;
-	vsnprintf(log_ring[log_head], LOG_COLS, fmt, ap);
+	(void)arg;
+	char msg[LOG_COLS];
+	int off = snprintf(msg, sizeof(msg), "%s[%s]: ",
+	                   mbt_log_component_str(comp), mbt_log_level_str(level));
+	vsnprintf(msg + off, sizeof(msg) - off, fmt, ap);
+	memcpy(log_ring[log_head], msg, LOG_COLS);
+	log_ring[log_head][LOG_COLS - 1] = 0;
 	log_head = (log_head + 1) % LOG_LINES;
 	if (log_count < LOG_LINES) log_count++;
 }

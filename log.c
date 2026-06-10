@@ -104,3 +104,29 @@ mbt_log_syslog(enum mbt_log_level level, enum mbt_log_component comp,
 	(void)comp;
 	vsyslog(level_to_syslog(level), fmt, ap);
 }
+
+const char *
+mbt_log_level_str(enum mbt_log_level level)
+{
+	switch (level) {
+	case MBT_LOG_DEBUG: return "debug";
+	case MBT_LOG_INFO:  return "info";
+	case MBT_LOG_WARN:  return "warn";
+	case MBT_LOG_ERROR: return "error";
+	default: return "?";
+	}
+}
+
+const char *
+mbt_log_component_str(enum mbt_log_component comp)
+{
+	switch (comp) {
+	case MBT_LOG_SESSION: return "session";
+	case MBT_LOG_TORRENT: return "torrent";
+	case MBT_LOG_PEER:    return "peer";
+	case MBT_LOG_DHT:     return "dht";
+	case MBT_LOG_LSD:     return "lsd";
+	case MBT_LOG_TRACKER: return "tracker";
+	default: return "?";
+	}
+}

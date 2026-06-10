@@ -44,6 +44,10 @@ MBT_API void mbt_log_stderr(enum mbt_log_level level, enum mbt_log_component com
 MBT_API void mbt_log_syslog(enum mbt_log_level level, enum mbt_log_component comp,
                     const char *fmt, va_list ap, void *arg);
 
+/* String names for levels/components */
+MBT_API const char *mbt_log_level_str(enum mbt_log_level level);
+MBT_API const char *mbt_log_component_str(enum mbt_log_component comp);
+
 /* Internal — used by library code via macros below */
 MBT_API void mbt_log_emit(enum mbt_log_level level, enum mbt_log_component comp,
                   const char *fmt, ...);
