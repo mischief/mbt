@@ -22,16 +22,120 @@ url_encode_binary(const uint8_t *in, size_t inlen, char *out, size_t outlen)
 	return w;
 }
 
+/* Context passed to HTTP done callback */
+struct http_announce_ctx {
+	struct mbt_tracker_request req; /* copy of original request */
+};
+
+static void
+http_announce_done(struct mbt_http_response *resp, void *arg)
+{
+	struct http_announce_ctx *ctx = arg;
+	struct mbt_tracker_request *req = &ctx->req;
+
+	if (!resp || !resp->data || resp->len == 0) {
+		if (req->done_cb)
+			req->done_cb(req->ih, -EIO, 0, req->arg);
+		mbt_infohash_unref(req->ih);
+		free(ctx);
+		return;
+	}
+
+	/* Parse bencoded response */
+	struct mbt_be_value *be = NULL;
+	int rv = mbt_be_value_parse(resp->data, resp->len, &be);
+	if (rv < 0) {
+		free(resp->data);
+		if (req->done_cb)
+			req->done_cb(req->ih, -EPROTO, 0, req->arg);
+		mbt_infohash_unref(req->ih);
+		free(ctx);
+		return;
+	}
+
+	/* Check for failure reason */
+	struct mbt_be_value *fail = mbt_be_find(be, "failure reason");
+	if (fail && fail->type == BE_STRING) {
+		mbt_log_warn(MBT_LOG_SESSION, "tracker: %.*s",
+		             (int)fail->string.iov_len, (char *)fail->string.iov_base);
+		mbt_be_value_free(be);
+		free(resp->data);
+		if (req->done_cb)
+			req->done_cb(req->ih, -EPROTO, 0, req->arg);
+		mbt_infohash_unref(req->ih);
+		free(ctx);
+		return;
+	}
+
+	/* Extract interval */
+	int interval = 1800;
+	struct mbt_be_value *intv = mbt_be_find(be, "interval");
+	if (intv && intv->type == BE_INTEGER)
+		interval = (int)intv->integer;
+
+	/* Parse compact peer list */
+	struct mbt_be_value *peers = mbt_be_find(be, "peers");
+	if (peers && peers->type == BE_STRING) {
+		int count = (int)(peers->string.iov_len / 6);
+		uint8_t *p = peers->string.iov_base;
+
+		mbt_log_info(MBT_LOG_SESSION, "tracker: %d peers, interval %ds", count, interval);
+
+		for (int i = 0; i < count; i++) {
+			char addr[INET_ADDRSTRLEN];
+			uint16_t port;
+
+			inet_ntop(AF_INET, p + i * 6, addr, sizeof(addr));
+			memcpy(&port, p + i * 6 + 4, 2);
+			port = ntohs(port);
+
+			if (req->peer_cb)
+				req->peer_cb(req->ih, addr, port, req->arg);
+		}
+	}
+
+	/* BEP 7: peers6 (18 bytes per peer) */
+	struct mbt_be_value *peers6 = mbt_be_find(be, "peers6");
+	if (peers6 && peers6->type == BE_STRING) {
+		int count = (int)(peers6->string.iov_len / 18);
+		uint8_t *p = peers6->string.iov_base;
+
+		for (int i = 0; i < count; i++) {
+			char addr[INET6_ADDRSTRLEN];
+			uint16_t port;
+
+			inet_ntop(AF_INET6, p + i * 18, addr, sizeof(addr));
+			memcpy(&port, p + i * 18 + 16, 2);
+			port = ntohs(port);
+
+			if (req->peer_cb)
+				req->peer_cb(req->ih, addr, port, req->arg);
+		}
+	}
+
+	if (req->done_cb)
+		req->done_cb(req->ih, 0, interval, req->arg);
+
+	mbt_be_value_free(be);
+	free(resp->data);
+	mbt_infohash_unref(req->ih);
+	free(ctx);
+}
+
 int
 mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
                           mbt_http_fn http, void *http_arg)
 {
-	char announce_url[2048];
-	char ih_enc[61], pid_enc[61];
-	int rv;
-
 	if (!http)
 		return -ENOTSUP;
+
+	struct http_announce_ctx *ctx = calloc(1, sizeof(*ctx));
+	if (!ctx) return -ENOMEM;
+	ctx->req = *req;
+	ctx->req.ih = mbt_infohash_ref(req->ih); /* prevent use-after-free */
+
+	char announce_url[2048];
+	char ih_enc[61], pid_enc[61];
 
 	url_encode_binary(req->ih->hash_sha1, 20, ih_enc, sizeof(ih_enc));
 	url_encode_binary(req->peer_id, 20, pid_enc, sizeof(pid_enc));
@@ -51,70 +155,14 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 		.url = announce_url,
 		.method = "GET",
 	};
-	struct mbt_http_response hresp = {0};
 
-	rv = http(&hreq, &hresp, http_arg);
+	int rv = http(&hreq, http_announce_done, ctx, http_arg);
 	if (rv < 0) {
-		if (req->done_cb)
-			req->done_cb(req->ih, rv, 0, req->arg);
+		mbt_infohash_unref(ctx->req.ih);
+		free(ctx);
 		return rv;
 	}
 
-	/* Parse bencoded response */
-	struct mbt_be_value *be = NULL;
-	rv = mbt_be_value_parse(hresp.data, hresp.len, &be);
-	if (rv < 0) {
-		free(hresp.data);
-		if (req->done_cb)
-			req->done_cb(req->ih, -EPROTO, 0, req->arg);
-		return rv;
-	}
-
-	/* Check for failure reason */
-	struct mbt_be_value *fail = mbt_be_find(be, "failure reason");
-	if (fail && fail->type == BE_STRING) {
-		mbt_log_warn(MBT_LOG_SESSION, "tracker: %.*s",
-		             (int)fail->string.iov_len, (char *)fail->string.iov_base);
-		mbt_be_value_free(be);
-		free(hresp.data);
-		if (req->done_cb)
-			req->done_cb(req->ih, -EPROTO, 0, req->arg);
-		return -EPROTO;
-	}
-
-	/* Extract interval */
-	int interval = 1800;
-	struct mbt_be_value *intv = mbt_be_find(be, "interval");
-	if (intv && intv->type == BE_INTEGER)
-		interval = (int)intv->integer;
-
-	/* Parse compact peer list */
-	struct mbt_be_value *peers = mbt_be_find(be, "peers");
-	if (peers && peers->type == BE_STRING) {
-		/* Compact: 6 bytes per peer (4 IP + 2 port) */
-		int count = (int)(peers->string.iov_len / 6);
-		uint8_t *p = peers->string.iov_base;
-
-		mbt_log_info(MBT_LOG_SESSION, "tracker: %d peers, interval %ds", count, interval);
-
-		for (int i = 0; i < count; i++) {
-			char addr[INET_ADDRSTRLEN];
-			uint16_t port;
-
-			inet_ntop(AF_INET, p + i * 6, addr, sizeof(addr));
-			memcpy(&port, p + i * 6 + 4, 2);
-			port = ntohs(port);
-
-			if (req->peer_cb)
-				req->peer_cb(req->ih, addr, port, req->arg);
-		}
-	}
-
-	if (req->done_cb)
-		req->done_cb(req->ih, 0, interval, req->arg);
-
-	mbt_be_value_free(be);
-	free(hresp.data);
 	return 0;
 }
 

@@ -37,7 +37,7 @@ struct mbt_tracker_request {
 #define MBT_TRACKER_EVENT_STARTED   2
 #define MBT_TRACKER_EVENT_STOPPED   3
 
-/* --- HTTP hook (caller-provided) --- */
+/* --- HTTP hook (caller-provided, async) --- */
 
 struct mbt_http_request {
 	const char *url;
@@ -51,8 +51,15 @@ struct mbt_http_response {
 	size_t len;
 };
 
+/* Callback invoked when HTTP response is ready */
+typedef void (*mbt_http_done_fn)(struct mbt_http_response *resp, void *arg);
+
+/* Async HTTP hook: initiate request, call done_cb when response arrives.
+ * Return 0 on success (request initiated), <0 on immediate failure.
+ * The implementation may use threads, curl_multi, or any async mechanism.
+ * resp in done_cb: data=NULL + len=0 indicates failure. */
 typedef int (*mbt_http_fn)(struct mbt_http_request *req,
-                           struct mbt_http_response *resp, void *arg);
+                           mbt_http_done_fn done_cb, void *done_arg, void *arg);
 
 /* --- Announce functions --- */
 

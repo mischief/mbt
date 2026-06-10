@@ -21,7 +21,7 @@
 
 #include <curl/curl.h>
 
-/* --- HTTP tracker via curl --- */
+/* --- HTTP tracker via curl (async-shaped, blocks internally) --- */
 struct curl_buf { char *data; size_t len; };
 
 static size_t
@@ -38,7 +38,7 @@ curl_write_cb(void *ptr, size_t size, size_t nmemb, void *v)
 }
 
 static int
-curl_http_fn(struct mbt_http_request *req, struct mbt_http_response *resp, void *arg)
+curl_http_fn(struct mbt_http_request *req, mbt_http_done_fn done_cb, void *done_arg, void *arg)
 {
 	(void)arg;
 	CURL *c = curl_easy_init();
@@ -51,9 +51,14 @@ curl_http_fn(struct mbt_http_request *req, struct mbt_http_response *resp, void 
 	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
 	CURLcode rc = curl_easy_perform(c);
 	curl_easy_cleanup(c);
-	if (rc != CURLE_OK) { free(buf.data); return -1; }
-	resp->data = buf.data;
-	resp->len = buf.len;
+	struct mbt_http_response resp = {0};
+	if (rc == CURLE_OK) {
+		resp.data = buf.data;
+		resp.len = buf.len;
+	} else {
+		free(buf.data);
+	}
+	done_cb(&resp, done_arg);
 	return 0;
 }
 
