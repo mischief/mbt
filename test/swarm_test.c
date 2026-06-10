@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <getopt.h>
 
 #include <sha1.h>
@@ -47,6 +48,8 @@ static void timeout_cb(struct mbt_ev_timer *t, void *a)
 
 int main(int argc, char *argv[])
 {
+	signal(SIGPIPE, SIG_IGN);
+
 	int num_seeders = 2;
 	int num_leechers = 5;
 	int num_pieces = 8;

@@ -66,7 +66,7 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	/* Parse: GET /announce?... HTTP/1.x */
 	if (strncmp(buf, "GET /announce?", 14) != 0) {
 		const char *err = "HTTP/1.0 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-		send(cfd, err, strlen(err), 0);
+		send(cfd, err, strlen(err), MSG_NOSIGNAL);
 		close(cfd);
 		return;
 	}
@@ -140,8 +140,8 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	char hdr[128];
 	int hdr_len = snprintf(hdr, sizeof(hdr),
 		"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n", enc_len);
-	send(cfd, hdr, hdr_len, 0);
-	send(cfd, enc, enc_len, 0);
+	send(cfd, hdr, hdr_len, MSG_NOSIGNAL);
+	send(cfd, enc, enc_len, MSG_NOSIGNAL);
 	free(enc);
 	close(cfd);
 }

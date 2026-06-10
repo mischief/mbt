@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <signal.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -446,8 +445,6 @@ int
 mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 {
 	struct mbt_session *s;
-
-	signal(SIGPIPE, SIG_IGN);
 
 	s = calloc(1, sizeof(*s));
 	if (!s)
