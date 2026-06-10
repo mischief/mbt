@@ -136,8 +136,17 @@
 - [x] `mbt-dht` — standalone DHT lookup
 - [x] `mbt-tracker` — UDP + HTTP tracker daemon
 - [x] `mbt-pcp` — standalone PCP port mapping tool (-k for persistent)
+- [x] `mbt-tui` — ncurses client (torrent list, peers, piece map, log panel)
+- [ ] `mbt-tui`: persistent state in $XDG_DATA_HOME/mbt/ (bencode)
+- [ ] `mbt-tui`: per-torrent download directory
 - [ ] `mbt-seed` — seed a file given a .torrent
 - [ ] `mbt-daemon` — long-running daemon + DBus/control interface
+
+### Persistent state ($XDG_DATA_HOME/mbt/)
+- [ ] `<infohash>.meta` — bencode dict: {"torrent": raw metainfo, "directory": path, "added": timestamp}
+- [ ] Resume on restart: scan dir, re-add each torrent with saved metadata
+- [ ] Per-torrent storage path (currently global on session config)
+- [ ] Save/load peer hints for faster reconnection
 
 ## Phase 9: Advanced protocols
 
