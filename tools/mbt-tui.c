@@ -173,13 +173,14 @@ draw_detail(void)
 	} else if (detail_view == 2) {
 		/* Piece map */
 		mvwprintw(win_detail, 1, 1, "Piece map (%u pieces):", total);
-		int maxw = getmaxx(win_detail) - 2;
-		int maxh = getmaxy(win_detail) - 3;
-		int row = 2, col = 1;
-		for (uint32_t i = 0; i < total && row <= maxh; i++) {
+		int maxw = getmaxx(win_detail) - 3;
+		int maxh = getmaxy(win_detail) - 2;
+		int row = 2, col = 0;
+		wmove(win_detail, row, 1);
+		for (uint32_t i = 0; i < total && row < maxh; i++) {
 			waddch(win_detail, mbt_torrent_has_piece(t, i) ? '#' : '.');
 			col++;
-			if (col >= maxw) { col = 1; row++; wmove(win_detail, row, col); }
+			if (col >= maxw) { col = 0; row++; wmove(win_detail, row, 1); }
 		}
 	} else if (detail_view == 3) {
 		/* Log */
