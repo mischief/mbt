@@ -526,6 +526,21 @@ mbt_session_free(struct mbt_session *s)
 		free(pc);
 	}
 
+	/* Announce event=stopped to all trackers */
+	struct session_torrent *sst;
+	STAILQ_FOREACH(sst, &s->torrents, next) {
+		if (sst->tracker_count > 0) {
+			struct mbt_tracker_request treq = {
+				.ev = s->ev, .ih = sst->ih, .peer_id = s->peer_id,
+				.listen_port = s->listen_port, .left = 0,
+				.event = MBT_TRACKER_EVENT_STOPPED,
+				.arg = s,
+			};
+			for (int i = 0; i < sst->tracker_count; i++)
+				mbt_tracker_announce(sst->trackers[i], &treq, s->http, s->http_arg);
+		}
+	}
+
 	/* Free torrents */
 	struct session_torrent *st;
 	while ((st = STAILQ_FIRST(&s->torrents))) {
