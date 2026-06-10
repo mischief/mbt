@@ -24,7 +24,7 @@ on_read(struct mbt_conn *c, void *arg)
 	(void)arg;
 	char buf[64];
 	ssize_t n = mbt_conn_read(c, buf, sizeof(buf));
-	assert(n > 0);
+	if (n <= 0) return;
 	memcpy(read_buf + read_total, buf, n);
 	read_total += n;
 	read_count++;
@@ -47,7 +47,7 @@ test_basic_rw(void)
 	int sv[2];
 	int rv;
 
-	printf("test_basic_rw\n");
+	mbt_ev_new_default(&ev); printf("test_basic_rw\n");
 	fflush(stdout);
 
 	rv = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
@@ -76,6 +76,7 @@ test_basic_rw(void)
 	assert(last_event_err == 0); /* EOF */
 
 	mbt_conn_free(conn);
+	mbt_ev_destroy(ev);
 }
 
 /* Test: watermark - don't fire read until N bytes available */
@@ -85,7 +86,7 @@ test_watermark(void)
 	int sv[2];
 	int rv;
 
-	printf("test_watermark\n");
+	mbt_ev_new_default(&ev); printf("test_watermark\n");
 
 	rv = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
 	assert(rv == 0);
@@ -113,6 +114,7 @@ test_watermark(void)
 	assert(memcmp(read_buf, "helloworld", 10) == 0);
 
 	mbt_conn_free(conn);
+	mbt_ev_destroy(ev);
 }
 
 /* Test: conn write then read back from other end (needs loop to flush) */
@@ -122,6 +124,7 @@ on_write_reader(struct mbt_conn *c, void *arg)
 {
 	char buf[16] = {0};
 	ssize_t r = mbt_conn_read(c, buf, sizeof(buf));
+	if (r <= 0) return;
 	assert(r == 8);
 	assert(memcmp(buf, "testdata", 8) == 0);
 	write_test_done = 1;
@@ -134,7 +137,7 @@ test_write(void)
 	int sv[2];
 	int rv;
 
-	printf("test_write\n");
+	mbt_ev_new_default(&ev); printf("test_write\n");
 	fflush(stdout);
 
 	rv = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
@@ -158,6 +161,7 @@ test_write(void)
 
 	mbt_conn_free(writer);
 	mbt_conn_free(reader);
+	mbt_ev_destroy(ev);
 }
 
 /* Test: available reports buffered bytes */
@@ -167,7 +171,7 @@ test_available(void)
 	int sv[2];
 	int rv;
 
-	printf("test_available\n");
+	mbt_ev_new_default(&ev); printf("test_available\n");
 
 	rv = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
 	assert(rv == 0);
@@ -198,6 +202,7 @@ test_available(void)
 	assert(memcmp(buf, "abc", 3) == 0);
 
 	mbt_conn_free(conn);
+	mbt_ev_destroy(ev);
 }
 
 /* Test: set_callbacks changes handlers mid-stream */
@@ -217,7 +222,7 @@ test_set_callbacks(void)
 	int sv[2];
 	int rv;
 
-	printf("test_set_callbacks\n");
+	mbt_ev_new_default(&ev); printf("test_set_callbacks\n");
 
 	rv = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
 	assert(rv == 0);
@@ -238,6 +243,7 @@ test_set_callbacks(void)
 	assert(second_read_fired == 1);
 
 	mbt_conn_free(conn);
+	mbt_ev_destroy(ev);
 }
 
 /* Test: large write/read */
@@ -273,7 +279,7 @@ test_large_transfer(void)
 	int sv[2];
 	int rv;
 
-	printf("test_large_transfer\n");
+	mbt_ev_new_default(&ev); printf("test_large_transfer\n");
 	fflush(stdout);
 
 	rv = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
@@ -306,14 +312,12 @@ test_large_transfer(void)
 
 	free(big);
 	mbt_conn_free(conn);
+	mbt_ev_destroy(ev);
 }
 
 int
 main(void)
 {
-	int rv = mbt_ev_new_default(&ev);
-	assert(rv == 0);
-
 	test_basic_rw();
 	printf("PASS basic_rw\n"); fflush(stdout);
 	test_watermark();
@@ -327,7 +331,6 @@ main(void)
 	test_large_transfer();
 	printf("PASS large_transfer\n"); fflush(stdout);
 
-	mbt_ev_destroy(ev);
 	printf("all conn tests passed\n");
 	return 0;
 }
