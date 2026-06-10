@@ -4,9 +4,11 @@
  */
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <signal.h>
 #include <locale.h>
+#include <getopt.h>
 #include <ncurses.h>
 
 #include "mbt/event.h"
@@ -14,12 +16,31 @@
 #include "mbt/torrent.h"
 #include "mbt/peer.h"
 #include "mbt/storage.h"
+#include "mbt/log.h"
 
 static struct mbt_ev *ev;
 static struct mbt_session *session;
 static WINDOW *win_list, *win_detail, *win_cmd;
 static int selected;
 static int detail_view; /* 0=overview, 1=peers, 2=pieces */
+static int debug_mode;
+
+/* Log ring buffer */
+#define LOG_LINES 256
+#define LOG_COLS 256
+static char log_ring[LOG_LINES][LOG_COLS];
+static int log_head; /* next write position */
+static int log_count;
+
+static void
+tui_log_cb(enum mbt_log_level level, enum mbt_log_component comp,
+           const char *fmt, va_list ap, void *arg)
+{
+	(void)level; (void)comp; (void)arg;
+	vsnprintf(log_ring[log_head], LOG_COLS, fmt, ap);
+	log_head = (log_head + 1) % LOG_LINES;
+	if (log_count < LOG_LINES) log_count++;
+}
 
 /* Rate tracking: sliding window */
 static uint32_t last_have;
@@ -100,7 +121,7 @@ draw_detail(void)
 	uint64_t total_bytes = (uint64_t)total * plen;
 	uint64_t have_bytes = (uint64_t)have * plen;
 
-	const char *views[] = {"Overview", "Peers", "Pieces"};
+	const char *views[] = {"Overview", "Peers", "Pieces", "Log"};
 	mvwprintw(win_detail, 0, 2, " %s [%s] (h/l to switch) ",
 	          name ? name : "(no metadata)", views[detail_view]);
 
@@ -123,8 +144,8 @@ draw_detail(void)
 	} else if (detail_view == 1) {
 		/* Peers */
 		int np = mbt_torrent_peer_count(t);
-		mvwprintw(win_detail, 1, 1, "%-22s %5s %4s %4s %4s %s",
-		          "IP", "DONE", "REQ", "SNUB", "FAIL", "FLAGS");
+		mvwprintw(win_detail, 1, 1, "%-28s %5s %4s %4s %4s %s",
+		          "ENDPOINT", "DONE", "REQ", "SNUB", "FAIL", "FLAGS");
 		int maxrow = getmaxy(win_detail) - 2;
 		for (int i = 0; i < np && i + 2 <= maxrow; i++) {
 			struct mbt_peer_stats ps;
@@ -135,8 +156,10 @@ draw_detail(void)
 			if (ps.interested) flags[fi++] = 'I';
 			if (ps.snubbed) flags[fi++] = 'S';
 			flags[fi] = 0;
-			mvwprintw(win_detail, i + 2, 1, "%-22s %3d%% %4d %4s %4d %s",
-			          ps.addr, ps.done_pct, ps.outstanding,
+			char endpoint[64];
+			snprintf(endpoint, sizeof(endpoint), "%s:%hu", ps.addr, ps.port);
+			mvwprintw(win_detail, i + 2, 1, "%-28s %3d%% %4d %4s %4d %s",
+			          endpoint, ps.done_pct, ps.outstanding,
 			          ps.snubbed ? "yes" : "", ps.hash_failures, flags);
 		}
 
@@ -151,8 +174,20 @@ draw_detail(void)
 			col++;
 			if (col >= maxw) { col = 1; row++; wmove(win_detail, row, col); }
 		}
+	} else if (detail_view == 3) {
+		/* Log */
+		mvwprintw(win_detail, 0, 2, " Log [%s] (D to toggle debug) ",
+		          debug_mode ? "DEBUG" : "INFO");
+		int maxrow = getmaxy(win_detail) - 2;
+		int start = log_head - maxrow;
+		if (start < 0) start += LOG_LINES;
+		for (int row = 1; row <= maxrow; row++) {
+			int idx = (start + row - 1) % LOG_LINES;
+			if (row > log_count) break;
+			mvwprintw(win_detail, row, 1, "%.*s",
+			          getmaxx(win_detail) - 2, log_ring[idx]);
+		}
 	}
-
 	wrefresh(win_detail);
 }
 
@@ -163,7 +198,7 @@ draw_cmd(void)
 	if (mode == 1) {
 		mvwprintw(win_cmd, 0, 0, "> %s", cmdbuf);
 	} else {
-		mvwprintw(win_cmd, 0, 0, " [a]dd  [q]uit  [j/k] navigate");
+		mvwprintw(win_cmd, 0, 0, " [a]dd  [q]uit  [j/k] select  [h/l] view  [D] debug");
 	}
 	wrefresh(win_cmd);
 }
@@ -224,11 +259,15 @@ on_input(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
 	} else {
 		switch (ch) {
 		case 'q': quit = 1; mbt_ev_stop(ev); return;
+		case 'D':
+			debug_mode = !debug_mode;
+			mbt_log_set_debug(debug_mode ? MBT_LOG_ALL : 0);
+			break;
 		case 'a': case ':': mode = 1; break;
 		case 'j': case KEY_DOWN: selected++; break;
 		case 'k': case KEY_UP: if (selected > 0) selected--; break;
 		case 'h': case KEY_LEFT: if (detail_view > 0) detail_view--; break;
-		case 'l': case KEY_RIGHT: if (detail_view < 2) detail_view++; break;
+		case 'l': case KEY_RIGHT: if (detail_view < 3) detail_view++; break;
 		}
 	}
 	draw_all();
@@ -286,6 +325,25 @@ main(int argc, char *argv[])
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGWINCH, on_resize);
 
+	/* Parse options */
+	int ch;
+	while ((ch = getopt(argc, argv, "dh")) != -1) {
+		switch (ch) {
+		case 'd': debug_mode = 1; break;
+		case 'h':
+		default:
+			fprintf(stderr, "usage: %s [-d] [torrent|magnet|infohash ...]\n", argv[0]);
+			return 1;
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	/* Route logs to our ring buffer */
+	mbt_log_set(tui_log_cb, NULL);
+	if (debug_mode)
+		mbt_log_set_debug(MBT_LOG_ALL);
+
 	mbt_ev_new_default(&ev);
 
 	struct mbt_session_config cfg = {
@@ -298,7 +356,7 @@ main(int argc, char *argv[])
 	mbt_session_enable_dht(session);
 
 	/* Add any args as torrents (.torrent, magnet, or raw infohash) */
-	for (int i = 1; i < argc; i++) {
+	for (int i = 0; i < argc; i++) {
 		int rv = mbt_session_add_torrent_file(session, argv[i]);
 		if (rv < 0)
 			rv = mbt_session_add_magnet(session, argv[i]);
