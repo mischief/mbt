@@ -485,7 +485,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	/* Already have this piece — ignore late/unsolicited data */
 	if (mbt_bitmap_isset(t->have, piece) > 0) {
 		struct torrent_peer *tp2 = find_torrent_peer(t, p);
-		if (tp2) tp2->outstanding--;
+		if (tp2) if (tp2->outstanding > 0) tp2->outstanding--;
 		return;
 	}
 
@@ -501,7 +501,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	if (!pi->data) {
 		/* Only accept if piece is ACTIVE and owned by this peer */
 		if (pi->state != MBT_PIECE_ACTIVE || pi->owner != tp) {
-			tp->outstanding--;
+			if (tp->outstanding > 0) tp->outstanding--;
 			return;
 		}
 		pi->data = calloc(1, pi->length);
@@ -511,7 +511,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	/* Track block by index, ignore true duplicates */
 	uint32_t block_idx = offset / (16 * 1024);
 	if (pi->blocks && mbt_bitmap_isset(pi->blocks, block_idx) > 0)
-		{ tp->outstanding--; return; } /* duplicate block */
+		{ if (tp->outstanding > 0) tp->outstanding--; return; } /* duplicate block */
 
 	memcpy(pi->data + offset, data, len);
 	if (!pi->blocks) {
@@ -523,7 +523,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	tp->bytes_from += len;
 	pi->last_activity = now_usec();
 
-	tp->outstanding--;
+	if (tp->outstanding > 0) tp->outstanding--;
 
 	/* Piece complete? */
 	if (pi->received >= pi->length) {
@@ -793,7 +793,7 @@ on_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, 
 		pi->requested = 0;
 		pi->received = 0;
 			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
-		tp->outstanding--;
+		if (tp->outstanding > 0) tp->outstanding--;
 		/* Try to re-request from someone else */
 		SLIST_FOREACH(op, &t->peers, entry) {
 			if (op != tp && !mbt_peer_choked(op->peer))
