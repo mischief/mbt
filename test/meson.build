@@ -86,3 +86,12 @@ test('rarest', rarest_test, timeout: 20)
 
 snub_test = executable('snub_test', 'snub_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('snub', snub_test, timeout: 20)
+
+hashfail_test = executable('hashfail_test', 'hashfail_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('hashfail', hashfail_test, timeout: 35)
+
+endgame_test = executable('endgame_test', 'endgame_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('endgame', endgame_test, timeout: 20)
+
+swarm_test = executable('swarm_test', 'swarm_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('swarm', swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5'])
