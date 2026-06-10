@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 #include <err.h>
 
@@ -15,6 +16,7 @@
 
 static struct mbt_ev *ev;
 static int got_mapping;
+static int keep_running;
 
 static void
 on_mapped(const char *addr, uint16_t port, uint32_t lifetime, void *arg)
@@ -22,8 +24,11 @@ on_mapped(const char *addr, uint16_t port, uint32_t lifetime, void *arg)
 	(void)arg;
 	printf("mapped: %s:%hu (lifetime %us)\n", addr, port, lifetime);
 	got_mapping = 1;
-	mbt_ev_stop(ev);
+	if (!keep_running)
+		mbt_ev_stop(ev);
 }
+
+static void on_signal(int sig) { (void)sig; mbt_ev_stop(ev); }
 
 static void
 timeout_cb(struct mbt_ev_timer *t, void *a)
@@ -42,9 +47,10 @@ main(int argc, char *argv[])
 	int port = 0;
 	int protocol = 6; /* TCP */
 
-	while ((ch = getopt(argc, argv, "hg:l:p:t:d")) != -1) {
+	while ((ch = getopt(argc, argv, "hg:kl:p:t:d")) != -1) {
 		switch (ch) {
 		case 'g': gateway = optarg; break;
+		case 'k': keep_running = 1; break;
 		case 'l': lifetime = atoi(optarg); break;
 		case 'p': port = atoi(optarg); break;
 		case 't':
@@ -58,14 +64,20 @@ main(int argc, char *argv[])
 			break;
 		case 'h':
 		default:
-			fprintf(stderr, "usage: mbt-pcp [-g gateway] [-l lifetime] [-t tcp|udp] [-d] -p port\n");
+			fprintf(stderr, "usage: mbt-pcp [-g gateway] [-k] [-l lifetime] [-t tcp|udp] [-d] -p port\n");
+			fprintf(stderr, "  -k  keep running (refresh mapping until signal)\n");
 			return ch == 'h' ? 0 : 1;
 		}
 	}
 
 	if (port == 0) {
-		fprintf(stderr, "usage: mbt-pcp [-g gateway] [-l lifetime] [-t tcp|udp] [-d] -p port\n");
+		fprintf(stderr, "usage: mbt-pcp [-g gateway] [-k] [-l lifetime] [-t tcp|udp] [-d] -p port\n");
 		return 1;
+	}
+
+	if (keep_running) {
+		signal(SIGINT, on_signal);
+		signal(SIGTERM, on_signal);
 	}
 
 	mbt_ev_new_default(&ev);
@@ -79,8 +91,9 @@ main(int argc, char *argv[])
 	if (rv < 0)
 		errx(1, "mbt_pcp_map: %s", strerror(-rv));
 
-	struct mbt_ev_timer *to;
-	mbt_ev_timer_new(ev, &to, 10 * 1000000ULL, timeout_cb, NULL);
+	struct mbt_ev_timer *to = NULL;
+	if (!keep_running)
+		mbt_ev_timer_new(ev, &to, 10 * 1000000ULL, timeout_cb, NULL);
 
 	mbt_ev_run(ev);
 
@@ -88,7 +101,7 @@ main(int argc, char *argv[])
 		printf("external: %s:%hu\n", mbt_pcp_external_addr(pcp), mbt_pcp_external_port(pcp));
 	}
 
-	mbt_ev_timer_free(to);
+	if (to) mbt_ev_timer_free(to);
 	mbt_pcp_free(pcp);
 	mbt_ev_destroy(ev);
 	return got_mapping ? 0 : 1;
