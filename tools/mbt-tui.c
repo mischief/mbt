@@ -18,6 +18,7 @@ static struct mbt_ev *ev;
 static struct mbt_session *session;
 static WINDOW *win_list, *win_detail, *win_cmd;
 static int selected;
+static int detail_view; /* 0=overview, 1=peers, 2=pieces */
 
 /* Rate tracking: snapshot have_count each refresh, compute delta */
 static uint32_t last_have;
@@ -91,18 +92,47 @@ draw_detail(void)
 	uint32_t total = mbt_torrent_piece_count(t);
 	float pct = total ? (100.0f * have / total) : 0;
 	int peers = mbt_torrent_peer_count(t);
+	uint32_t plen = mbt_torrent_piece_length(t);
+	uint64_t total_bytes = (uint64_t)total * plen;
+	uint64_t have_bytes = (uint64_t)have * plen;
 
-	mvwprintw(win_detail, 0, 2, " %s ", name ? name : "(no metadata)");
-	mvwprintw(win_detail, 1, 1, "Pieces: %u/%u (%.1f%%)  Peers: %d  Rate: %.0f KB/s",
-	          have, total, pct, peers, dl_rate_kbps);
+	const char *views[] = {"Overview", "Peers", "Pieces"};
+	mvwprintw(win_detail, 0, 2, " %s [%s] (h/l to switch) ",
+	          name ? name : "(no metadata)", views[detail_view]);
 
-	/* Progress bar */
-	int barw = getmaxx(win_detail) - 4;
-	int filled = total ? (barw * have / total) : 0;
-	mvwaddch(win_detail, 2, 1, '[');
-	for (int i = 0; i < barw; i++)
-		waddch(win_detail, i < filled ? '#' : '.');
-	waddch(win_detail, ']');
+	if (detail_view == 0) {
+		/* Overview */
+		mvwprintw(win_detail, 1, 1, "Progress: %u/%u pieces (%.1f%%)  %.1f/%.1f MB",
+		          have, total, pct,
+		          have_bytes / (1024.0*1024.0), total_bytes / (1024.0*1024.0));
+		mvwprintw(win_detail, 2, 1, "Peers: %d  Rate: %.0f KB/s  Piece size: %u KB",
+		          peers, dl_rate_kbps, plen / 1024);
+
+		/* Progress bar */
+		int barw = getmaxx(win_detail) - 4;
+		int filled = total ? (barw * have / total) : 0;
+		mvwaddch(win_detail, 3, 1, '[');
+		for (int i = 0; i < barw; i++)
+			waddch(win_detail, i < filled ? '#' : '.');
+		waddch(win_detail, ']');
+
+	} else if (detail_view == 1) {
+		/* Peers — show what we can from torrent_peer_count */
+		mvwprintw(win_detail, 1, 1, "Connected peers: %d", peers);
+		mvwprintw(win_detail, 2, 1, "(detailed peer list requires API extension)");
+
+	} else if (detail_view == 2) {
+		/* Piece map */
+		mvwprintw(win_detail, 1, 1, "Piece map (%u pieces):", total);
+		int maxw = getmaxx(win_detail) - 2;
+		int maxh = getmaxy(win_detail) - 3;
+		int row = 2, col = 1;
+		for (uint32_t i = 0; i < total && row <= maxh; i++) {
+			waddch(win_detail, mbt_torrent_has_piece(t, i) ? '#' : '.');
+			col++;
+			if (col >= maxw) { col = 1; row++; wmove(win_detail, row, col); }
+		}
+	}
 
 	wrefresh(win_detail);
 }
@@ -178,6 +208,8 @@ on_input(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
 		case 'a': case ':': mode = 1; break;
 		case 'j': case KEY_DOWN: selected++; break;
 		case 'k': case KEY_UP: if (selected > 0) selected--; break;
+		case 'h': case KEY_LEFT: if (detail_view > 0) detail_view--; break;
+		case 'l': case KEY_RIGHT: if (detail_view < 2) detail_view++; break;
 		}
 	}
 	draw_all();
@@ -240,11 +272,16 @@ main(int argc, char *argv[])
 	mbt_session_new(&session, &cfg);
 	mbt_session_enable_dht(session);
 
-	/* Add any args as torrents */
+	/* Add any args as torrents (.torrent, magnet, or raw infohash) */
 	for (int i = 1; i < argc; i++) {
 		int rv = mbt_session_add_torrent_file(session, argv[i]);
 		if (rv < 0)
-			mbt_session_add_magnet(session, argv[i]);
+			rv = mbt_session_add_magnet(session, argv[i]);
+		if (rv < 0 && strlen(argv[i]) == 40) {
+			char mag[256];
+			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", argv[i]);
+			mbt_session_add_magnet(session, mag);
+		}
 	}
 
 	/* Init ncurses */
