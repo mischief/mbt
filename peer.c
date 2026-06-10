@@ -316,6 +316,8 @@ peer_rx_message(struct mbt_peer *p)
 	case BT_HAVE:
 		sz = mbt_conn_read(p->conn, buf, 4);
 		mbt_unpack(buf, "l", &piece);
+		if (p->bitfield)
+			mbt_bitmap_set(p->bitfield, piece);
 		if (p->cb.on_have)
 			p->cb.on_have(p, piece, p->cb_arg);
 		break;
