@@ -815,8 +815,11 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 	/* Schedule re-announce */
 	struct session_torrent *st = session_find(s, ih);
 	if (st && interval > 0) {
-		/* Clamp interval: min 30s, max 15min */
-		if (interval < 30) interval = 30;
+		/* Use configured interval if shorter than server's */
+		if (s->timers.tracker_interval > 0 && s->timers.tracker_interval < interval)
+			interval = s->timers.tracker_interval;
+		/* Clamp: min 5s, max 15min */
+		if (interval < 5) interval = 5;
 		if (interval > 900) interval = 900;
 		st->announce_interval = interval;
 		if (!st->reannounce_timer) {

@@ -25,6 +25,7 @@
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "mbt/tracker_server.h"
+#include "mbt/log.h"
 
 #define PIECE_LEN 16384
 #define BASE_PORT 19700
@@ -58,17 +59,20 @@ int main(int argc, char *argv[])
 		{"pieces", required_argument, NULL, 'p'},
 		{"piece-size", required_argument, NULL, 'b'},
 		{"tracker", no_argument, NULL, 't'},
+		{"debug", no_argument, NULL, 'd'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 	int ch;
-	while ((ch = getopt_long(argc, argv, "s:l:p:b:th", longopts, NULL)) != -1) {
+	int debug = 0;
+	while ((ch = getopt_long(argc, argv, "s:l:p:b:tdh", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's': num_seeders = atoi(optarg); break;
 		case 'l': num_leechers = atoi(optarg); break;
 		case 'p': num_pieces = atoi(optarg); break;
 		case 'b': piece_kib = atoi(optarg); break;
 		case 't': use_tracker = 1; break;
+		case 'd': debug = 1; break;
 		case 'h':
 		default:
 			fprintf(stderr, "usage: swarm_test [--seeders N] [--leechers M] [--pieces P] [--piece-size KiB] [--tracker]\n");
@@ -77,6 +81,10 @@ int main(int argc, char *argv[])
 	}
 
 	target_completions = num_leechers;
+	if (debug) {
+		mbt_log_set(mbt_log_stderr, NULL);
+		mbt_log_set_debug(MBT_LOG_ALL);
+	}
 	uint16_t tracker_port = BASE_PORT - 1; /* 19699 */
 	int piece_len = piece_kib * 1024;
 	int total_len = piece_len * num_pieces;
@@ -149,6 +157,8 @@ int main(int argc, char *argv[])
 		struct mbt_session_config cfg = {
 			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
 			.storage_ctx = smem[i], .listen_port = BASE_PORT + i,
+			.max_peers = num_leechers + num_seeders,
+			.timers = { .tracker_interval = 5 },
 		};
 		mbt_session_new(&seeders[i], &cfg);
 		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len);
@@ -162,6 +172,7 @@ int main(int argc, char *argv[])
 		struct mbt_session_config cfg = {
 			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
 			.storage_ctx = lmem[i], .listen_port = BASE_PORT + num_seeders + i,
+			.timers = { .tracker_interval = 5 },
 		};
 		mbt_session_new(&leechers[i], &cfg);
 
