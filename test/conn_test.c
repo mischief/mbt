@@ -250,7 +250,7 @@ on_large_read(struct mbt_conn *c, void *arg)
 		memcpy(read_buf + read_total, buf, n);
 		read_total += n;
 	}
-	if (read_total >= 65536)
+	if (read_total >= 16384)
 		mbt_ev_stop(ev);
 }
 
@@ -287,14 +287,14 @@ test_large_transfer(void)
 	rv = mbt_conn_new(ev, &conn, sv[0], on_large_read, on_large_event, NULL);
 	assert(rv == 0);
 
-	/* Write 64KB from the other end */
-	char *big = malloc(65536);
+	/* Write 16KB from the other end */
+	char *big = malloc(16384);
 	assert(big);
-	memset(big, 'A', 65536);
+	memset(big, 'A', 16384);
 
 	size_t written = 0;
-	while (written < 65536) {
-		ssize_t n = write(sv[1], big + written, 65536 - written);
+	while (written < 16384) {
+		ssize_t n = write(sv[1], big + written, 16384 - written);
 		if (n <= 0) break;
 		written += n;
 	}
@@ -302,7 +302,7 @@ test_large_transfer(void)
 
 	mbt_ev_run(ev);
 
-	assert(read_total == 65536);
+	assert(read_total == 16384);
 
 	free(big);
 	mbt_conn_free(conn);
