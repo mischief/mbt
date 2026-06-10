@@ -376,8 +376,8 @@ on_active(struct mbt_peer *p, void *arg)
 	if (tp2) tp2->am_choking = 0;
 	mbt_peer_send_choke(p, 0);
 
-	/* Always express interest */
-	mbt_peer_send_interested(p, 1);
+	/* Express interest only if we need pieces */
+	mbt_peer_send_interested(p, t->have_count < t->piece_count ? 1 : 0);
 
 	/* BEP 5: advertise our DHT port if DHT is active */
 	if (t->session && (mbt_peer_flags(p) & MBT_PEER_FLAG_DHT)) {
@@ -611,6 +611,12 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 			/* Check completion */
 			if (t->have_count == t->piece_count) {
+				/* Tell all peers we're no longer interested */
+				struct torrent_peer *np;
+				SLIST_FOREACH(np, &t->peers, entry) {
+					if (np->peer && !np->banned)
+						mbt_peer_send_interested(np->peer, 0);
+				}
 				if (t->cb.on_complete)
 					t->cb.on_complete(t, t->cb_arg);
 				return;
