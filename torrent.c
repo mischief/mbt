@@ -982,6 +982,10 @@ torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg)
 		if (!tp->banned && tp->peer && !mbt_peer_choked(tp->peer))
 			torrent_drive_peer(t, tp);
 	}
+
+	/* If still incomplete and no timer was scheduled, retry in 10ms */
+	if (!t->ratelimit_timer && t->have_count < t->piece_count)
+		mbt_ev_timer_new(t->ev, &t->ratelimit_timer, 10000, torrent_ratelimit_retry, t);
 }
 
 static void
