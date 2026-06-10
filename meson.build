@@ -130,6 +130,6 @@ executable('mbt-probe', 'tools/mbt-probe.c', link_with: [libmbt], include_direct
 executable('mbt-pcp', 'tools/mbt-pcp.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
 ncurses_dep = dependency('ncurses', required: false)
-if ncurses_dep.found()
-  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep])
+if ncurses_dep.found() and libcurl_dep.found()
+  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep, libcurl_dep])
 endif

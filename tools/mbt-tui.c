@@ -15,8 +15,47 @@
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/peer.h"
+#include "mbt/tracker.h"
 #include "mbt/storage.h"
 #include "mbt/log.h"
+
+#include <curl/curl.h>
+
+/* --- HTTP tracker via curl --- */
+struct curl_buf { char *data; size_t len; };
+
+static size_t
+curl_write_cb(void *ptr, size_t size, size_t nmemb, void *v)
+{
+	struct curl_buf *b = v;
+	size_t total = size * nmemb;
+	char *tmp = realloc(b->data, b->len + total);
+	if (!tmp) return 0;
+	memcpy(tmp + b->len, ptr, total);
+	b->data = tmp;
+	b->len += total;
+	return total;
+}
+
+static int
+curl_http_fn(struct mbt_http_request *req, struct mbt_http_response *resp, void *arg)
+{
+	(void)arg;
+	CURL *c = curl_easy_init();
+	if (!c) return -1;
+	struct curl_buf buf = {0};
+	curl_easy_setopt(c, CURLOPT_URL, req->url);
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write_cb);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, &buf);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT, 15L);
+	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+	CURLcode rc = curl_easy_perform(c);
+	curl_easy_cleanup(c);
+	if (rc != CURLE_OK) { free(buf.data); return -1; }
+	resp->data = buf.data;
+	resp->len = buf.len;
+	return 0;
+}
 
 static struct mbt_ev *ev;
 static struct mbt_session *session;
@@ -359,6 +398,7 @@ main(int argc, char *argv[])
 		.storage_ops = mbt_storage_file_ops(),
 		.storage_ctx = (void *)".",
 		.listen_port = 6881,
+		.http = curl_http_fn,
 	};
 	mbt_session_new(&session, &cfg);
 	mbt_session_enable_dht(session);
