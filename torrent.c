@@ -615,13 +615,18 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 				return;
 			}
 
-			/* Drive all unchoked peers — new pieces are now available */
-			struct torrent_peer *otp;
-			SLIST_FOREACH(otp, &t->peers, entry) {
-				if (otp->peer && !otp->banned && !mbt_peer_choked(otp->peer))
-					torrent_drive_peer(t, otp);
+			/* Drive peers to pick up new pieces */
+			if (t->download_limit || mbt_session_get_download_limit(t->session)) {
+				/* Rate-limited: only drive this peer; retry timer handles others */
+				torrent_drive_peer(t, tp);
+			} else {
+				struct torrent_peer *otp;
+				SLIST_FOREACH(otp, &t->peers, entry) {
+					if (otp->peer && !otp->banned && !mbt_peer_choked(otp->peer))
+						torrent_drive_peer(t, otp);
+				}
 			}
-			return; /* already drove all peers above */
+			return;
 		}
 	}
 
