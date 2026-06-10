@@ -60,7 +60,7 @@
 
 ## Phase 5: API polish (complete)
 
-- [x] All symbols namespaced `mbt_*`, internals hidden (linker script)
+- [x] All symbols namespaced `mbt_*`, internals hidden (linker script + visibility)
 - [x] Headers in `mbt/` — `#include <mbt/mbt.h>`
 - [x] `mbt_ev_new_default()` — backend-agnostic
 - [x] DHT/LSD enable/disable at runtime, order-independent
@@ -70,19 +70,26 @@
 - [x] `mbt_metainfo` API — parse/create/encode
 - [x] `mbt_session_add_torrent_buf` — add torrent from memory
 - [x] Shared tracker store (UDP + HTTP see same peers)
+- [x] Man page infrastructure (mdoc format, check-docs.sh validator)
+- [x] Tools: all use getopt, -h/--help
 
-## Phase 6: Production hardening (next)
+## Phase 6: Production hardening (in progress)
 
 ### Immediate (spec compliance, small)
 
 ### Short-term (infrastructure)
-- [ ] Configurable timers (all hardcoded intervals exposed via config)
-- [ ] NAT-PMP / UPnP-IGD port mapping (built-in)
+- [x] Configurable timers (all hardcoded intervals exposed via mbt_timers struct)
+- [x] NAT traversal — PCP client (RFC 6887, MAP opcode, auto-refresh)
+- [x] Rarest-first picker (three-phase: random first → rarest → endgame)
+- [x] Anti-snubbing (peer silent → stop requesting, auto-unsnub on data)
+- [x] MBT_API visibility macro (-fvisibility=hidden, explicit exports)
+- [x] sys/queue.h refactor (SLIST for all linked lists)
+- [x] Tracker stats snapshot API (mbt_tracker_store_stats)
+- [x] DHT: reject bogus nodes (0.0.0.0, port 0)
+- [ ] Wire PCP into session (auto-map listen port on startup)
 - [ ] Dual-stack networking (IPv6 throughout: session, tracker, DHT)
 
 ### Medium-term (swarm quality)
-- [ ] Anti-snubbing (peer silent 60s → request elsewhere)
-- [ ] Rarest-first picker with peer availability tracking
 - [ ] Upload/download rate limiting
 
 ### Longer-term (enterprise/embedding)
@@ -99,7 +106,10 @@
 - [x] Integration: e2e, tracker server (UDP), DHT localhost, resume, partial resume
 - [x] Magnet flow, multi-peer, choke cycling, LSD, picker coverage
 - [x] Shared tracker store test (UDP+HTTP same store)
-- [x] ASan clean (28/28), valgrind clean
+- [x] ASan clean (31/31), valgrind clean
+- [x] PCP client test (stub server, refresh verification)
+- [x] Rarest-first picker test (two-seeder, availability preference)
+- [x] Anti-snubbing test (dead seeder + working seeder)
 - [ ] Endgame mode test
 - [ ] Hash failure + peer ban test
 - [ ] IPv6 tracker test (announce over ::1)
