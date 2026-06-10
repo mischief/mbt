@@ -72,6 +72,16 @@ MBT_API float mbt_torrent_progress(struct mbt_torrent *t);
 MBT_API int mbt_torrent_complete(struct mbt_torrent *t);
 MBT_API int mbt_torrent_is_private(struct mbt_torrent *t);
 MBT_API int mbt_torrent_has_metadata(struct mbt_torrent *t);
+
+enum mbt_torrent_state {
+	MBT_TORRENT_INIT,        /* no metadata yet */
+	MBT_TORRENT_DOWNLOADING, /* actively receiving pieces */
+	MBT_TORRENT_STALLED,     /* incomplete but no progress possible */
+	MBT_TORRENT_SEEDING,     /* complete, serving to others */
+};
+
+MBT_API enum mbt_torrent_state mbt_torrent_state(struct mbt_torrent *t);
+
 MBT_API uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_have_count(struct mbt_torrent *t);

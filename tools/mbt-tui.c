@@ -127,12 +127,14 @@ draw_detail(void)
 
 	if (detail_view == 0) {
 		/* Overview */
-		mvwprintw(win_detail, 1, 1, "Progress: %u/%u pieces (%.1f%%)  %.1f/%.1f MB",
+		const char *state_str[] = {"init", "downloading", "STALLED", "seeding"};
+		enum mbt_torrent_state st = mbt_torrent_state(t);
+		mvwprintw(win_detail, 1, 1, "Progress: %u/%u pieces (%.1f%%)  %.1f/%.1f MB  [%s]",
 		          have, total, pct,
-		          have_bytes / (1024.0*1024.0), total_bytes / (1024.0*1024.0));
+		          have_bytes / (1024.0*1024.0), total_bytes / (1024.0*1024.0),
+		          state_str[st]);
 		mvwprintw(win_detail, 2, 1, "Peers: %d  Rate: %.0f KB/s  Piece size: %u KB",
 		          peers, dl_rate_kbps, plen / 1024);
-
 		/* Progress bar */
 		int barw = getmaxx(win_detail) - 4;
 		int filled = total ? (barw * have / total) : 0;

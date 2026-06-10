@@ -1366,6 +1366,29 @@ mbt_torrent_complete(struct mbt_torrent *t)
 	return t->piece_count > 0 && t->have_count == t->piece_count;
 }
 
+enum mbt_torrent_state
+mbt_torrent_state(struct mbt_torrent *t)
+{
+	if (!t->pieces)
+		return MBT_TORRENT_INIT;
+	if (t->have_count == t->piece_count)
+		return MBT_TORRENT_SEEDING;
+
+	/* Check if any unchoked peer has a piece we need */
+	struct torrent_peer *tp;
+	SLIST_FOREACH(tp, &t->peers, entry) {
+		if (tp->banned || !tp->peer) continue;
+		if (mbt_peer_choked(tp->peer)) continue;
+		struct mbt_bitmap *bf = mbt_peer_bitfield(tp->peer);
+		if (!bf) continue;
+		for (uint32_t i = 0; i < t->piece_count; i++) {
+			if (mbt_bitmap_isset(t->have, i) <= 0 &&
+			    mbt_bitmap_isset(bf, i) > 0)
+				return MBT_TORRENT_DOWNLOADING;
+		}
+	}
+	return MBT_TORRENT_STALLED;
+}
 
 int
 mbt_torrent_is_private(struct mbt_torrent *t)
