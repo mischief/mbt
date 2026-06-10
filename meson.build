@@ -122,3 +122,4 @@ endif
 # Fuzz
 executable('be_fuzz', 'fuzz/fuzz.c', link_with: [libmbt], include_directories: mbt_inc)
 executable('mbt-probe', 'tools/mbt-probe.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+executable('mbt-pcp', 'tools/mbt-pcp.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
