@@ -80,14 +80,16 @@
 ### Short-term (infrastructure)
 - [x] Configurable timers (all hardcoded intervals exposed via mbt_timers struct)
 - [x] NAT traversal — PCP client (RFC 6887, MAP opcode, auto-refresh)
+- [x] PCP wired into session (auto-map on startup, retry on failure, -P in mbt-get)
 - [x] Rarest-first picker (three-phase: random first → rarest → endgame)
 - [x] Anti-snubbing (peer silent → stop requesting, auto-unsnub on data)
 - [x] MBT_API visibility macro (-fvisibility=hidden, explicit exports)
 - [x] sys/queue.h refactor (SLIST for all linked lists)
 - [x] Tracker stats snapshot API (mbt_tracker_store_stats)
 - [x] DHT: reject bogus nodes (0.0.0.0, port 0)
-- [ ] Wire PCP into session (auto-map listen port on startup)
-- [ ] Dual-stack networking (IPv6 throughout: session, tracker, DHT)
+- [x] Dual-stack IPv6 (net.c helpers, all sockets v6 clean, IPV6_V6ONLY=1)
+- [x] Tracker re-announce jitter (prevents thundering herd)
+- [ ] Rate limiting (upload/download caps)
 
 ### Medium-term (swarm quality)
 - [ ] Upload/download rate limiting
@@ -106,12 +108,13 @@
 - [x] Integration: e2e, tracker server (UDP), DHT localhost, resume, partial resume
 - [x] Magnet flow, multi-peer, choke cycling, LSD, picker coverage
 - [x] Shared tracker store test (UDP+HTTP same store)
-- [x] ASan clean (31/31), valgrind clean
+- [x] ASan clean (36/36), valgrind clean
 - [x] PCP client test (stub server, refresh verification)
 - [x] Rarest-first picker test (two-seeder, availability preference)
 - [x] Anti-snubbing test (dead seeder + working seeder)
-- [ ] Endgame mode test
-- [ ] Hash failure + peer ban test
+- [x] Hash failure + peer ban test (corrupt seeder, ban after 5)
+- [x] Endgame mode test (10 pieces, 2 seeders, endgame triggers)
+- [x] Swarm scaling test (parameterized: direct + tracker, up to 100 leechers)
 - [ ] IPv6 tracker test (announce over ::1)
 - [ ] HTTP tracker client test (needs async client)
 
@@ -122,6 +125,7 @@
 - [x] `mbt-torrent` — create, show, magnet (uses metainfo API)
 - [x] `mbt-dht` — standalone DHT lookup
 - [x] `mbt-tracker` — UDP + HTTP tracker daemon
+- [x] `mbt-pcp` — standalone PCP port mapping tool (-k for persistent)
 - [ ] `mbt-seed` — seed a file given a .torrent
 - [ ] `mbt-daemon` — long-running daemon + DBus/control interface
 
