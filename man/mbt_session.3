@@ -25,7 +25,11 @@
 .Nm mbt_session_disable_lsd ,
 .Nm mbt_session_add_peer ,
 .Nm mbt_session_reannounce ,
-.Nm mbt_session_set_callbacks
+.Nm mbt_session_set_callbacks ,
+.Nm mbt_session_set_upload_rate ,
+.Nm mbt_session_set_download_rate ,
+.Nm mbt_session_upload_rate ,
+.Nm mbt_session_download_rate
 .Nd BitTorrent session management
 .Sh SYNOPSIS
 .In mbt/session.h
@@ -75,6 +79,14 @@
 .Fn mbt_session_reannounce "struct mbt_session *s" "struct mbt_infohash *ih"
 .Ft int
 .Fn mbt_session_set_callbacks "struct mbt_session *s" "struct mbt_session_callbacks *cb"
+.Ft void
+.Fn mbt_session_set_upload_rate "struct mbt_session *s" "uint64_t bytes_per_sec"
+.Ft void
+.Fn mbt_session_set_download_rate "struct mbt_session *s" "uint64_t bytes_per_sec"
+.Ft uint64_t
+.Fn mbt_session_upload_rate "struct mbt_session *s"
+.Ft uint64_t
+.Fn mbt_session_download_rate "struct mbt_session *s"
 .Sh DESCRIPTION
 A session manages one or more BitTorrent downloads and seeds.
 It owns the event loop integration, listening socket, DHT node, and LSD
@@ -156,15 +168,30 @@ Fatal error on a torrent.
 LSD discovery of a peer.
 Return 1 to auto-add, 0 to ignore.
 .El
+.Ss Rate limiting
+.Fn mbt_session_set_upload_rate
+and
+.Fn mbt_session_set_download_rate
+set global bandwidth caps in bytes per second.
+A value of 0 means unlimited.
+These may be called at any time to adjust limits dynamically.
+.Fn mbt_session_upload_rate
+and
+.Fn mbt_session_download_rate
+return the current settings.
+Per-torrent limits are also available via
+.Xr mbt_torrent 3 .
 .Sh RETURN VALUES
 Functions returning
 .Ft int
 return 0 on success or a negative errno value on failure.
 Functions returning a pointer return NULL on failure.
 .Sh EXAMPLES
+Download a magnet with DHT discovery:
 .Bd -literal
 struct mbt_session *s;
 mbt_session_default(&s, "/tmp/downloads");
+mbt_session_set_download_rate(s, 1024 * 1024); /* 1 MB/s */
 mbt_session_enable_dht(s);
 mbt_session_dht_bootstrap(s, "router.bittorrent.com", 6881);
 mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...");
