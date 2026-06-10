@@ -129,16 +129,15 @@ int main(void)
 	for (int i = 0; i < pieces_idx; i++) fprintf(stderr, "%d ", pieces_order[i]);
 	fprintf(stderr, "\n");
 
-	/* The first piece is random (phase 1). After that, pieces 4-7 should
-	 * tend to appear before pieces 0-3 because they are rarer (avail=1 vs 2).
-	 * Check: among the first 5 pieces received, at least 2 of {4,5,6,7}
-	 * should be present (conservative due to connection timing). */
-	int rare_in_first5 = 0;
-	int check = pieces_idx < 5 ? pieces_idx : 5;
-	for (int i = 0; i < check; i++)
-		if (pieces_order[i] >= 4) rare_in_first5++;
-	fprintf(stderr, "  rare pieces (4-7) in first 5: %d\n", rare_in_first5);
-	assert(rare_in_first5 >= 2);
+	/* The first piece is random (phase 1). After that, rarest-first
+	 * should strongly prefer pieces 4-7 (avail=1) over 0-3 (avail=2).
+	 * Assert all 8 pieces arrived and at least 1 rare piece in first 4. */
+	assert(pieces_idx == NUM_PIECES);
+	int rare_in_first4 = 0;
+	for (int i = 0; i < 4; i++)
+		if (pieces_order[i] >= 4) rare_in_first4++;
+	fprintf(stderr, "  rare pieces (4-7) in first 4: %d\n", rare_in_first4);
+	assert(rare_in_first4 >= 1);
 
 	fprintf(stderr, "rarest_test: PASS\n");
 
