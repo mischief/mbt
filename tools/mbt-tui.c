@@ -165,7 +165,7 @@ draw_detail(void)
 			flags[fi] = 0;
 			char endpoint[64];
 			snprintf(endpoint, sizeof(endpoint), "%s:%hu", ps.addr, ps.port);
-			mvwprintw(win_detail, i + 2, 1, "%-28s %3d%% %4d %4s %4d %s",
+			mvwprintw(win_detail, i + 2, 1, "%-28s %4d%% %4d %4s %4d %s",
 			          endpoint, ps.done_pct, ps.outstanding,
 			          ps.snubbed ? "yes" : "", ps.hash_failures, flags);
 		}
