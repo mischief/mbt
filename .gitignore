@@ -3,3 +3,4 @@ build/
 standards/
 ubuntu-25.10-desktop-amd64.iso
 .aider*
+.*.swp
