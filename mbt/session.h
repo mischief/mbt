@@ -37,6 +37,9 @@ struct mbt_session_config {
 	void *http_arg;
 
 	struct mbt_timers timers;  /* 0-initialized = all defaults */
+
+	uint64_t upload_rate;    /* bytes/sec, 0 = unlimited */
+	uint64_t download_rate;  /* bytes/sec, 0 = unlimited */
 };
 
 /* Session lifecycle */
@@ -90,5 +93,11 @@ struct mbt_session_callbacks {
 };
 
 MBT_API int mbt_session_set_callbacks(struct mbt_session *s, struct mbt_session_callbacks *cb);
+
+/* Rate limiting — 0 = unlimited, adjustable at runtime */
+MBT_API void mbt_session_set_upload_rate(struct mbt_session *s, uint64_t bytes_per_sec);
+MBT_API void mbt_session_set_download_rate(struct mbt_session *s, uint64_t bytes_per_sec);
+MBT_API uint64_t mbt_session_upload_rate(struct mbt_session *s);
+MBT_API uint64_t mbt_session_download_rate(struct mbt_session *s);
 
 #endif

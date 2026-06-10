@@ -18,6 +18,8 @@
 #include "mbt/infohash.h"
 #include "mbt/peer.h"
 #include "mbt/torrent.h"
+#include "mbt/ratelimit.h"
+#include "mbt_internal.h"
 #include "mbt/bitmap.h"
 #include "mbt/peerdb.h"
 #include "mbt/be.h"
@@ -63,6 +65,7 @@ struct torrent_peer {
 struct mbt_torrent {
 	struct mbt_ev *ev;
 	struct mbt_infohash *ih;
+	struct mbt_session *session; /* owning session (NULL if standalone) */
 	uint8_t peer_id[20];
 
 	const struct mbt_storage_ops *storage_ops;
@@ -111,6 +114,11 @@ struct mbt_torrent {
 	/* Endgame mode */
 	int endgame;  /* 1 when all pieces are requested at least once */
 	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
+
+	/* Rate limiting */
+	struct mbt_ratelimit *upload_limit;
+	struct mbt_ratelimit *download_limit;
+	struct mbt_ev_timer *ratelimit_timer;
 };
 
 enum {
@@ -120,6 +128,7 @@ enum {
 
 /* --- Forward declarations --- */
 static void torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp);
+static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
 
 static void
@@ -454,6 +463,10 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	if (!tp) return;
 	struct torrent_peer *hp;
 
+	/* Account download against rate limiters */
+	mbt_ratelimit_consume(t->download_limit, len);
+	mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), len);
+
 	tp->last_recv = time(NULL);
 	if (tp->snubbed) {
 		tp->snubbed = 0;
@@ -728,6 +741,15 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 		return;
 	}
 
+	/* Check upload rate limits (per-torrent and session) */
+	if (mbt_ratelimit_delay(t->upload_limit, length) > 0 ||
+	    mbt_ratelimit_delay(mbt_session_get_upload_limit(t->session), length) > 0) {
+		free(buf);
+		return; /* drop request — peer will re-request */
+	}
+	mbt_ratelimit_consume(t->upload_limit, length);
+	mbt_ratelimit_consume(mbt_session_get_upload_limit(t->session), length);
+
 	mbt_peer_send_piece(p, piece, offset, buf + offset, length);
 	free(buf);
 }
@@ -835,6 +857,16 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	if (t->have_count == t->piece_count)
 		return; /* complete — nothing to request */
 
+	/* Throttle requests if download rate exceeded */
+	uint64_t d1 = mbt_ratelimit_delay(t->download_limit, t->piece_length);
+	uint64_t d2 = mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), t->piece_length);
+	uint64_t d = d1 > d2 ? d1 : d2;
+	if (d > 0) {
+		if (!t->ratelimit_timer)
+			mbt_ev_timer_new(t->ev, &t->ratelimit_timer, d, torrent_ratelimit_retry, t);
+		return;
+	}
+
 	int limit = 64; /* default pipeline — keeps memory bounded */
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0)
@@ -913,6 +945,20 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 }
 
 static void
+torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg)
+{
+	struct mbt_torrent *t = arg;
+	mbt_ev_timer_free(timer);
+	t->ratelimit_timer = NULL;
+
+	struct torrent_peer *tp;
+	SLIST_FOREACH(tp, &t->peers, entry) {
+		if (!tp->banned && tp->peer && !mbt_peer_choked(tp->peer))
+			torrent_drive_peer(t, tp);
+	}
+}
+
+static void
 torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp)
 {
 	mbt_log_debug(MBT_LOG_TORRENT, "requesting %d metadata pieces", t->metadata_pieces);
@@ -982,6 +1028,8 @@ mbt_torrent_free(struct mbt_torrent *t)
 		mbt_ev_timer_free(t->choke_timer);
 	if (t->pex_timer)
 		mbt_ev_timer_free(t->pex_timer);
+	if (t->ratelimit_timer)
+		mbt_ev_timer_free(t->ratelimit_timer);
 	mbt_peerdb_free(&t->peerdb);
 	mbt_bitmap_unref(t->have);
 	free(t->metadata);
@@ -992,6 +1040,8 @@ mbt_torrent_free(struct mbt_torrent *t)
 		free(t->files);
 	}
 	mbt_infohash_unref(t->ih);
+	mbt_ratelimit_free(t->upload_limit);
+	mbt_ratelimit_free(t->download_limit);
 	free(t);
 }
 
@@ -1370,4 +1420,40 @@ mbt_torrent_file(struct mbt_torrent *t, int index)
 	if (index < 0 || index >= t->file_count)
 		return NULL;
 	return &t->files[index];
+}
+
+void
+mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s)
+{
+	t->session = s;
+}
+
+void
+mbt_torrent_set_upload_rate(struct mbt_torrent *t, uint64_t bytes_per_sec)
+{
+	if (!t->upload_limit && bytes_per_sec)
+		mbt_ratelimit_new(&t->upload_limit, bytes_per_sec, 0);
+	else if (t->upload_limit)
+		mbt_ratelimit_set_rate(t->upload_limit, bytes_per_sec);
+}
+
+void
+mbt_torrent_set_download_rate(struct mbt_torrent *t, uint64_t bytes_per_sec)
+{
+	if (!t->download_limit && bytes_per_sec)
+		mbt_ratelimit_new(&t->download_limit, bytes_per_sec, 0);
+	else if (t->download_limit)
+		mbt_ratelimit_set_rate(t->download_limit, bytes_per_sec);
+}
+
+uint64_t
+mbt_torrent_upload_rate(struct mbt_torrent *t)
+{
+	return mbt_ratelimit_rate(t->upload_limit);
+}
+
+uint64_t
+mbt_torrent_download_rate(struct mbt_torrent *t)
+{
+	return mbt_ratelimit_rate(t->download_limit);
 }

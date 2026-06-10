@@ -86,4 +86,10 @@ MBT_API void mbt_torrent_piece_map(struct mbt_torrent *t, uint8_t *out, uint32_t
 MBT_API int mbt_torrent_file_count(struct mbt_torrent *t);
 MBT_API const struct mbt_file *mbt_torrent_file(struct mbt_torrent *t, int index);
 
+/* Rate limiting — 0 = unlimited, adjustable at runtime */
+MBT_API void mbt_torrent_set_upload_rate(struct mbt_torrent *t, uint64_t bytes_per_sec);
+MBT_API void mbt_torrent_set_download_rate(struct mbt_torrent *t, uint64_t bytes_per_sec);
+MBT_API uint64_t mbt_torrent_upload_rate(struct mbt_torrent *t);
+MBT_API uint64_t mbt_torrent_download_rate(struct mbt_torrent *t);
+
 #endif

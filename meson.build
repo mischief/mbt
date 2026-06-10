@@ -50,6 +50,7 @@ bt_src = [
   'hex.c',
   'infohash.c',
   'log.c',
+  'ratelimit.c',
   'lsd.c',
   'magnet.c',
   'metainfo.c',

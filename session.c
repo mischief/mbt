@@ -20,6 +20,8 @@
 #include "mbt/be.h"
 #include "mbt/torrent.h"
 #include "mbt/session.h"
+#include "mbt/ratelimit.h"
+#include "mbt_internal.h"
 #include "mbt/pcp.h"
 #include "net.h"
 #include "mbt/log.h"
@@ -109,12 +111,16 @@ struct mbt_session {
 
 	/* Pending outgoing connections */
 	struct pending_connect_list pending;
+
+	/* Rate limiting */
+	struct mbt_ratelimit *upload_limit;
+	struct mbt_ratelimit *download_limit;
 };
 
 /* --- Forward declarations --- */
 
 static void session_pcp_start(struct mbt_session *s);
-
+void mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s);
 static void
 session_pcp_retry_cb(struct mbt_ev_timer *timer, void *v)
 {
@@ -457,6 +463,10 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->picker_ctx = cfg->picker_ctx;
 	s->listen_port = cfg->listen_port;
 	s->timers = cfg->timers;
+	if (cfg->upload_rate)
+		mbt_ratelimit_new(&s->upload_limit, cfg->upload_rate, 0);
+	if (cfg->download_rate)
+		mbt_ratelimit_new(&s->download_limit, cfg->download_rate, 0);
 	/* Apply defaults for zero values */
 	if (!s->timers.choke_interval) s->timers.choke_interval = 10;
 	if (!s->timers.pex_interval) s->timers.pex_interval = 60;
@@ -544,6 +554,8 @@ mbt_session_free(struct mbt_session *s)
 	if (s->maintain_timer)
 		mbt_ev_timer_free(s->maintain_timer);
 
+	mbt_ratelimit_free(s->upload_limit);
+	mbt_ratelimit_free(s->download_limit);
 	free(s);
 }
 
@@ -873,6 +885,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 		free(st);
 		return rv;
 	}
+	mbt_torrent_set_session(st->torrent, s);
 
 
 	st->session = s;
@@ -1127,4 +1140,46 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 
 	STAILQ_INSERT_TAIL(&s->pending, pc, next);
 	return 0;
+}
+
+struct mbt_ratelimit *
+mbt_session_get_upload_limit(struct mbt_session *s)
+{
+	return s ? s->upload_limit : NULL;
+}
+
+struct mbt_ratelimit *
+mbt_session_get_download_limit(struct mbt_session *s)
+{
+	return s ? s->download_limit : NULL;
+}
+
+void
+mbt_session_set_upload_rate(struct mbt_session *s, uint64_t bytes_per_sec)
+{
+	if (!s->upload_limit && bytes_per_sec)
+		mbt_ratelimit_new(&s->upload_limit, bytes_per_sec, 0);
+	else if (s->upload_limit)
+		mbt_ratelimit_set_rate(s->upload_limit, bytes_per_sec);
+}
+
+void
+mbt_session_set_download_rate(struct mbt_session *s, uint64_t bytes_per_sec)
+{
+	if (!s->download_limit && bytes_per_sec)
+		mbt_ratelimit_new(&s->download_limit, bytes_per_sec, 0);
+	else if (s->download_limit)
+		mbt_ratelimit_set_rate(s->download_limit, bytes_per_sec);
+}
+
+uint64_t
+mbt_session_upload_rate(struct mbt_session *s)
+{
+	return mbt_ratelimit_rate(s->upload_limit);
+}
+
+uint64_t
+mbt_session_download_rate(struct mbt_session *s)
+{
+	return mbt_ratelimit_rate(s->download_limit);
 }
