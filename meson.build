@@ -97,6 +97,7 @@ install_headers(
   'mbt/session.h',
   'mbt/storage.h',
   'mbt/torrent.h',
+  'mbt/timers.h',
   'mbt/tracker.h',
   'mbt/tracker_server.h',
   subdir: 'mbt',

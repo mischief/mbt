@@ -73,7 +73,7 @@ struct mbt_session {
 	void *picker_ctx;
 
 	uint16_t listen_port;
-	int request_timeout_sec;
+	struct mbt_timers timers;
 	int max_peers;
 	mbt_http_fn http;
 	void *http_arg;
@@ -159,7 +159,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 		/* DHT re-lookup every 5 min if incomplete and few peers */
 		if (s->dht && !mbt_torrent_complete(st->torrent) && !mbt_torrent_is_private(st->torrent)) {
 			time_t now = time(NULL);
-			if (now - st->last_dht_lookup >= 300) {
+			if (now - st->last_dht_lookup >= s->timers.dht_refresh) {
 				st->last_dht_lookup = now;
 				mbt_session_dht_get_peers(s, st->ih);
 			}
@@ -424,7 +424,15 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->picker = cfg->picker;
 	s->picker_ctx = cfg->picker_ctx;
 	s->listen_port = cfg->listen_port;
-	s->request_timeout_sec = cfg->request_timeout;
+	s->timers = cfg->timers;
+	/* Apply defaults for zero values */
+	if (!s->timers.choke_interval) s->timers.choke_interval = 10;
+	if (!s->timers.pex_interval) s->timers.pex_interval = 60;
+	if (!s->timers.request_timeout) s->timers.request_timeout = 15;
+	if (!s->timers.keepalive_interval) s->timers.keepalive_interval = 120;
+	if (!s->timers.dht_refresh) s->timers.dht_refresh = 900;
+	if (!s->timers.lsd_interval) s->timers.lsd_interval = 300;
+	if (!s->timers.tracker_interval) s->timers.tracker_interval = 1800;
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
@@ -443,7 +451,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 
 	/* LSD announcer: multicast our infohashes every 5 min */
 	if (cfg->mbt_lsd_announce && s->lsd && s->listen_port > 0)
-		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, 300 * 1000000ULL,
+		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, (uint64_t)s->timers.lsd_interval * 1000000ULL,
 		                 session_lsd_announce_cb, s);
 
 	*out = s;
@@ -826,7 +834,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 		.storage_ctx = s->storage_ctx,
 		.picker = s->picker,
 		.picker_ctx = s->picker_ctx,
-		.request_timeout_sec = s->request_timeout_sec,
+		.timers = s->timers,
 	};
 
 	int rv = mbt_torrent_new(&st->torrent, &cfg);

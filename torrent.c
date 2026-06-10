@@ -102,7 +102,7 @@ struct mbt_torrent {
 	struct mbt_ev_timer *choke_timer;
 	struct mbt_ev_timer *pex_timer;
 	int choke_round;  /* increments every 10s, optimistic every 3rd round (30s) */
-	int request_timeout_sec; /* 0 = disabled */
+	struct mbt_timers timers;
 
 	/* Endgame mode */
 	int endgame;  /* 1 when all pieces are requested at least once */
@@ -143,7 +143,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct mbt_torrent *t = v;
 	uint64_t now = now_usec();
-	uint64_t deadline = (uint64_t)t->request_timeout_sec * 1000000;
+	uint64_t deadline = (uint64_t)t->timers.request_timeout * 1000000;
 	int reset_count = 0;
 
 	if (!t->pieces)
@@ -271,7 +271,7 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 	free(enc);
 
 done:
-	mbt_ev_timer_mod(timer, 60 * 1000000ULL);
+	mbt_ev_timer_mod(timer, (uint64_t)t->timers.pex_interval * 1000000ULL);
 }
 
 /* --- Choking algorithm (BEP 3) --- */
@@ -323,7 +323,7 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 		tp->bytes_to = 0;
 	}
 
-	mbt_ev_timer_mod(timer, 10 * 1000000ULL);
+	mbt_ev_timer_mod(timer, (uint64_t)t->timers.choke_interval * 1000000ULL);
 }
 
 static void
@@ -910,14 +910,14 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->storage_ctx = cfg->storage_ctx;
 	t->picker = cfg->picker ? cfg->picker : mbt_picker_rarest;
 	t->picker_ctx = cfg->picker_ctx;
-	t->request_timeout_sec = cfg->request_timeout_sec ? cfg->request_timeout_sec : 15;
+	t->timers = cfg->timers;
 
 	mbt_peerdb_init(&t->peerdb);
 
 	/* Start timeout scanner */
 	mbt_ev_timer_new(t->ev, &t->timeout_timer, 5 * 1000000ULL, torrent_timeout_cb, t);
-	mbt_ev_timer_new(t->ev, &t->choke_timer, 10 * 1000000ULL, torrent_choke_cb, t);
-	mbt_ev_timer_new(t->ev, &t->pex_timer, 60 * 1000000ULL, torrent_pex_cb, t);
+	mbt_ev_timer_new(t->ev, &t->choke_timer, (uint64_t)t->timers.choke_interval * 1000000ULL, torrent_choke_cb, t);
+	mbt_ev_timer_new(t->ev, &t->pex_timer, (uint64_t)t->timers.pex_interval * 1000000ULL, torrent_pex_cb, t);
 
 	*out = t;
 	return 0;

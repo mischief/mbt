@@ -77,7 +77,7 @@ int main(void)
 	struct mbt_session_config cfg2 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
 		.storage_ctx = mem2, .listen_port = 19002,
-		.request_timeout = 2, /* fast timeout to trigger reassignment */
+		.timers = { .request_timeout = 2 }, /* fast timeout to trigger reassignment */
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);

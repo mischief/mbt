@@ -16,6 +16,8 @@ struct mbt_ev;
 struct mbt_torrent;
 struct mbt_infohash;
 
+#include "timers.h"
+
 /* Session configuration — caller's policy choices */
 struct mbt_session_config {
 	struct mbt_ev *ev;
@@ -27,11 +29,12 @@ struct mbt_session_config {
 	void *picker_ctx;
 
 	uint16_t listen_port;  /* 0 = don't listen for incoming */
-	int request_timeout;   /* seconds before stale requests reset (0 = default 15s) */
 	int max_peers;         /* max peers per torrent (0 = default 30) */
 	int mbt_lsd_announce;      /* if nonzero, periodically multicast our infohashes via LSD */
 	mbt_http_fn http;      /* HTTP callback for HTTP/HTTPS trackers (NULL = disabled) */
 	void *http_arg;
+
+	struct mbt_timers timers;  /* 0-initialized = all defaults */
 };
 
 /* Session lifecycle */
