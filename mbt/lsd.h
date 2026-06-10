@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: ISC
 #include "export.h"
-#include <net/ethernet.h>
 #include <arpa/inet.h>
 
 struct mbt_lsd_frame_info;
@@ -18,7 +17,7 @@ struct mbt_lsd_frame
 {
 	struct sockaddr_storage sa;
 	char remote[INET6_ADDRSTRLEN];
-	char frame[ETH_DATA_LEN];
+	char frame[1500];
 	int len;
 };
 

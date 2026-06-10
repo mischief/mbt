@@ -26,7 +26,7 @@ enum mbt_log_component {
 	MBT_LOG_TRACKER  = 1 << 8,  /* tracker client */
 	MBT_LOG_TRACKERD = 1 << 9,  /* tracker server */
 
-	MBT_LOG_ALL      = 0xFFFFFFFF,
+	MBT_LOG_ALL      = 0x7FFFFFFF,
 };
 
 typedef void (*mbt_log_fn)(enum mbt_log_level level, enum mbt_log_component comp,

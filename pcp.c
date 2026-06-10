@@ -250,7 +250,9 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 		((struct sockaddr_in *)&p->gateway)->sin_port = htons(PCP_PORT);
 		((struct sockaddr_in *)&p->gateway)->sin_addr.s_addr = gw;
 #else
-#error "PCP gateway auto-detection not implemented for this platform"
+		/* TODO: implement gateway detection for this platform */
+		free(p);
+		return -ENOSYS;
 #endif
 	}
 

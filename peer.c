@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include <sys/param.h>
+#include <sys/socket.h>
 #include <arpa/inet.h>
 #include <assert.h>
 #include <stdint.h>
