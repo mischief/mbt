@@ -18,6 +18,10 @@ static struct mbt_ev *ev;
 static struct mbt_session *session;
 static WINDOW *win_list, *win_detail, *win_cmd;
 static int selected;
+
+/* Rate tracking: snapshot have_count each refresh, compute delta */
+static uint32_t last_have;
+static float dl_rate_kbps;
 static int quit;
 static char cmdbuf[512];
 static int cmdlen;
@@ -30,11 +34,8 @@ draw_header(void)
 	attron(A_BOLD);
 	mvhline(0, 0, ' ', w);
 	mvprintw(0, 1, "mbt-tui");
-	uint64_t dlr = mbt_session_download_rate(session);
-	uint64_t ulr = mbt_session_upload_rate(session);
-	mvprintw(0, w - 30, "DL %llu KB/s  UL %llu KB/s",
-	         (unsigned long long)(dlr / 1024),
-	         (unsigned long long)(ulr / 1024));
+	mvprintw(0, w - 30, "DL %.0f KB/s  [%d torrents]",
+	         dl_rate_kbps, mbt_session_torrent_count(session));
 	attroff(A_BOLD);
 }
 
@@ -89,11 +90,13 @@ draw_detail(void)
 	uint32_t have = mbt_torrent_have_count(t);
 	uint32_t total = mbt_torrent_piece_count(t);
 	float pct = total ? (100.0f * have / total) : 0;
+	int peers = mbt_torrent_peer_count(t);
 
 	mvwprintw(win_detail, 0, 2, " %s ", name ? name : "(no metadata)");
-	mvwprintw(win_detail, 1, 1, "Progress: %u/%u pieces (%.1f%%)", have, total, pct);
+	mvwprintw(win_detail, 1, 1, "Pieces: %u/%u (%.1f%%)  Peers: %d  Rate: %.0f KB/s",
+	          have, total, pct, peers, dl_rate_kbps);
 
-	/* Simple progress bar */
+	/* Progress bar */
 	int barw = getmaxx(win_detail) - 4;
 	int filled = total ? (barw * have / total) : 0;
 	mvwaddch(win_detail, 2, 1, '[');
@@ -184,6 +187,20 @@ static void
 on_refresh(struct mbt_ev_timer *timer, void *arg)
 {
 	(void)arg;
+
+	/* Compute download rate from piece count delta */
+	uint32_t total_have = 0;
+	uint32_t piece_len = 0;
+	struct mbt_torrent *t = mbt_session_torrent_first(session);
+	while (t) {
+		total_have += mbt_torrent_have_count(t);
+		if (!piece_len) piece_len = mbt_torrent_piece_length(t);
+		t = mbt_session_torrent_next(session, t);
+	}
+	uint32_t delta = total_have - last_have;
+	dl_rate_kbps = (float)delta * piece_len / 1024.0f;
+	last_have = total_have;
+
 	draw_all();
 	mbt_ev_timer_mod(timer, 1000000); /* 1 sec */
 }
