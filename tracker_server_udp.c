@@ -193,10 +193,17 @@ mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint1
 
 	int rv = mbt_listen_udp(&ts->listener, ev, port, tracker_recv, ts);
 	if (rv < 0) { free(ts); return rv; }
+	ts->port = ts->listener.port;
 
 	mbt_log_info(MBT_LOG_SESSION, "tracker server listening on UDP port %hu", port);
 	*out = ts;
 	return 0;
+}
+
+uint16_t
+mbt_tracker_server_port(struct mbt_tracker_server *ts)
+{
+	return ts ? ts->port : 0;
 }
 
 void

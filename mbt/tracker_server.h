@@ -31,6 +31,7 @@ struct mbt_tracker_server;
 MBT_API int mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev,
                            uint16_t port, struct mbt_tracker_store *store);
 MBT_API void mbt_tracker_server_free(struct mbt_tracker_server *ts);
+MBT_API uint16_t mbt_tracker_server_port(struct mbt_tracker_server *ts);
 MBT_API int mbt_tracker_server_num_torrents(struct mbt_tracker_server *ts);
 MBT_API int mbt_tracker_server_num_peers(struct mbt_tracker_server *ts);
 
