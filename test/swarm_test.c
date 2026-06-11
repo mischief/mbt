@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
 			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
 			.storage_ctx = smem[i], .listen_port = 0,
 			.max_peers = num_leechers + num_seeders,
-			.timers = { .tracker_interval = 5 },
+			.timers = { .tracker_interval = 2 },
 		};
 		mbt_session_new(&seeders[i], &cfg);
 		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len);
@@ -175,7 +175,7 @@ int main(int argc, char *argv[])
 		struct mbt_session_config cfg = {
 			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
 			.storage_ctx = lmem[i], .listen_port = 0,
-			.timers = { .tracker_interval = 5 },
+			.timers = { .tracker_interval = 2 },
 		};
 		mbt_session_new(&leechers[i], &cfg);
 

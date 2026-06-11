@@ -279,7 +279,7 @@ test_dht_v6(void)
 	/* A announces after 1s, C looks up after 2s */
 	struct mbt_ev_timer *t1, *t2, *to;
 	mbt_ev_timer_new(ev, &t1, 1000000ULL, dht_do_announce, NULL);
-	mbt_ev_timer_new(ev, &t2, 4000000ULL, dht_do_lookup, NULL);
+	mbt_ev_timer_new(ev, &t2, 2000000ULL, dht_do_lookup, NULL);
 	mbt_ev_timer_new(ev, &to, 10000000ULL, timeout_cb, NULL);
 
 	dht_found = 0;

@@ -95,7 +95,7 @@ int main(void)
 
 	/* Run for 5s — should be enough for connect + choke + disconnect */
 	struct mbt_ev_timer *to;
-	mbt_ev_timer_new(ev, &to, 5 * 1000000ULL, on_timeout, NULL);
+	mbt_ev_timer_new(ev, &to, 3 * 1000000ULL, on_timeout, NULL);
 	mbt_ev_run(ev);
 
 	/* Both should have 0 peers — disconnected */

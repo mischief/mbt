@@ -819,8 +819,6 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 	/* If below cap, connect immediately */
 	if (mbt_torrent_peer_count(st->torrent) < s->max_peers)
 		mbt_session_add_peer(s, ih, addr, port);
-
-	mbt_session_add_peer(s, ih, addr, port);
 }
 
 static void session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v);
