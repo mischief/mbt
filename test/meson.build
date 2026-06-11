@@ -37,6 +37,8 @@ ratelimit_test = executable('ratelimit_test', 'ratelimit_test.c', link_with: [li
 test('ratelimit', ratelimit_test)
 
 bitfield_test = executable('bitfield_test', 'bitfield_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+seed_seed_test = executable('seed_seed_test', 'seed_seed_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('seed_seed', seed_seed_test)
 test('bitfield', bitfield_test)
 header_test = executable('header_test', 'header_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('header', header_test)
