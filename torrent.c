@@ -357,6 +357,12 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 			mbt_peer_send_choke(tp->peer, 1);
 			tp->am_choking = 1;
 		}
+		/* Disconnect seed-to-seed: neither side interested */
+		if (tp->peer && !tp->banned && !tp->peer_interested &&
+		    t->have_count == t->piece_count) {
+			mbt_peer_disconnect(tp->peer);
+			tp->banned = 1;
+		}
 	}
 
 	mbt_ev_timer_mod(timer, (uint64_t)t->timers.choke_interval * 1000000ULL);
@@ -1297,6 +1303,12 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 			}
 			if (t->have_count == t->piece_count) {
 				mbt_log_info(MBT_LOG_TORRENT, "all pieces verified, nothing to download");
+				/* Tell connected peers we're no longer interested */
+				struct torrent_peer *np;
+				SLIST_FOREACH(np, &t->peers, entry) {
+					if (np->peer && !np->banned)
+						mbt_peer_send_interested(np->peer, 0);
+				}
 				if (t->cb.on_complete)
 					t->cb.on_complete(t, t->cb_arg);
 			}
