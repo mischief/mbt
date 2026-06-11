@@ -85,7 +85,7 @@ int main(void)
 	mbt_storage_memory_put_file(memA, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfgA = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memA, .listen_port = 19401,
+		.storage_ctx = memA, .listen_port = 0,
 	};
 	struct mbt_session *sA;
 	mbt_session_new(&sA, &cfgA);
@@ -94,7 +94,7 @@ int main(void)
 	/* Seeder B: dead (advertises pieces but never sends data) */
 	struct mbt_session_config cfgB = {
 		.ev = ev, .storage_ops = &dead_ops,
-		.storage_ctx = NULL, .listen_port = 19402,
+		.storage_ctx = NULL, .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
@@ -104,7 +104,7 @@ int main(void)
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 19403,
+		.storage_ctx = memL, .listen_port = 0,
 		.timers = { .snub_timeout = 2, .request_timeout = 3 },
 	};
 	struct mbt_session *sL;
@@ -123,7 +123,8 @@ int main(void)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:19401&x.pe=127.0.0.1:19402", hex);
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
+	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB));
 	mbt_session_add_magnet(sL, magnet);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);

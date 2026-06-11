@@ -29,7 +29,6 @@
 #include "mbt/log.h"
 
 #define PIECE_LEN 16384
-#define BASE_PORT 19700
 
 static struct mbt_ev *ev;
 static int completions;
@@ -88,7 +87,6 @@ int main(int argc, char *argv[])
 		mbt_log_set(mbt_log_stderr, NULL);
 		mbt_log_set_debug(MBT_LOG_ALL);
 	}
-	uint16_t tracker_port = BASE_PORT - 1; /* 19699 */
 	int piece_len = piece_kib * 1024;
 	int total_len = piece_len * num_pieces;
 	uint8_t *data = malloc(total_len);
@@ -110,13 +108,25 @@ int main(int argc, char *argv[])
 	mbt_be_dict_append_number(info, "piece length", piece_len);
 	mbt_be_dict_append_string(info, "pieces", pieces_hash, num_pieces * 20);
 
+	unsigned char *encoded; size_t enc_len;
+
+	mbt_ev_new_default(&ev);
+
+	/* Optional tracker */
+	struct mbt_tracker_server *tracker = NULL;
+	uint16_t tracker_port = 0;
+	if (use_tracker) {
+		int rv = mbt_tracker_server_new(&tracker, ev, 0, NULL);
+		if (rv < 0) { fprintf(stderr, "tracker: %s\n", strerror(-rv)); return 1; }
+		tracker_port = mbt_tracker_server_port(tracker);
+	}
+
 	if (use_tracker) {
 		char announce[128];
-		snprintf(announce, sizeof(announce), "udp://127.0.0.1:%d/announce", tracker_port);
+		snprintf(announce, sizeof(announce), "udp://127.0.0.1:%hu/announce", tracker_port);
 		mbt_be_dict_append_string(root, "announce", announce, strlen(announce));
 	}
 
-	unsigned char *encoded; size_t enc_len;
 	mbt_be_value_encode(root, &encoded, &enc_len);
 	mbt_be_value_free(root);
 
@@ -131,26 +141,6 @@ int main(int argc, char *argv[])
 	SHA1Init(&hctx); SHA1Update(&hctx, is, ilen); SHA1Final(digest, &hctx);
 	mbt_hex_encode(digest, 20, hex, sizeof(hex));
 
-	mbt_ev_new_default(&ev);
-
-	/* Optional tracker */
-	struct mbt_tracker_server *tracker = NULL;
- /* 19699 */
-	if (use_tracker) {
-		int rv = mbt_tracker_server_new(&tracker, ev, tracker_port, NULL);
-		if (rv < 0) { fprintf(stderr, "tracker: %s\n", strerror(-rv)); return 1; }
-	}
-
-	/* Build peer list string for magnet (only used when no tracker) */
-	char peers[4096] = "";
-	if (!use_tracker) {
-		for (int i = 0; i < num_seeders; i++) {
-			char tmp2[64];
-			snprintf(tmp2, sizeof(tmp2), "&x.pe=127.0.0.1:%d", BASE_PORT + i);
-			strncat(peers, tmp2, sizeof(peers) - strlen(peers) - 1);
-		}
-	}
-
 	/* Create seeders */
 	struct mbt_session **seeders = calloc(num_seeders, sizeof(*seeders));
 	struct mbt_storage_memory **smem = calloc(num_seeders, sizeof(*smem));
@@ -159,12 +149,22 @@ int main(int argc, char *argv[])
 		mbt_storage_memory_put_file(smem[i], 0, data, total_len);
 		struct mbt_session_config cfg = {
 			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-			.storage_ctx = smem[i], .listen_port = BASE_PORT + i,
+			.storage_ctx = smem[i], .listen_port = 0,
 			.max_peers = num_leechers + num_seeders,
 			.timers = { .tracker_interval = 5 },
 		};
 		mbt_session_new(&seeders[i], &cfg);
 		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len);
+	}
+
+	/* Build peer list string for magnet (only used when no tracker) */
+	char peers[4096] = "";
+	if (!use_tracker) {
+		for (int i = 0; i < num_seeders; i++) {
+			char tmp2[64];
+			snprintf(tmp2, sizeof(tmp2), "&x.pe=127.0.0.1:%hu", mbt_session_listen_port(seeders[i]));
+			strncat(peers, tmp2, sizeof(peers) - strlen(peers) - 1);
+		}
 	}
 
 	/* Create leechers */
@@ -174,7 +174,7 @@ int main(int argc, char *argv[])
 		lmem[i] = mbt_storage_memory_new();
 		struct mbt_session_config cfg = {
 			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-			.storage_ctx = lmem[i], .listen_port = BASE_PORT + num_seeders + i,
+			.storage_ctx = lmem[i], .listen_port = 0,
 			.timers = { .tracker_interval = 5 },
 		};
 		mbt_session_new(&leechers[i], &cfg);
@@ -182,7 +182,7 @@ int main(int argc, char *argv[])
 		char magnet[8192];
 		if (use_tracker)
 			snprintf(magnet, sizeof(magnet),
-			         "magnet:?xt=urn:btih:%s&tr=udp://127.0.0.1:%d/announce",
+			         "magnet:?xt=urn:btih:%s&tr=udp://127.0.0.1:%hu/announce",
 			         hex, tracker_port);
 		else
 			snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s%s", hex, peers);

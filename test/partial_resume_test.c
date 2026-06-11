@@ -67,7 +67,7 @@ int main(void)
 	mbt_storage_memory_put_file(mem1, 0, test_data, TOTAL_LEN);
 	struct mbt_session_config cfg1 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 19101,
+		.storage_ctx = mem1, .listen_port = 0,
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
@@ -90,14 +90,14 @@ int main(void)
 
 	struct mbt_session_config cfg2 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 19102,
+		.storage_ctx = mem2, .listen_port = 0,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:19101", hex);
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, mbt_session_listen_port(s1));
 	rv = mbt_session_add_magnet(s2, magnet); assert(rv == 0);
 
 	/* Verify partial resume: should have 4/8 already */

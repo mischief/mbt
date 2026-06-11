@@ -102,7 +102,7 @@ int main(void)
 
 	struct mbt_session_config cfg2 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 19902,
+		.storage_ctx = mem2, .listen_port = 0,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
@@ -118,7 +118,7 @@ int main(void)
 
 	struct mbt_session_config cfg1 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 19901,
+		.storage_ctx = mem1, .listen_port = 0,
 		.max_pieces_per_peer = 4,
 	};
 	struct mbt_session *s1;
@@ -130,7 +130,7 @@ int main(void)
 	mbt_hex_encode(ih2->hash_sha1, 20, ih_hex, sizeof(ih_hex));
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:19902", ih_hex);
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", ih_hex, mbt_session_listen_port(s2));
 	rv = mbt_session_add_magnet(s1, magnet); assert(rv == 0);
 
 	struct mbt_torrent *t1 = mbt_session_torrent_first(s1);

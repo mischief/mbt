@@ -73,7 +73,7 @@ int main(void)
 	mbt_storage_memory_put_file(memA, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfgA = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memA, .listen_port = 19301,
+		.storage_ctx = memA, .listen_port = 0,
 	};
 	struct mbt_session *sA;
 	mbt_session_new(&sA, &cfgA);
@@ -84,7 +84,7 @@ int main(void)
 	mbt_storage_memory_put_file(memB, 0, data, PIECE_LEN * 4); /* only first 4 pieces */
 	struct mbt_session_config cfgB = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memB, .listen_port = 19302,
+		.storage_ctx = memB, .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
@@ -94,7 +94,7 @@ int main(void)
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 19303,
+		.storage_ctx = memL, .listen_port = 0,
 		.picker = mbt_picker_rarest,
 		.max_pieces_per_peer = 1, /* serialize for predictable pick order */
 	};
@@ -114,7 +114,8 @@ int main(void)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:19301&x.pe=127.0.0.1:19302", hex);
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
+	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB));
 	mbt_session_add_magnet(sL, magnet);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);

@@ -66,7 +66,7 @@ int main(void)
 	mbt_storage_memory_put_file(memA, 0, test_data, PIECE_LEN * 2);
 	struct mbt_session_config cfgA = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memA, .listen_port = 18001,
+		.storage_ctx = memA, .listen_port = 0,
 	};
 	struct mbt_session *sA;
 	rv = mbt_session_new(&sA, &cfgA); assert(rv == 0);
@@ -77,7 +77,7 @@ int main(void)
 	mbt_storage_memory_put_file(memB, PIECE_LEN * 2, test_data + PIECE_LEN * 2, PIECE_LEN * 2);
 	struct mbt_session_config cfgB = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memB, .listen_port = 18002,
+		.storage_ctx = memB, .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	rv = mbt_session_new(&sB, &cfgB); assert(rv == 0);
@@ -88,7 +88,7 @@ int main(void)
 	mbt_storage_memory_put_file(memC, PIECE_LEN * 4, test_data + PIECE_LEN * 4, PIECE_LEN * 2);
 	struct mbt_session_config cfgC = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memC, .listen_port = 18003,
+		.storage_ctx = memC, .listen_port = 0,
 	};
 	struct mbt_session *sC;
 	rv = mbt_session_new(&sC, &cfgC); assert(rv == 0);
@@ -98,7 +98,7 @@ int main(void)
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 18004,
+		.storage_ctx = memL, .listen_port = 0,
 	};
 	struct mbt_session *sL;
 	rv = mbt_session_new(&sL, &cfgL); assert(rv == 0);
@@ -116,7 +116,8 @@ int main(void)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:18001&x.pe=127.0.0.1:18002&x.pe=127.0.0.1:18003", hex);
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
+	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB), mbt_session_listen_port(sC));
 	rv = mbt_session_add_magnet(sL, magnet); assert(rv == 0);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);

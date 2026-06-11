@@ -82,7 +82,7 @@ test_peer_to_peer_v6(void)
 	mbt_storage_memory_put_file(memS, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfgS = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memS, .listen_port = 19801,
+		.storage_ctx = memS, .listen_port = 0,
 	};
 	struct mbt_session *sS;
 	mbt_session_new(&sS, &cfgS);
@@ -92,13 +92,13 @@ test_peer_to_peer_v6(void)
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 19802,
+		.storage_ctx = memL, .listen_port = 0,
 	};
 	struct mbt_session *sL;
 	mbt_session_new(&sL, &cfgL);
 
 	char magnet[256];
-	snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s&x.pe=[::1]:19801", hex);
+	snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s&x.pe=[::1]:%hu", hex, mbt_session_listen_port(sS));
 	mbt_session_add_magnet(sL, magnet);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
@@ -131,10 +131,11 @@ test_tracker_v6(void)
 
 	mbt_ev_new_default(&ev);
 
-	/* Tracker on ::1 port 19899 */
+	/* Tracker on ::1 port 0 (ephemeral) */
 	struct mbt_tracker_server *tracker;
-	int rv = mbt_tracker_server_new(&tracker, ev, 19899, NULL);
+	int rv = mbt_tracker_server_new(&tracker, ev, 0, NULL);
 	assert(rv == 0);
+	uint16_t tracker_port = mbt_tracker_server_port(tracker);
 
 	/* Seeder */
 	struct mbt_storage_memory *memS = mbt_storage_memory_new();
@@ -156,7 +157,9 @@ test_tracker_v6(void)
 		SHA1Final(pieces_hash + i * 20, &ctx);
 	}
 	mbt_be_dict_append_string(info, "pieces", pieces_hash, sizeof(pieces_hash));
-	mbt_be_dict_append_string(root, "announce", "udp://[::1]:19899/announce", 26);
+	char announce_url[64];
+	snprintf(announce_url, sizeof(announce_url), "udp://[::1]:%hu/announce", tracker_port);
+	mbt_be_dict_append_string(root, "announce", announce_url, strlen(announce_url));
 
 	unsigned char *enc2; size_t enc2_len;
 	mbt_be_value_encode(root, &enc2, &enc2_len);
@@ -164,7 +167,7 @@ test_tracker_v6(void)
 
 	struct mbt_session_config cfgS = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memS, .listen_port = 19803,
+		.storage_ctx = memS, .listen_port = 0,
 		.timers = { .tracker_interval = 5 },
 	};
 	struct mbt_session *sS;
@@ -175,7 +178,7 @@ test_tracker_v6(void)
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 19804,
+		.storage_ctx = memL, .listen_port = 0,
 		.timers = { .tracker_interval = 5 },
 	};
 	struct mbt_session *sL;
@@ -183,7 +186,7 @@ test_tracker_v6(void)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&tr=udp://[::1]:19899/announce", hex);
+	         "magnet:?xt=urn:btih:%s&tr=udp://[::1]:%hu/announce", hex, tracker_port);
 	mbt_session_add_magnet(sL, magnet);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);

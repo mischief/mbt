@@ -49,17 +49,12 @@ int main(void)
 
 	struct mbt_be_value *root = NULL, *info = NULL;
 	mbt_be_dict_new(&root);
-	mbt_be_dict_append_string(root, "announce", "udp://127.0.0.1:20969/announce", 30);
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append(root, "info", info);
 	mbt_be_dict_append_number(info, "length", TOTAL_LEN);
 	mbt_be_dict_append_string(info, "name", "shared_test.bin", 15);
 	mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
 	mbt_be_dict_append_string(info, "pieces", pieces_hash, sizeof(pieces_hash));
-
-	unsigned char *encoded; size_t enc_len;
-	assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
-	mbt_be_value_free(root);
 
 	mbt_ev_new_default(&ev);
 
@@ -69,18 +64,28 @@ int main(void)
 
 	/* UDP tracker using shared store */
 	struct mbt_tracker_server *udp;
-	rv = mbt_tracker_server_new(&udp, ev, 20969, store); assert(rv == 0);
+	rv = mbt_tracker_server_new(&udp, ev, 0, store); assert(rv == 0);
+	uint16_t udp_port = mbt_tracker_server_port(udp);
 
 	/* HTTP tracker using same shared store */
 	struct mbt_tracker_http *http;
-	rv = mbt_tracker_http_new(&http, ev, 20970, store); assert(rv == 0);
+	rv = mbt_tracker_http_new(&http, ev, 0, store); assert(rv == 0);
+
+	/* Now encode the torrent with the actual tracker port */
+	char announce[64];
+	snprintf(announce, sizeof(announce), "udp://127.0.0.1:%hu/announce", udp_port);
+	mbt_be_dict_append_string(root, "announce", announce, strlen(announce));
+
+	unsigned char *encoded; size_t enc_len;
+	assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
+	mbt_be_value_free(root);
 
 	/* Seeder announces via UDP */
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(mem1, 0, test_data, TOTAL_LEN);
 	struct mbt_session_config cfg1 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 20891,
+		.storage_ctx = mem1, .listen_port = 0,
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
@@ -90,7 +95,7 @@ int main(void)
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
 	struct mbt_session_config cfg2 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 20892,
+		.storage_ctx = mem2, .listen_port = 0,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);

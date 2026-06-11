@@ -501,8 +501,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	mbt_ev_timer_new(s->ev, &s->maintain_timer, 5 * 1000000ULL, session_maintain_cb, s);
 
 	/* Listen socket for incoming peers */
-	if (s->listen_port > 0)
-		session_listen(s);
+	session_listen(s);
 
 	/* LSD announcer: multicast our infohashes every 5 min */
 	if (cfg->mbt_lsd_announce && s->lsd && s->listen_port > 0)

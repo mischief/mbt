@@ -124,7 +124,7 @@ main(void)
 		.ev = ev,
 		.storage_ops = mbt_storage_memory_ops(),
 		.storage_ctx = mem1,
-		.listen_port = 16881,
+		.listen_port = 0,
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1);
@@ -145,7 +145,7 @@ main(void)
 		.ev = ev,
 		.storage_ops = mbt_storage_memory_ops(),
 		.storage_ctx = mem2,
-		.listen_port = 16882,
+		.listen_port = 0,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2);
@@ -155,7 +155,7 @@ main(void)
 	/* Add magnet pointing at seeder */
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:16881", infohash_hex);
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", infohash_hex, mbt_session_listen_port(s1));
 	rv = mbt_session_add_magnet(s2, magnet);
 	assert(rv == 0);
 
@@ -184,8 +184,8 @@ main(void)
 
 	/* Verify DHT PORT exchange: both sessions should have routing entries
 	 * from the peer's PORT message (no external bootstrap used). */
-	assert(mbt_session_dht_port(s1) == 16881);
-	assert(mbt_session_dht_port(s2) == 16882);
+	assert(mbt_session_dht_port(s1) == mbt_session_listen_port(s1));
+	assert(mbt_session_dht_port(s2) == mbt_session_listen_port(s2));
 	fprintf(stderr, "e2e_test: DHT PORT exchange verified\n");
 
 	/* Cleanup */

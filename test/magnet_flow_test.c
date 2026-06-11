@@ -50,7 +50,6 @@ int main(void)
 
 	struct mbt_be_value *root = NULL, *info = NULL;
 	mbt_be_dict_new(&root);
-	mbt_be_dict_append_string(root, "announce", "udp://127.0.0.1:17969/announce", 30);
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append(root, "info", info);
 	mbt_be_dict_append_number(info, "length", TOTAL_LEN);
@@ -78,14 +77,30 @@ int main(void)
 
 	/* Tracker */
 	struct mbt_tracker_server *tracker;
-	rv = mbt_tracker_server_new(&tracker, ev, 17969, NULL); assert(rv == 0);
+	rv = mbt_tracker_server_new(&tracker, ev, 0, NULL); assert(rv == 0);
+	uint16_t tracker_port = mbt_tracker_server_port(tracker);
+
+	/* Re-encode torrent with actual tracker port */
+	free(encoded);
+	mbt_be_dict_new(&root);
+	mbt_be_dict_new(&info);
+	char announce[64];
+	snprintf(announce, sizeof(announce), "udp://127.0.0.1:%hu/announce", tracker_port);
+	mbt_be_dict_append_string(root, "announce", announce, strlen(announce));
+	mbt_be_dict_append(root, "info", info);
+	mbt_be_dict_append_number(info, "length", TOTAL_LEN);
+	mbt_be_dict_append_string(info, "name", "magnet_test.bin", 15);
+	mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
+	mbt_be_dict_append_string(info, "pieces", pieces_hash, sizeof(pieces_hash));
+	assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
+	mbt_be_value_free(root);
 
 	/* Seeder */
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(mem1, 0, test_data, TOTAL_LEN);
 	struct mbt_session_config cfg1 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 17891,
+		.storage_ctx = mem1, .listen_port = 0,
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
@@ -95,14 +110,14 @@ int main(void)
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
 	struct mbt_session_config cfg2 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 17892,
+		.storage_ctx = mem2, .listen_port = 0,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&tr=udp://127.0.0.1:17969/announce", hex);
+	         "magnet:?xt=urn:btih:%s&tr=udp://127.0.0.1:%hu/announce", hex, tracker_port);
 	rv = mbt_session_add_magnet(s2, magnet); assert(rv == 0);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);

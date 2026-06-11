@@ -64,7 +64,7 @@ int main(void)
 	mbt_storage_memory_put_file(mem1, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfg1 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 19951,
+		.storage_ctx = mem1, .listen_port = 0,
 		.timers = { .choke_interval = 1 }, /* fast choke for test */
 	};
 	struct mbt_session *s1;
@@ -78,7 +78,7 @@ int main(void)
 	mbt_storage_memory_put_file(mem2, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfg2 = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 19952,
+		.storage_ctx = mem2, .listen_port = 0,
 		.timers = { .choke_interval = 1 },
 	};
 	struct mbt_session *s2;
@@ -90,7 +90,7 @@ int main(void)
 	mbt_hex_encode(ih->hash_sha1, 20, ih_hex, sizeof(ih_hex));
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:19951", ih_hex);
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", ih_hex, mbt_session_listen_port(s1));
 	rv = mbt_session_add_magnet(s2, magnet); assert(rv == 0);
 
 	/* Run for 5s — should be enough for connect + choke + disconnect */
