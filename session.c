@@ -450,6 +450,7 @@ session_listen(struct mbt_session *s)
 {
 	int rv = mbt_listen_tcp(&s->listener, s->ev, s->listen_port, listen_accept_cb, s);
 	if (rv < 0) return rv;
+	s->listen_port = s->listener.port; /* update with actual bound port */
 
 	mbt_log_info(MBT_LOG_SESSION, "listening on port %hu", s->listen_port);
 	return 0;
@@ -786,6 +787,11 @@ mbt_session_dht_port(struct mbt_session *s)
 	return (s && s->dht) ? s->listen_port : 0;
 }
 
+uint16_t
+mbt_session_listen_port(struct mbt_session *s)
+{
+	return s ? s->listen_port : 0;
+}
 void
 mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih)
 {

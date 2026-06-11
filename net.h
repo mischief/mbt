@@ -17,6 +17,7 @@ typedef void (*mbt_ev_io_cb)(struct mbt_ev_io *, int fd, uint32_t events, void *
 struct mbt_listener {
 	int fd4, fd6;
 	struct mbt_ev_io *io4, *io6;
+	uint16_t port; /* actual bound port (from getsockname after bind) */
 };
 
 /* TCP listener pair (listen + accept) */

@@ -79,6 +79,7 @@ MBT_API void mbt_session_disable_dht(struct mbt_session *s);
 MBT_API int mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, uint16_t port);
 MBT_API void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih);
 MBT_API uint16_t mbt_session_dht_port(struct mbt_session *s);
+MBT_API uint16_t mbt_session_listen_port(struct mbt_session *s);
 MBT_API int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                          const char *addr, uint16_t port);
 

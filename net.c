@@ -105,7 +105,15 @@ mbt_listen_tcp(struct mbt_listener *l, struct mbt_ev *ev, uint16_t port,
 	l->fd4 = -1; l->fd6 = -1;
 
 	l->fd4 = bind_listen_tcp(AF_INET, port);
+	/* If port=0, discover assigned port for v6 to match */
+	if (l->fd4 >= 0 && port == 0) {
+		struct sockaddr_in sa;
+		socklen_t len = sizeof(sa);
+		getsockname(l->fd4, (struct sockaddr *)&sa, &len);
+		port = ntohs(sa.sin_port);
+	}
 	l->fd6 = bind_listen_tcp(AF_INET6, port);
+	l->port = port;
 
 	if (l->fd4 < 0 && l->fd6 < 0)
 		return l->fd4; /* both failed, return first error */
@@ -126,7 +134,14 @@ mbt_listen_udp(struct mbt_listener *l, struct mbt_ev *ev, uint16_t port,
 	l->fd4 = -1; l->fd6 = -1;
 
 	l->fd4 = bind_udp(AF_INET, port);
+	if (l->fd4 >= 0 && port == 0) {
+		struct sockaddr_in sa;
+		socklen_t len = sizeof(sa);
+		getsockname(l->fd4, (struct sockaddr *)&sa, &len);
+		port = ntohs(sa.sin_port);
+	}
 	l->fd6 = bind_udp(AF_INET6, port);
+	l->port = port;
 
 	if (l->fd4 < 0 && l->fd6 < 0)
 		return l->fd4;
