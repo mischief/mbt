@@ -2,7 +2,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +11,7 @@
 #include "mbt/event.h"
 #include "mbt/infohash.h"
 #include "mbt/tracker.h"
+#include "mbt/resolve.h"
 #include "internal.h"
 #include "mbt/log.h"
 
@@ -267,10 +267,82 @@ parse_udp_url(const char *url, char *host, size_t hostlen, uint16_t *port)
 	return 0;
 }
 
+/* Context for async DNS → UDP announce */
+struct udp_announce_ctx {
+	char host[256];
+	uint16_t port;
+	struct mbt_tracker_request req;
+};
+
+static void
+udp_announce_resolved(struct sockaddr_storage *addr, socklen_t len, int err, void *arg)
+{
+	struct udp_announce_ctx *ctx = arg;
+	struct udp_tracker *ut;
+	int rv;
+
+	if (err < 0) {
+		if (ctx->req.done_cb)
+			ctx->req.done_cb(ctx->req.ih, err, 0, ctx->req.arg);
+		free(ctx);
+		return;
+	}
+
+	ut = calloc(1, sizeof(*ut));
+	if (!ut) {
+		if (ctx->req.done_cb)
+			ctx->req.done_cb(ctx->req.ih, -ENOMEM, 0, ctx->req.arg);
+		free(ctx);
+		return;
+	}
+
+	ut->ev = ctx->req.ev;
+	ut->req = ctx->req;
+	ut->fd = -1;
+
+	/* Set up destination address */
+	memcpy(&ut->addr, addr, len);
+	ut->addrlen = len;
+	if (ut->addr.ss_family == AF_INET6)
+		((struct sockaddr_in6 *)&ut->addr)->sin6_port = htons(ctx->port);
+	else
+		((struct sockaddr_in *)&ut->addr)->sin_port = htons(ctx->port);
+
+	/* Create UDP socket matching resolved address family */
+	ut->fd = socket(ut->addr.ss_family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	if (ut->fd < 0) {
+		free(ut); free(ctx);
+		return;
+	}
+
+	/* Watch for responses */
+	rv = mbt_ev_io_new(ut->ev, &ut->io, ut->fd, MBT_EV_READ, udp_on_read, ut);
+	if (rv < 0) {
+		close(ut->fd); free(ut); free(ctx);
+		return;
+	}
+
+	/* Timeout */
+	rv = mbt_ev_timer_new(ut->ev, &ut->timer, 15 * 1000000ULL, udp_on_timeout, ut);
+	if (rv < 0) {
+		mbt_ev_io_free(ut->io); close(ut->fd); free(ut); free(ctx);
+		return;
+	}
+
+	/* Send connect */
+	rv = udp_send_connect(ut);
+	if (rv < 0) {
+		udp_cleanup(ut); free(ctx);
+		return;
+	}
+
+	mbt_log_debug(MBT_LOG_SESSION, "tracker: UDP connect sent to %s:%hu", ctx->host, ctx->port);
+	free(ctx);
+}
+
 int
 mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req)
 {
-	struct udp_tracker *ut;
 	char host[256];
 	uint16_t port;
 	int rv;
@@ -279,64 +351,13 @@ mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req)
 	if (rv < 0)
 		return rv;
 
-	/* Resolve hostname (blocking for now — TODO: async DNS) */
-	struct addrinfo hints = { .ai_socktype = SOCK_DGRAM };
-	struct addrinfo *res;
+	struct udp_announce_ctx *ctx = calloc(1, sizeof(*ctx));
+	if (!ctx) return -ENOMEM;
+	memcpy(ctx->host, host, sizeof(ctx->host));
+	ctx->port = port;
+	ctx->req = *req;
 
-	rv = getaddrinfo(host, NULL, &hints, &res);
-	if (rv != 0)
-		return -EHOSTUNREACH;
-
-	ut = calloc(1, sizeof(*ut));
-	if (!ut) {
-		freeaddrinfo(res);
-		return -ENOMEM;
-	}
-
-	ut->ev = req->ev;
-	ut->req = *req;
-	ut->fd = -1;
-
-	/* Set up destination address */
-	memcpy(&ut->addr, res->ai_addr, res->ai_addrlen);
-	ut->addrlen = res->ai_addrlen;
-	if (ut->addr.ss_family == AF_INET6)
-		((struct sockaddr_in6 *)&ut->addr)->sin6_port = htons(port);
-	else
-		((struct sockaddr_in *)&ut->addr)->sin_port = htons(port);
-	freeaddrinfo(res);
-
-	/* Create UDP socket matching resolved address family */
-	ut->fd = socket(ut->addr.ss_family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (ut->fd < 0) {
-		free(ut);
-		return -errno;
-	}
-
-	/* Watch for responses */
-	rv = mbt_ev_io_new(ut->ev, &ut->io, ut->fd, MBT_EV_READ, udp_on_read, ut);
-	if (rv < 0) {
-		close(ut->fd);
-		free(ut);
-		return rv;
-	}
-
-	/* Timeout */
-	rv = mbt_ev_timer_new(ut->ev, &ut->timer, 15 * 1000000ULL, udp_on_timeout, ut);
-	if (rv < 0) {
-		mbt_ev_io_free(ut->io);
-		close(ut->fd);
-		free(ut);
-		return rv;
-	}
-
-	/* Send connect */
-	rv = udp_send_connect(ut);
-	if (rv < 0) {
-		udp_cleanup(ut);
-		return rv;
-	}
-
-	mbt_log_debug(MBT_LOG_SESSION, "tracker: UDP connect sent to %s:%hu", host, port);
+	rv = mbt_resolve(req->ev, host, port, udp_announce_resolved, ctx, NULL);
+	if (rv < 0) { free(ctx); return rv; }
 	return 0;
 }

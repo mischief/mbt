@@ -9,7 +9,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,6 +26,7 @@
 #include "mbt/log.h"
 #include "mbt/hex.h"
 #include "mbt/ratelimit.h"
+#include "mbt/resolve.h"
 #include "net.h"
 
 /* --- Constants --- */
@@ -874,6 +874,32 @@ mbt_dht_free(struct mbt_dht *d)
 	free(d);
 }
 
+struct dht_bootstrap_ctx {
+	struct mbt_dht *d;
+};
+
+static void
+dht_bootstrap_resolved(struct sockaddr_storage *addr, socklen_t len, int err, void *arg)
+{
+	struct dht_bootstrap_ctx *ctx = arg;
+	(void)len;
+	if (err < 0 || !addr) { free(ctx); return; }
+
+	uint8_t fake_id[20];
+	random_bytes(fake_id, 20);
+	routing_add(ctx->d, fake_id, addr);
+
+	char buf[INET6_ADDRSTRLEN];
+	if (addr->ss_family == AF_INET)
+		inet_ntop(AF_INET, &((struct sockaddr_in *)addr)->sin_addr, buf, sizeof(buf));
+	else
+		inet_ntop(AF_INET6, &((struct sockaddr_in6 *)addr)->sin6_addr, buf, sizeof(buf));
+	mbt_log_info(MBT_LOG_DHT, "bootstrapping from %s", buf);
+
+	dht_send_find_node(ctx->d, addr, ctx->d->id);
+	free(ctx);
+}
+
 int
 mbt_dht_bootstrap(struct mbt_dht *d, const char *addr, uint16_t port)
 {
@@ -888,18 +914,14 @@ mbt_dht_bootstrap(struct mbt_dht *d, const char *addr, uint16_t port)
 		s4->sin_family = AF_INET;
 		s4->sin_port = htons(port);
 	} else {
-		/* Try DNS resolution */
-		struct addrinfo hints = { .ai_socktype = SOCK_DGRAM };
-		struct addrinfo *res;
-		char portstr[8];
-		snprintf(portstr, sizeof(portstr), "%hu", port);
-		if (getaddrinfo(addr, portstr, &hints, &res) != 0)
-			return -EINVAL;
-		memcpy(&sa, res->ai_addr, res->ai_addrlen);
-		freeaddrinfo(res);
+		/* Async DNS resolution */
+		struct dht_bootstrap_ctx *ctx = calloc(1, sizeof(*ctx));
+		if (!ctx) return -ENOMEM;
+		ctx->d = d;
+		return mbt_resolve(d->ev, addr, port, dht_bootstrap_resolved, ctx, NULL);
 	}
 
-	/* Add as a temporary routing node so lookups can use it */
+	/* IP literal — immediate */
 	uint8_t fake_id[20];
 	random_bytes(fake_id, 20);
 	routing_add(d, fake_id, &sa);
