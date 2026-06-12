@@ -694,6 +694,11 @@ mbt_session_enable_lsd(struct mbt_session *s)
 		return rv;
 	}
 
+	/* Start announce timer if we have a listen port */
+	if (!s->lsd_announce_timer && s->listen_port > 0)
+		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, 15 * 1000000ULL,
+		                 session_lsd_announce_cb, s);
+
 	return 0;
 }
 
