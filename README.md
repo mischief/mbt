@@ -2,19 +2,25 @@
 
 A production-grade BitTorrent client library and embeddable tracker, written in C.
 
-Downloads, seeds, and tracks torrents. Pluggable event loop (sd-event or libevent), pluggable storage, no global state. Suitable for embedding in daemons, GUI applications, containers, or CLI tools.
+Downloads, seeds, and tracks torrents. Pluggable event loop (sd-event or libevent), pluggable storage, pluggable DNS resolver, no global state. Suitable for embedding in daemons, GUI applications, containers, or CLI tools.
 
 ## Features
 
 - Full download + seed (piece verification, endgame, resume)
-- DHT (BEP 5), PEX (BEP 11), LSD (BEP 14)
+- DHT (BEP 5) with PORT message bootstrap from peers
+- PEX (BEP 11), LSD (BEP 14), dual-stack IPv6
 - UDP + HTTP tracker client and server
 - Magnet URI support with BEP 9 metadata exchange
 - Fast Extension (BEP 6), private torrents (BEP 27)
-- Choking algorithm (BEP 3 tit-for-tat)
-- Async I/O throughout (no blocking, no threads)
-- Memory-bounded (one piece buffer per peer)
-- 28 tests, ASan + valgrind clean
+- Choking algorithm (BEP 3 tit-for-tat, optimistic unchoke)
+- Rate limiting (token bucket, per-session and per-torrent)
+- NAT traversal via PCP (RFC 6887, TCP + UDP mapping)
+- Rarest-first piece picker with anti-snubbing
+- Async I/O throughout (no blocking in event loop)
+- Async HTTP tracker callback API
+- Memory-bounded (configurable pieces per peer, default 4)
+- 41 tests, ASan + valgrind clean, zero leaks
+- Portable: Linux, OpenBSD 7.9, FreeBSD 15.0
 
 ## Building
 
@@ -24,16 +30,11 @@ ninja -C build
 meson test -C build
 ```
 
-Install:
+Options:
 ```
-meson install -C build
-# Headers → <prefix>/include/mbt/
-# Library → <prefix>/lib/libmbt.so
-```
-
-Production build (no tests):
-```
-meson setup build -Devent_backend=sd-event -Dtests=false
+-Devent_backend=sd-event|libevent
+-Ddns_backend=blocking|cares|asr
+-Dtests=false
 ```
 
 ## Testing
@@ -47,10 +48,12 @@ meson setup build -Devent_backend=sd-event -Dtests=false
 
 | Tool | Description |
 |------|-------------|
-| `mbt-get` | Download by .torrent or magnet URI |
+| `mbt-get` | Download by .torrent or magnet URI (-r for rate limit) |
+| `mbt-tui` | ncurses client (torrent list, peers, piece map, log) |
 | `mbt-torrent` | Create, inspect, convert .torrent files |
 | `mbt-dht` | Standalone DHT peer lookup |
 | `mbt-tracker` | UDP + HTTP tracker daemon |
+| `mbt-pcp` | PCP port mapping tool (-k for persistent) |
 | `mbt-lsd` | LSD auto-discovery + replicate |
 
 ## BEP Compliance
@@ -58,8 +61,9 @@ meson setup build -Devent_backend=sd-event -Dtests=false
 | BEP | Name | Status |
 |-----|------|--------|
 | 3 | Protocol | ✅ Complete |
-| 5 | DHT | ✅ Complete |
+| 5 | DHT + PORT | ✅ Complete |
 | 6 | Fast Extension | ✅ Complete |
+| 7 | IPv6 Tracker Extension | ✅ Complete |
 | 9 | Metadata Exchange | ✅ Complete |
 | 10 | Extension Protocol | ✅ Complete |
 | 11 | PEX | ✅ Send + receive |
@@ -68,6 +72,7 @@ meson setup build -Devent_backend=sd-event -Dtests=false
 | 15 | UDP Tracker | ✅ Client + server |
 | 23 | Compact Peer Lists | ✅ Complete |
 | 27 | Private Torrents | ✅ Complete |
+| 32 | DHT IPv6 | ✅ Complete |
 | 19 | HTTP Seeding | ❌ Not implemented |
 | 29 | µTP | ❌ Not implemented |
 | 55 | Holepunch | ❌ Not implemented |
@@ -80,7 +85,11 @@ meson setup build -Devent_backend=sd-event -Dtests=false
 struct mbt_ev *ev;
 mbt_ev_new_default(&ev);
 
-struct mbt_session_config cfg = { .ev = ev, .listen_port = 6881 };
+struct mbt_session_config cfg = {
+    .ev = ev,
+    .listen_port = 6881,
+    .download_rate = 1024 * 1024, /* 1 MB/s */
+};
 struct mbt_session *s;
 mbt_session_new(&s, &cfg);
 mbt_session_enable_dht(s);
