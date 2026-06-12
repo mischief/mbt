@@ -427,6 +427,7 @@ main(int argc, char *argv[])
 	};
 	mbt_session_new(&session, &cfg);
 	mbt_session_enable_dht(session);
+	mbt_session_enable_lsd(session);
 
 	/* Add any args as torrents (.torrent, magnet, or raw infohash) */
 	for (int i = 0; i < argc; i++) {
