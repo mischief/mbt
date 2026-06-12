@@ -44,6 +44,20 @@ elif event_backend == 'libevent'
   add_project_arguments('-DHAVE_LIBEVENT', language: 'c')
 endif
 
+# DNS resolver backend
+dns_backend = get_option('dns_backend')
+if dns_backend == 'cares'
+  cares_dep = dependency('libcares')
+  deps += cares_dep
+  resolve_src = ['resolve_cares.c']
+  add_project_arguments('-DHAVE_CARES', language: 'c')
+elif dns_backend == 'asr'
+  resolve_src = ['resolve_asr.c']
+  add_project_arguments('-DHAVE_ASR', language: 'c')
+else
+  resolve_src = ['resolve_blocking.c']
+endif
+
 # Core library
 bt_src = [
   'be.c',
@@ -71,7 +85,7 @@ bt_src = [
   'pcp.c',
   'net.c',
   'dht.c',
-] + ev_src
+] + ev_src + resolve_src
 
 mbt_inc = include_directories('.', 'mbt')
 
