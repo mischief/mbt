@@ -102,11 +102,10 @@
 - [x] HAVE broadcast for resumed pieces after metadata arrives
 - [x] Torrent state API (init/downloading/stalled/seeding)
 - [x] Rate limiting (token bucket, session + per-torrent, configurable at runtime)
-- [ ] Ephemeral ports for tests (listen_port=0, session reports bound port)
+- [x] Ephemeral ports (listen_port=0, mbt_session_listen_port, mbt_tracker_server_port)
 - [ ] Track peer origin (tracker/DHT/PEX/LSD/incoming) on connected torrent_peer
 - [ ] Expose peer source in mbt_peer_stats and mbt-tui peer list
 ### Medium-term (swarm quality)
-- [ ] Upload/download rate limiting
 - [ ] Tracker store: expire stale peers (no re-announce within 2× interval)
 - [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
 
