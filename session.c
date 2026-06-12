@@ -169,9 +169,8 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 	struct mbt_session *s = v;
 	struct session_torrent *st;
 
-	(void)timer;
 	if (!s->lsd || s->listen_port == 0)
-		return;
+		goto reschedule;
 
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		if (mbt_torrent_is_private(st->torrent)) continue; /* BEP 27 */
@@ -180,6 +179,9 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 		mbt_lsd_announce(s->lsd, hex, s->listen_port);
 		mbt_log_debug(MBT_LOG_LSD, "LSD announce: %s port %hu", hex, s->listen_port);
 	}
+
+reschedule:
+	mbt_ev_timer_mod(timer, (uint64_t)s->timers.lsd_interval * 1000000ULL);
 }
 
 static void
@@ -516,7 +518,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 
 	/* LSD announcer: multicast our infohashes every 5 min */
 	if (cfg->mbt_lsd_announce && s->lsd && s->listen_port > 0)
-		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, (uint64_t)s->timers.lsd_interval * 1000000ULL,
+		mbt_ev_timer_new(s->ev, &s->lsd_announce_timer, 15 * 1000000ULL,
 		                 session_lsd_announce_cb, s);
 
 	/* PCP port mapping */
