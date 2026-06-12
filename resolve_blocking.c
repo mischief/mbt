@@ -12,8 +12,24 @@
 #include "mbt/event.h"
 
 struct mbt_resolve {
-	int cancelled;
+	int dummy;
 };
+
+static int
+gai_to_errno(int gai_err)
+{
+	switch (gai_err) {
+	case EAI_NONAME:  return -ENOENT;
+	case EAI_AGAIN:   return -EAGAIN;
+	case EAI_MEMORY:  return -ENOMEM;
+#ifdef EAI_NODATA
+	case EAI_NODATA:  return -ENOENT;
+#endif
+	case EAI_FAIL:    return -EIO;
+	case EAI_FAMILY:  return -EAFNOSUPPORT;
+	default:          return -EIO;
+	}
+}
 
 int
 mbt_resolve(struct mbt_ev *ev, const char *host, uint16_t port,
@@ -27,7 +43,7 @@ mbt_resolve(struct mbt_ev *ev, const char *host, uint16_t port,
 
 	int rv = getaddrinfo(host, portstr, &hints, &res);
 	if (rv != 0) {
-		cb(NULL, 0, -EHOSTUNREACH, arg);
+		cb(NULL, 0, gai_to_errno(rv), arg);
 		return 0;
 	}
 

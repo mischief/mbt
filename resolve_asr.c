@@ -48,7 +48,7 @@ resolve_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	}
 
 	if (ar.ar_gai_errno != 0 || !ar.ar_addrinfo) {
-		r->cb(NULL, 0, -EHOSTUNREACH, r->arg);
+		r->cb(NULL, 0, -ENOENT, r->arg);
 	} else {
 		struct sockaddr_storage ss = {0};
 		socklen_t len = ar.ar_addrinfo->ai_addrlen;
@@ -85,7 +85,7 @@ mbt_resolve(struct mbt_ev *ev, const char *host, uint16_t port,
 	if (rv != 0) {
 		/* Resolved immediately (cached?) */
 		if (ar.ar_gai_errno != 0 || !ar.ar_addrinfo) {
-			cb(NULL, 0, -EHOSTUNREACH, arg);
+			cb(NULL, 0, -ENOENT, arg);
 		} else {
 			struct sockaddr_storage ss = {0};
 			socklen_t len = ar.ar_addrinfo->ai_addrlen;
