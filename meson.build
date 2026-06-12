@@ -1,7 +1,6 @@
-project('mbt', 'c', version: '0.1', default_options: ['c_std=c23', 'warning_level=3'], license: 'ISC')
+project('mbt', 'c', version: '0.1', default_options: ['c_std=c23', 'warning_level=3', 'werror=true'], license: 'ISC', meson_version: '>=1.1')
 
 add_project_arguments('-D_DEFAULT_SOURCE', language: 'c')
-add_project_arguments('-Werror', language: 'c')
 
 cc = meson.get_compiler('c')
 
@@ -31,6 +30,13 @@ endif
 
 # Event backend (one or the other)
 event_backend = get_option('event_backend')
+if event_backend == 'auto'
+  if host_machine.system() == 'linux'
+    event_backend = 'sd-event'
+  else
+    event_backend = 'libevent'
+  endif
+endif
 
 if event_backend == 'sd-event'
   libsystemd_dep = dependency('libsystemd')
@@ -46,6 +52,14 @@ endif
 
 # DNS resolver backend
 dns_backend = get_option('dns_backend')
+if dns_backend == 'auto'
+  if host_machine.system() == 'openbsd'
+    dns_backend = 'asr'
+  else
+    dns_backend = 'blocking'
+  endif
+endif
+
 if dns_backend == 'cares'
   cares_dep = dependency('libcares')
   deps += cares_dep
