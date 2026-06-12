@@ -851,6 +851,11 @@ mbt_peer_addr(struct mbt_peer *p)
 	return p->addr;
 }
 
+const uint8_t *
+mbt_peer_id(struct mbt_peer *p)
+{
+	return p->their_id;
+}
 uint16_t
 mbt_peer_port(struct mbt_peer *p)
 {

@@ -19,6 +19,7 @@
 #include "mbt/hex.h"
 #include "mbt/be.h"
 #include "mbt/torrent.h"
+#include "mbt/peer.h"
 #include "mbt/session.h"
 #include "mbt/ratelimit.h"
 #include "mbt/pcp.h"
@@ -401,6 +402,17 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		mbt_ev_io_free(pa->io);
 		free(pa);
 		return;
+	}
+
+	/* Reject duplicate peer_id (same peer connecting twice) */
+	for (int i = 0; i < mbt_torrent_peer_count(st->torrent); i++) {
+		struct mbt_peer *ep = mbt_torrent_peer_at(st->torrent, i);
+		if (ep && mbt_peer_id_eq(mbt_peer_id(ep), their_id)) {
+			close(pa->fd);
+			mbt_ev_io_free(pa->io);
+			free(pa);
+			return;
+		}
 	}
 
 	/* Enforce peer limit */
@@ -1160,6 +1172,18 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	}
 	if (mbt_torrent_peer_count(st->torrent) + pending >= s->max_peers)
 		return 0;
+
+	/* Skip if already connected or connecting to this address */
+	STAILQ_FOREACH(pcc, &s->pending, next) {
+		if (pcc->torrent == st->torrent &&
+		    strcmp(pcc->addr, addr) == 0 && pcc->port == port)
+			return 0;
+	}
+	for (int i = 0; i < mbt_torrent_peer_count(st->torrent); i++) {
+		struct mbt_peer *p = mbt_torrent_peer_at(st->torrent, i);
+		if (p && mbt_peer_port(p) == port && strcmp(mbt_peer_addr(p), addr) == 0)
+			return 0;
+	}
 
 	/* Set up non-blocking connect */
 	fd = mbt_connect_tcp(addr, port);

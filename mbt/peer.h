@@ -5,6 +5,14 @@
 #include "export.h"
 
 #include <sys/queue.h>
+#include <string.h>
+
+#define MBT_PEER_ID_LEN 20
+
+static inline int mbt_peer_id_eq(const uint8_t *a, const uint8_t *b)
+{
+	return memcmp(a, b, MBT_PEER_ID_LEN) == 0;
+}
 #include <netinet/in.h>
 #include <stdint.h>
 
@@ -127,6 +135,7 @@ MBT_API uint32_t mbt_peer_flags(struct mbt_peer *p);          /* mbt_peer_flags 
 MBT_API size_t mbt_peer_metadata_size(struct mbt_peer *p);    /* 0 if unknown */
 MBT_API int mbt_peer_reqq(struct mbt_peer *p);                /* max outstanding, 0=unknown */
 MBT_API const char *mbt_peer_addr(struct mbt_peer *p);
+MBT_API const uint8_t *mbt_peer_id(struct mbt_peer *p);
 MBT_API uint16_t mbt_peer_port(struct mbt_peer *p);
 
 #endif
