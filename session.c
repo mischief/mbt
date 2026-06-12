@@ -44,6 +44,7 @@ struct session_torrent {
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
 	time_t last_dht_lookup;
+	time_t last_dht_announce;
 	int completed_announced; /* sent event=completed to tracker */
 	STAILQ_ENTRY(session_torrent) next;
 };
@@ -219,6 +220,16 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 			if (now - st->last_dht_lookup >= interval) {
 				st->last_dht_lookup = now;
 				mbt_session_dht_get_peers(s, st->ih);
+			}
+		}
+
+		/* DHT announce: tell the network we have this torrent (every 15 min) */
+		if (s->dht && mbt_torrent_have_count(st->torrent) > 0 &&
+		    !mbt_torrent_is_private(st->torrent)) {
+			time_t now = time(NULL);
+			if (now - st->last_dht_announce >= s->timers.dht_refresh) {
+				st->last_dht_announce = now;
+				mbt_dht_announce(s->dht, st->ih, s->listen_port);
 			}
 		}
 	}

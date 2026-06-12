@@ -423,6 +423,7 @@ main(int argc, char *argv[])
 		.storage_ops = mbt_storage_file_ops(),
 		.storage_ctx = (void *)".",
 		.listen_port = 0,
+		.mbt_lsd_announce = 1,
 		.http = curl_http_fn,
 	};
 	mbt_session_new(&session, &cfg);
