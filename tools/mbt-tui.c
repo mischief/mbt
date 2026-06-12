@@ -258,6 +258,10 @@ draw_cmd(void)
 static void
 draw_all(void)
 {
+	if (!session) {
+		refresh();
+		return;
+	}
 	draw_header();
 	draw_torrent_list();
 	draw_detail();
@@ -398,6 +402,21 @@ main(int argc, char *argv[])
 
 	mbt_ev_new_default(&ev);
 
+	/* Init ncurses early so UI renders while session starts */
+	initscr();
+	cbreak();
+	noecho();
+	nodelay(stdscr, TRUE);
+	keypad(stdscr, TRUE);
+	curs_set(0);
+
+	int list_h = LINES / 2;
+	int det_h = LINES - list_h - 2;
+	win_list = newwin(list_h, COLS, 1, 0);
+	win_detail = newwin(det_h, COLS, list_h + 1, 0);
+	win_cmd = newwin(1, COLS, LINES - 1, 0);
+	draw_all();
+
 	struct mbt_session_config cfg = {
 		.ev = ev,
 		.storage_ops = mbt_storage_file_ops(),
@@ -419,20 +438,6 @@ main(int argc, char *argv[])
 			mbt_session_add_magnet(session, mag);
 		}
 	}
-
-	/* Init ncurses */
-	initscr();
-	cbreak();
-	noecho();
-	nodelay(stdscr, TRUE);
-	keypad(stdscr, TRUE);
-	curs_set(0);
-
-	int list_h = LINES / 2;
-	int det_h = LINES - list_h - 2;
-	win_list = newwin(list_h, COLS, 1, 0);
-	win_detail = newwin(det_h, COLS, list_h + 1, 0);
-	win_cmd = newwin(1, COLS, LINES - 1, 0);
 
 	/* Watch stdin for input */
 	struct mbt_ev_io *input_io;
