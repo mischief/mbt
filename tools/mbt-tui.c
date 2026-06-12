@@ -334,12 +334,13 @@ on_refresh(struct mbt_ev_timer *timer, void *arg)
 {
 	(void)arg;
 
-	/* Compute download rate from piece count delta (sliding window) */
+	/* Compute download rate — only count pieces from actively downloading torrents */
 	uint32_t total_have = 0;
 	uint32_t piece_len = 0;
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
 	while (t) {
-		total_have += mbt_torrent_have_count(t);
+		if (mbt_torrent_state(t) == MBT_TORRENT_DOWNLOADING)
+			total_have += mbt_torrent_have_count(t);
 		if (!piece_len) piece_len = mbt_torrent_piece_length(t);
 		t = mbt_session_torrent_next(session, t);
 	}
@@ -446,6 +447,7 @@ main(int argc, char *argv[])
 	/* Refresh timer */
 	struct mbt_ev_timer *refresh_timer;
 	mbt_ev_timer_new(ev, &refresh_timer, 1000000, on_refresh, NULL);
+
 
 	draw_all();
 	mbt_ev_run(ev);
