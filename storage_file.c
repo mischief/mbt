@@ -42,12 +42,17 @@ mkdirs(const char *path)
 {
 	char *tmp = strdup(path);
 	char *dir = dirname(tmp);
+	int rv = 0;
 	if (strlen(dir) > 1) {
-		/* Recursively create parent dirs */
 		char *parent = strdup(dir);
-		mkdirs(parent);
+		rv = mkdirs(parent);
 		free(parent);
-		mkdir(dir, 0755);
+		if (rv < 0) { free(tmp); return rv; }
+		if (mkdir(dir, 0755) < 0 && errno != EEXIST) {
+			rv = -errno;
+			free(tmp);
+			return rv;
+		}
 	}
 	free(tmp);
 	return 0;
@@ -85,7 +90,11 @@ mbt_storage_file_open(void *ctx, struct mbt_torrent *t)
 			         name ? name : "download", f->path);
 		}
 
-		mkdirs(path);
+		int rv2 = mkdirs(path);
+		if (rv2 < 0) {
+			mbt_log_warn(MBT_LOG_STORAGE, "mkdir for %s: %s", path, strerror(-rv2));
+			return rv2;
+		}
 
 		fs.entries[i].fd = open(path, O_RDWR | O_CREAT, 0644);
 		if (fs.entries[i].fd < 0) {
