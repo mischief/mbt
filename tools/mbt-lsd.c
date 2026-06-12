@@ -72,6 +72,7 @@ main(int argc, char *argv[])
 		.on_lsd_announce = on_lsd,
 	};
 	mbt_session_set_callbacks(session, &cb);
+	mbt_session_enable_lsd(session);
 
 	printf("Listening for LSD announcements (download to %s)\n", outdir);
 
