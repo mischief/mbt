@@ -148,6 +148,14 @@ mbt_resolve(struct mbt_ev *ev, const char *host, uint16_t port,
 	struct ares_addrinfo_hints hints = { .ai_socktype = SOCK_DGRAM };
 	ares_getaddrinfo(r->channel, host, NULL, &hints, ares_addrinfo_cb, r);
 
+	/* If resolved synchronously (cached/immediate NXDOMAIN), clean up now */
+	if (r->done) {
+		ares_destroy(r->channel);
+		free(r);
+		if (out) *out = NULL;
+		return 0;
+	}
+
 	if (out) *out = r;
 	return 0;
 }
