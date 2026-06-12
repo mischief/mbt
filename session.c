@@ -665,6 +665,8 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	if (rv < 0)
 		return;
 
+	mbt_log_debug(MBT_LOG_LSD, "LSD received from %s:%hu", info->remote, info->port);
+
 	STAILQ_FOREACH(ih, &info->infohashes, next) {
 		struct session_torrent *st = session_find(s, ih);
 
@@ -680,6 +682,7 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			}
 		} else {
 			if (st) {
+				mbt_log_info(MBT_LOG_LSD, "LSD peer %s:%hu for known torrent", info->remote, info->port);
 				mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), info->remote, info->port, MBT_SOURCE_LSD);
 				mbt_session_add_peer(s, ih, info->remote, info->port);
 			}
