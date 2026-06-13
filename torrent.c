@@ -1330,7 +1330,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn)
 		return -ENOMEM;
 
 	rv = mbt_peer_new(&peer, t->ev, conn, t->ih, t->peer_id,
-	                  t->piece_count, &torrent_peer_cbs, t);
+	                  t->piece_count, MBT_SOURCE_MANUAL, &torrent_peer_cbs, t);
 	if (rv < 0) {
 		free(tp);
 		return rv;
@@ -1359,7 +1359,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 		return -ENOMEM;
 
 	rv = mbt_peer_new_incoming(&peer, t->ev, conn, t->ih, t->peer_id,
-	                           t->piece_count, ext, their_id,
+	                           t->piece_count, MBT_SOURCE_INCOMING, ext, their_id,
 	                           t->metadata_len,
 	                           &torrent_peer_cbs, t);
 	if (rv < 0) {

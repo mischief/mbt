@@ -19,6 +19,9 @@
 
 #include "mbt/sha1_compat.h"
 
+#define DHT_PEER_ID_LEN 20
+#define DHT_PEER_ID_STRLEN (DHT_PEER_ID_LEN * 2)
+
 #include "mbt/dht.h"
 #include "mbt/event.h"
 #include "mbt/infohash.h"
@@ -214,14 +217,14 @@ make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 static void
 routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr)
 {
-	if (memcmp(id, d->id, 20) == 0) return; /* don't add ourselves */
+	if (memcmp(id, d->id, DHT_PEER_ID_LEN) == 0) return; /* don't add ourselves */
 
 	int idx = bucket_index(d->id, id);
 	struct dht_bucket *b = &d->buckets[idx];
 
 	/* Already in bucket? Update last_seen */
 	for (int i = 0; i < b->count; i++) {
-		if (memcmp(b->nodes[i].id, id, 20) == 0) {
+		if (memcmp(b->nodes[i].id, id, DHT_PEER_ID_LEN) == 0) {
 			b->nodes[i].last_seen = time(NULL);
 			b->nodes[i].addr = *addr;
 			return;

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #define MBT_PEER_ID_LEN 20
+#define MBT_PEER_ID_STRLEN (MBT_PEER_ID_LEN * 2)
 
 static inline int mbt_peer_id_eq(const uint8_t *a, const uint8_t *b)
 {
@@ -86,13 +87,13 @@ struct mbt_peer_callbacks {
 /* Create peer from a connected mbt_conn (takes ownership of conn) */
 MBT_API int mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
                  struct mbt_infohash *ih, const uint8_t peer_id[20],
-                 uint32_t piece_count,
+                 uint32_t piece_count, uint8_t source,
                  struct mbt_peer_callbacks *cb, void *arg);
 
 /* Create peer from an already-accepted incoming connection (handshake already read) */
 MBT_API int mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
                           struct mbt_infohash *ih, const uint8_t peer_id[20],
-                          uint32_t piece_count, const uint8_t ext[8], const uint8_t their_id[20],
+                          uint32_t piece_count, uint8_t source, const uint8_t ext[8], const uint8_t their_id[20],
                           size_t metadata_size,
                           struct mbt_peer_callbacks *cb, void *arg);
 
@@ -137,5 +138,7 @@ MBT_API int mbt_peer_reqq(struct mbt_peer *p);                /* max outstanding
 MBT_API const char *mbt_peer_addr(struct mbt_peer *p);
 MBT_API const uint8_t *mbt_peer_id(struct mbt_peer *p);
 MBT_API uint16_t mbt_peer_port(struct mbt_peer *p);
+MBT_API uint8_t mbt_peer_source(struct mbt_peer *p);
+MBT_API const char *mbt_peer_source_str(uint8_t source);
 
 #endif

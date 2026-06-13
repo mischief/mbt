@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include "mbt/peerdb.h"  /* for mbt_peer_source enum */
 
 #include "mbt/log.h"
 #include "mbt/event.h"
@@ -40,6 +41,7 @@ struct mbt_peer {
 	uint32_t flags;
 	char addr[INET6_ADDRSTRLEN];
 	uint16_t port;
+	uint8_t source;  /* mbt_peer_source flags */
 
 	struct mbt_peer_callbacks cb;
 	void *cb_arg;
@@ -638,7 +640,7 @@ peer_on_event(struct mbt_conn *c, int err, void *v)
 int
 mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
              struct mbt_infohash *ih, const uint8_t peer_id[20],
-             uint32_t piece_count,
+             uint32_t piece_count, uint8_t source,
              struct mbt_peer_callbacks *cb, void *arg)
 {
 	struct mbt_peer *p;
@@ -654,6 +656,7 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 	memcpy(p->our_id, peer_id, 20);
 	p->cb = *cb;
 	p->cb_arg = arg;
+	p->source = source;
 	p->peer_choking = 1;
 	p->am_choking = 1;
 	p->piece_count = piece_count;
@@ -687,7 +690,7 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 int
 mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
                       struct mbt_infohash *ih, const uint8_t peer_id[20],
-                      uint32_t piece_count, const uint8_t ext[8], const uint8_t their_id[20],
+                      uint32_t piece_count, uint8_t source, const uint8_t ext[8], const uint8_t their_id[20],
                       size_t metadata_size,
                       struct mbt_peer_callbacks *cb, void *arg)
 {
@@ -704,6 +707,10 @@ mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn 
 	memcpy(p->our_id, peer_id, 20);
 	p->cb = *cb;
 	p->cb_arg = arg;
+	p->source = source;
+
+	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: incoming peer from %s", p->addr, p->port,
+	              mbt_peer_source_str(source));
 	p->peer_choking = 1;
 	p->am_choking = 1;
 	p->piece_count = piece_count;
@@ -855,6 +862,25 @@ const uint8_t *
 mbt_peer_id(struct mbt_peer *p)
 {
 	return p->their_id;
+}
+uint8_t
+mbt_peer_source(struct mbt_peer *p)
+{
+	return p->source;
+}
+const char *
+mbt_peer_source_str(uint8_t source)
+{
+	switch (source) {
+	case MBT_SOURCE_TRACKER: return "tracker";
+	case MBT_SOURCE_DHT: return "dht";
+	case MBT_SOURCE_PEX: return "pex";
+	case MBT_SOURCE_LSD: return "lsd";
+	case MBT_SOURCE_INCOMING: return "incoming";
+	case MBT_SOURCE_MANUAL: return "manual";
+	case MBT_SOURCE_MAGNET: return "magnet";
+	default: return "unknown";
+	}
 }
 uint16_t
 mbt_peer_port(struct mbt_peer *p)

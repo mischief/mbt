@@ -24,6 +24,7 @@ enum mbt_peer_source {
 	MBT_SOURCE_LSD     = 1 << 3,
 	MBT_SOURCE_INCOMING = 1 << 4,
 	MBT_SOURCE_MANUAL  = 1 << 5,
+	MBT_SOURCE_MAGNET  = 1 << 6,  /* from magnet x.pe parameter */
 };
 
 struct mbt_peer_entry {

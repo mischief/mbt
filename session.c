@@ -211,7 +211,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 			if (!pe)
 				break;
 			pe->state = MBT_PEERDB_CONNECTING;
-			mbt_session_add_peer(s, st->ih, pe->addr, pe->port);
+			mbt_session_add_peer(s, st->ih, pe->addr, pe->port, pe->sources);
 		}
 
 		/* Announce event=completed once when torrent finishes */
@@ -397,7 +397,10 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	memcpy(their_id, pa->hs + 48, 20);
 
 	/* Reject self-connections */
-	if (memcmp(their_id, s->peer_id, 20) == 0) {
+	if (memcmp(their_id, s->peer_id, MBT_PEER_ID_LEN) == 0) {
+		char hex[MBT_PEER_ID_STRLEN + 1];
+		mbt_hex_encode(s->peer_id, MBT_PEER_ID_LEN, hex, sizeof(hex));
+		mbt_log_debug(MBT_LOG_SESSION, "self-connection rejected: peer_id=%s", hex);
 		close(pa->fd);
 		mbt_ev_io_free(pa->io);
 		free(pa);
@@ -690,13 +693,13 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 				}
 				if (st)
 					mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), info->remote, info->port, MBT_SOURCE_LSD);
-				mbt_session_add_peer(s, ih, info->remote, info->port);
+				mbt_session_add_peer(s, ih, info->remote, info->port, MBT_SOURCE_LSD);
 			}
 		} else {
 			if (st) {
 				mbt_log_info(MBT_LOG_LSD, "LSD peer %s:%hu for known torrent", info->remote, info->port);
 				mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), info->remote, info->port, MBT_SOURCE_LSD);
-				mbt_session_add_peer(s, ih, info->remote, info->port);
+				mbt_session_add_peer(s, ih, info->remote, info->port, MBT_SOURCE_LSD);
 			}
 		}
 	}
@@ -863,7 +866,7 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 
 	/* If below cap, connect immediately */
 	if (mbt_torrent_peer_count(st->torrent) < s->max_peers)
-		mbt_session_add_peer(s, ih, addr, port);
+		mbt_session_add_peer(s, ih, addr, port, MBT_SOURCE_TRACKER);
 }
 
 static void session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v);
@@ -1076,9 +1079,9 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri)
 		return rv;
 	}
 
-	/* Connect peer hints */
+	/* Connect peer hints (from x.pe in magnet URI) */
 	for (int i = 0; i < m.peer_count; i++)
-		mbt_session_add_peer(s, ih, m.peers[i].addr, m.peers[i].port);
+		mbt_session_add_peer(s, ih, m.peers[i].addr, m.peers[i].port, MBT_SOURCE_MAGNET);
 
 	/* Announce to trackers from magnet */
 	struct session_torrent *st = session_find(s, ih);
@@ -1168,7 +1171,7 @@ mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih)
 
 int
 mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
-                     const char *addr, uint16_t port)
+                     const char *addr, uint16_t port, uint8_t source)
 {
 	int rv, fd;
 	struct session_torrent *st;
@@ -1218,7 +1221,8 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	int yes = 1;
 	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
 
-	mbt_log_debug(MBT_LOG_SESSION, "connecting to %s:%hu", addr, port);
+	mbt_log_debug(MBT_LOG_SESSION, "connecting to %s:%hu from %s", addr, port,
+	              mbt_peer_source_str(source));
 
 	/* Wait for writable (handles both instant connect and EINPROGRESS) */
 	pc = calloc(1, sizeof(*pc));

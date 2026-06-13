@@ -111,4 +111,8 @@ test('swarm_tracker', swarm_test, timeout: 60, args: ['--seeders', '3', '--leech
 test('swarm_single_seed', swarm_test, timeout: 60, args: ['--seeders', '1', '--leechers', '8', '--pieces', '20', '--piece-size', '8'])
 
 ipv6_test = executable('ipv6_test', 'ipv6_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+
+
+peer_source_test = executable('peer_source_test', 'peer_source_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('peer_source', peer_source_test)
 test('ipv6', ipv6_test, timeout: 30)

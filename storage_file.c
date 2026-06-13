@@ -133,7 +133,7 @@ mbt_storage_file_write_piece(void *ctx, uint32_t index, const void *data, size_t
 		uint64_t write_start = piece_offset > e->offset ? piece_offset - e->offset : 0;
 		uint64_t data_start = piece_offset > e->offset ? 0 : e->offset - piece_offset;
 		uint64_t can_write = e->length - write_start;
-		size_t to_write = remaining - data_start;
+		size_t to_write = remaining;
 		if (to_write > can_write)
 			to_write = can_write;
 
@@ -141,9 +141,9 @@ mbt_storage_file_write_piece(void *ctx, uint32_t index, const void *data, size_t
 		if (rv < 0)
 			return -errno;
 
-		remaining -= (data_start + to_write);
-		piece_offset += (data_start + to_write);
-		p += (data_start + to_write);
+		remaining -= to_write;
+		piece_offset += to_write;
+		p += to_write;
 	}
 
 	return 0;
