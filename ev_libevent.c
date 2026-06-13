@@ -6,11 +6,7 @@
 
 #include "mbt/event.h"
 
-struct ev_lev {
-	struct mbt_ev base;
-	struct event_base *base_ev;
-	int owned; /* if true, free base_ev on destroy */
-};
+#include "ev_lev_internal.h"
 
 struct ev_lev_io {
 	struct mbt_ev *ev;

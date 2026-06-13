@@ -24,11 +24,7 @@ struct conn_lev {
 };
 
 /* Access the underlying event_base from our ev_libevent backend */
-struct ev_lev {
-	struct mbt_ev base;
-	struct event_base *base_ev;
-	int owned;
-};
+#include "ev_lev_internal.h"
 
 static void
 conn_lev_on_read(struct bufferevent *bev, void *v)

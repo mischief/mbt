@@ -14,11 +14,7 @@
 #include "sdbuf.h"
 
 /* Access the underlying sd_event* from our ev_sd backend */
-struct ev_sd {
-	struct mbt_ev base;
-	sd_event *loop;
-	int owned;
-};
+#include "ev_sd_internal.h"
 
 struct conn_sd {
 	struct mbt_conn base;

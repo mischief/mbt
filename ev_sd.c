@@ -6,11 +6,7 @@
 
 #include "mbt/event.h"
 
-struct ev_sd {
-	struct mbt_ev base;
-	sd_event *loop;
-	int owned;
-};
+#include "ev_sd_internal.h"
 
 struct ev_sd_io {
 	struct mbt_ev *ev;
