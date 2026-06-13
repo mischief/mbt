@@ -169,7 +169,7 @@ mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, size_t len)
 		uint64_t read_start = piece_offset > e->offset ? piece_offset - e->offset : 0;
 		uint64_t data_start = piece_offset > e->offset ? 0 : e->offset - piece_offset;
 		uint64_t can_read = e->length - read_start;
-		size_t to_read = remaining - data_start;
+		size_t to_read = remaining;
 		if (to_read > can_read)
 			to_read = can_read;
 
@@ -179,9 +179,9 @@ mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, size_t len)
 		if ((size_t)rv < to_read)
 			return -EIO; /* short read — file truncated or not yet written */
 
-		remaining -= (data_start + to_read);
-		piece_offset += (data_start + to_read);
-		p += (data_start + to_read);
+		remaining -= to_read;
+		piece_offset += to_read;
+		p += to_read;
 	}
 
 	return 0;
