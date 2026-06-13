@@ -972,6 +972,13 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 	if (s->dht && st->torrent && !mbt_torrent_is_private(st->torrent))
 		mbt_session_dht_get_peers(s, ih);
 
+	/* Immediate LSD announce for this infohash */
+	if (s->lsd && s->listen_port > 0 && !mbt_torrent_is_private(st->torrent)) {
+		char hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
+		mbt_infohash_string(ih, hex, sizeof(hex));
+		mbt_lsd_announce(s->lsd, hex, s->listen_port);
+	}
+
 	return 0;
 }
 
