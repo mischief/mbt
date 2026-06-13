@@ -269,39 +269,54 @@ err:
 int
 mbt_lsd_announce(struct mbt_lsd *lsd, const char *infohash_hex, uint16_t port)
 {
-	char buf[256];
-	int len;
+	return mbt_lsd_announce_multi(lsd, &infohash_hex, 1, port);
+}
+
+int
+mbt_lsd_announce_multi(struct mbt_lsd *lsd, const char **hashes, int count, uint16_t port)
+{
+	char buf[4096];
+	int off = 0;
 	struct sockaddr_in dst = {
 		.sin_family = AF_INET,
 		.sin_port = htons(6771),
 		.sin_addr.s_addr = inet_addr("239.192.152.143"),
 	};
 
-	len = snprintf(buf, sizeof(buf),
+	off += snprintf(buf + off, sizeof(buf) - off,
 		"BT-SEARCH * HTTP/1.1\r\n"
 		"Host: 239.192.152.143:6771\r\n"
-		"Port: %hu\r\n"
-		"Infohash: %s\r\n"
-		"\r\n", port, infohash_hex);
+		"Port: %hu\r\n", port);
 
-	if (len < 0 || (size_t)len >= sizeof(buf))
+	for (int i = 0; i < count && off < (int)sizeof(buf) - 60; i++)
+		off += snprintf(buf + off, sizeof(buf) - off, "Infohash: %s\r\n", hashes[i]);
+
+	off += snprintf(buf + off, sizeof(buf) - off, "\r\n");
+
+	if (off < 0 || (size_t)off >= sizeof(buf))
 		return -ENOMEM;
 
-	sendto(lsd->fd, buf, len, 0, (struct sockaddr *)&dst, sizeof(dst));
+	sendto(lsd->fd, buf, off, 0, (struct sockaddr *)&dst, sizeof(dst));
 
 	/* Also send on IPv6 multicast if available */
 	if (lsd->fd6 >= 0) {
+		char buf6[4096];
+		int off6 = 0;
 		struct sockaddr_in6 dst6 = { .sin6_family = AF_INET6, .sin6_port = htons(6771) };
 		inet_pton(AF_INET6, "ff15::efc0:988f", &dst6.sin6_addr);
-		char buf6[256];
-		int len6 = snprintf(buf6, sizeof(buf6),
+
+		off6 += snprintf(buf6 + off6, sizeof(buf6) - off6,
 			"BT-SEARCH * HTTP/1.1\r\n"
 			"Host: [ff15::efc0:988f]:6771\r\n"
-			"Port: %hu\r\n"
-			"Infohash: %s\r\n"
-			"\r\n", port, infohash_hex);
-		if (len6 > 0 && (size_t)len6 < sizeof(buf6))
-			sendto(lsd->fd6, buf6, len6, 0, (struct sockaddr *)&dst6, sizeof(dst6));
+			"Port: %hu\r\n", port);
+
+		for (int i = 0; i < count && off6 < (int)sizeof(buf6) - 60; i++)
+			off6 += snprintf(buf6 + off6, sizeof(buf6) - off6, "Infohash: %s\r\n", hashes[i]);
+
+		off6 += snprintf(buf6 + off6, sizeof(buf6) - off6, "\r\n");
+
+		if (off6 > 0 && (size_t)off6 < sizeof(buf6))
+			sendto(lsd->fd6, buf6, off6, 0, (struct sockaddr *)&dst6, sizeof(dst6));
 	}
 
 	return 0;

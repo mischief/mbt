@@ -38,4 +38,5 @@ MBT_API int mbt_lsd_init(struct mbt_lsd **out, int setfl);
 MBT_API int mbt_lsd_recv(struct mbt_lsd *lsd, struct mbt_lsd_frame **out);
 MBT_API int mbt_lsd_frame_parse(struct mbt_lsd_frame *frame, struct mbt_lsd_frame_info **out);
 MBT_API int mbt_lsd_announce(struct mbt_lsd *lsd, const char *infohash_hex, uint16_t port);
+MBT_API int mbt_lsd_announce_multi(struct mbt_lsd *lsd, const char **hashes, int count, uint16_t port);
 

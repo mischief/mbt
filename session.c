@@ -173,12 +173,21 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 	if (!s->lsd || s->listen_port == 0)
 		goto reschedule;
 
+	/* Batch all infohashes into one announce */
+	const char *hashes[256];
+	int n = 0;
 	STAILQ_FOREACH(st, &s->torrents, next) {
-		if (mbt_torrent_is_private(st->torrent)) continue; /* BEP 27 */
-		char hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
-		mbt_infohash_string(st->ih, hex, sizeof(hex));
-		mbt_lsd_announce(s->lsd, hex, s->listen_port);
-		mbt_log_debug(MBT_LOG_LSD, "LSD announce: %s port %hu", hex, s->listen_port);
+		if (mbt_torrent_is_private(st->torrent)) continue;
+		if (n >= 256) break;
+		/* Use static buffer per entry — safe since we send before returning */
+		static char hexbuf[256][MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
+		mbt_infohash_string(st->ih, hexbuf[n], sizeof(hexbuf[n]));
+		hashes[n] = hexbuf[n];
+		n++;
+	}
+	if (n > 0) {
+		mbt_lsd_announce_multi(s->lsd, hashes, n, s->listen_port);
+		mbt_log_debug(MBT_LOG_LSD, "LSD announce: %d torrents on port %hu", n, s->listen_port);
 	}
 
 reschedule:
