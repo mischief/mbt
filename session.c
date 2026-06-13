@@ -178,7 +178,10 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 	int n = 0;
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		if (mbt_torrent_is_private(st->torrent)) continue;
-		if (n >= 256) break;
+		if (n >= 256) {
+			mbt_log_warn(MBT_LOG_LSD, "LSD announce truncated at 256 torrents");
+			break;
+		}
 		/* Use static buffer per entry — safe since we send before returning */
 		static char hexbuf[256][MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
 		mbt_infohash_string(st->ih, hexbuf[n], sizeof(hexbuf[n]));
