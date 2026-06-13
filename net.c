@@ -118,11 +118,17 @@ mbt_listen_tcp(struct mbt_listener *l, struct mbt_ev *ev, uint16_t port,
 	if (l->fd4 < 0 && l->fd6 < 0)
 		return l->fd4; /* both failed, return first error */
 
-	if (l->fd4 >= 0)
-		mbt_ev_io_new(ev, &l->io4, l->fd4, MBT_EV_READ, cb, arg);
-	if (l->fd6 >= 0)
-		mbt_ev_io_new(ev, &l->io6, l->fd6, MBT_EV_READ, cb, arg);
-
+	int rv;
+	if (l->fd4 >= 0) {
+		rv = mbt_ev_io_new(ev, &l->io4, l->fd4, MBT_EV_READ, cb, arg);
+		if (rv < 0) { close(l->fd4); l->fd4 = -1; }
+	}
+	if (l->fd6 >= 0) {
+		rv = mbt_ev_io_new(ev, &l->io6, l->fd6, MBT_EV_READ, cb, arg);
+		if (rv < 0) { close(l->fd6); l->fd6 = -1; }
+	}
+	if (l->fd4 < 0 && l->fd6 < 0)
+		return -ENOMEM;
 	return 0;
 }
 
@@ -146,10 +152,17 @@ mbt_listen_udp(struct mbt_listener *l, struct mbt_ev *ev, uint16_t port,
 	if (l->fd4 < 0 && l->fd6 < 0)
 		return l->fd4;
 
-	if (l->fd4 >= 0)
-		mbt_ev_io_new(ev, &l->io4, l->fd4, MBT_EV_READ, cb, arg);
-	if (l->fd6 >= 0)
-		mbt_ev_io_new(ev, &l->io6, l->fd6, MBT_EV_READ, cb, arg);
+	int rv2;
+	if (l->fd4 >= 0) {
+		rv2 = mbt_ev_io_new(ev, &l->io4, l->fd4, MBT_EV_READ, cb, arg);
+		if (rv2 < 0) { close(l->fd4); l->fd4 = -1; }
+	}
+	if (l->fd6 >= 0) {
+		rv2 = mbt_ev_io_new(ev, &l->io6, l->fd6, MBT_EV_READ, cb, arg);
+		if (rv2 < 0) { close(l->fd6); l->fd6 = -1; }
+	}
+	if (l->fd4 < 0 && l->fd6 < 0)
+		return -ENOMEM;
 
 	return 0;
 }
