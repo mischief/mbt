@@ -1,6 +1,6 @@
 project('mbt', 'c', version: '0.1', default_options: ['c_std=c23', 'warning_level=3', 'werror=true'], license: 'ISC', meson_version: '>=1.1')
 
-add_project_arguments('-D_DEFAULT_SOURCE', language: 'c')
+add_project_arguments('-D_DEFAULT_SOURCE', '-D_GNU_SOURCE', language: 'c')
 
 cc = meson.get_compiler('c')
 

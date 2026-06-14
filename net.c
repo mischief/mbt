@@ -5,7 +5,6 @@
  * Portable listener pairs (v4 + v6), outbound connect, UDP send.
  * Works on Linux (dual-stack optional) and OpenBSD (v6only mandatory).
  */
-#define _GNU_SOURCE
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>

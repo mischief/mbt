@@ -4,7 +4,6 @@
  *
  * Minimal HTTP/1.0 server handling GET /announce requests.
  */
-#define _GNU_SOURCE
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>

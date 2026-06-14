@@ -5,7 +5,6 @@
  * Handles connect, announce, and scrape requests.
  * Stores peers per infohash in a simple hash table.
  */
-#define _GNU_SOURCE
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>

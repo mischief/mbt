@@ -2,7 +2,6 @@
 /*
  * metainfo.c — .torrent file parsing, creation, and serialization
  */
-#define _GNU_SOURCE
 #include <sys/stat.h>
 #include <dirent.h>
 #include <stdlib.h>

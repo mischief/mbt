@@ -5,7 +5,6 @@
  * Sends MAP requests to the gateway, handles retransmit + renewal.
  * Supports IPv4 and IPv6. Single mapping per instance.
  */
-#define _GNU_SOURCE
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>

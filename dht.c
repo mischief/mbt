@@ -5,7 +5,6 @@
  * Kademlia-based distributed hash table over UDP.
  * Standalone: only depends on event loop, bencode, infohash, logging.
  */
-#define _GNU_SOURCE
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>

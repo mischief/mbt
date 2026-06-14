@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: ISC
-#define _GNU_SOURCE
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
