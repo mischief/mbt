@@ -154,7 +154,7 @@ usage(const char *prog)
 	fprintf(stderr, "  -L            disable LSD (Local Service Discovery)\n");
 	fprintf(stderr, "  -P            enable PCP port mapping\n");
 	fprintf(stderr, "  -S            seed after download completes\n");
-	fprintf(stderr, "  -l port       listen port (default: 6881)\n");
+	fprintf(stderr, "  -l port       listen port (default: random)\n");
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
 	fprintf(stderr, "  -r KB/s       download rate limit (default: unlimited)\n");
@@ -172,7 +172,7 @@ main(int argc, char *argv[])
 	int use_dht = 0;
 	int use_pcp = 0;
 	int max_peers = 0;
-	int listen_port = 6881;
+	int listen_port = 0;
 	uint64_t dl_rate = 0;
 	mbt_picker_fn picker = mbt_picker_sequential;
 
