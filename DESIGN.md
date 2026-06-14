@@ -119,6 +119,7 @@ A C library (`libmbt`) providing composable BitTorrent primitives. Programs buil
 | `mbt/be.h` | Bencode parser/encoder |
 | `mbt/bitmap.h` | Bit-accurate bitmap (refcounted) |
 | `mbt/infohash.h` | Infohash type (refcounted, SHA1/SHA256) |
+| `mbt/peer_source.h` | Peer source enum (tracker/DHT/PEX/LSD/incoming/magnet) |
 | `mbt/peerdb.h` | Peer database (RB tree, source tracking, backoff) |
 | `mbt/timers.h` | Timer configuration struct |
 | `mbt/log.h` | Logging (component mask, custom callback) |
@@ -131,7 +132,7 @@ A C library (`libmbt`) providing composable BitTorrent primitives. Programs buil
 2. **Callbacks up, calls down.** Peer reports events via callbacks. Torrent/session calls down.
 3. **Backend agnostic.** Core never calls epoll/sd-event directly — goes through event ops.
 4. **Compile-time backend selection.** Event loop, DNS resolver, conn layer chosen at build time via meson options. Auto-detected per platform.
-5. **Testable in isolation.** Each component works standalone. 42 tests, ASan + valgrind clean.
+5. **Testable in isolation.** Each component works standalone. 43 tests, ASan + valgrind clean, AFL fuzz-hardened.
 6. **Silent by default.** No output unless caller sets a log callback.
 7. **`mbt_` namespace.** All public symbols use `mbt_` prefix. Internal symbols hidden via `-fvisibility=hidden`.
 8. **Dual-stack networking.** All sockets handle IPv4 and IPv6. `IPV6_V6ONLY=1` on all v6 sockets.
@@ -158,8 +159,8 @@ ninja -C build && meson test -C build
 ├── internal.h              # shared internal definitions
 ├── net.h / net.c           # portable listener helpers
 ├── tools/                  # CLI tools
-├── test/                   # 42 unit + integration tests
-├── fuzz/                   # AFL++ harness + corpus
+├── test/                   # 43 unit + integration tests
+├── fuzz/                   # AFL++ harness + corpus (bencode, metainfo, LSD, DHT, magnet)
 ├── man/                    # mdoc man pages
 ├── libmbt.map              # linker version script
 ├── meson.build

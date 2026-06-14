@@ -19,8 +19,8 @@ Downloads, seeds, and tracks torrents. Pluggable event loop (sd-event or libeven
 - Async I/O throughout (no blocking in event loop)
 - Async HTTP tracker callback API
 - Memory-bounded (configurable pieces per peer, default 4)
-- 41 tests, ASan + valgrind clean, zero leaks
-- Portable: Linux, OpenBSD 7.9, FreeBSD 15.0
+- 43 tests, ASan + valgrind clean, AFL fuzz-tested, zero leaks
+- Portable: Linux, OpenBSD 7.9 (amd64 + riscv64), FreeBSD 15.0
 
 ## Building
 
@@ -34,7 +34,7 @@ Options:
 ```
 -Devent_backend=sd-event|libevent
 -Ddns_backend=blocking|cares|asr
--Dtests=false
+-Dtests=false    # skip tests and fuzz targets
 ```
 
 ## Testing
@@ -43,6 +43,16 @@ Options:
 ./test.sh              # full suite: build, ASan, valgrind, symbol check
 ./test.sh libevent     # test with libevent backend
 ```
+
+## Fuzzing
+
+```
+CC=afl-clang-fast meson setup build-fuzz -Ddefault_library=static
+ninja -C build-fuzz
+afl-fuzz -i fuzz/corpus -o fuzz/out_bencode -- ./build-fuzz/fuzz_bencode
+```
+
+Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_lsd`, `fuzz_dht`, `fuzz_magnet`.
 
 ## Tools
 
@@ -55,6 +65,7 @@ Options:
 | `mbt-tracker` | UDP + HTTP tracker daemon |
 | `mbt-pcp` | PCP port mapping tool (-k for persistent) |
 | `mbt-lsd` | LSD auto-discovery + replicate |
+| `mbt-probe` | Connect to a peer and print handshake info |
 
 ## BEP Compliance
 

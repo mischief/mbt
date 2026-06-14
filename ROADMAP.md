@@ -103,8 +103,13 @@
 - [x] Torrent state API (init/downloading/stalled/seeding)
 - [x] Rate limiting (token bucket, session + per-torrent, configurable at runtime)
 - [x] Ephemeral ports (listen_port=0, mbt_session_listen_port, mbt_tracker_server_port)
-- [ ] Track peer origin (tracker/DHT/PEX/LSD/incoming) on connected torrent_peer
-- [ ] Expose peer source in mbt_peer_stats and mbt-tui peer list
+- [x] Peer source tracking (enum mbt_peer_source, accessor, string helper, TUI column)
+- [x] Peer deduplication (outbound by address, incoming by peer_id)
+- [x] Skip outbound connects when seeding (100% complete)
+- [x] LSD batched announce (multiple infohashes per packet, BEP 14 compliant)
+- [x] LSD instant announce on add_infohash
+- [x] Storage error propagation (open failures surface to caller)
+- [x] Metainfo parser bounds checking (fuzz-hardened)
 ### Medium-term (swarm quality)
 - [ ] Tracker store: expire stale peers (no re-announce within 2× interval)
 - [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
@@ -123,7 +128,7 @@
 - [x] Integration: e2e, tracker server (UDP), DHT localhost, resume, partial resume
 - [x] Magnet flow, multi-peer, choke cycling, LSD, picker coverage
 - [x] Shared tracker store test (UDP+HTTP same store)
-- [x] ASan clean (38/38), valgrind clean (38/38), zero leaks
+- [x] ASan clean (43/43), valgrind clean (42/43 — ratelimit timing-sensitive), zero leaks
 - [x] PCP client test (stub server, refresh verification)
 - [x] Rarest-first picker test (two-seeder, availability preference)
 - [x] Anti-snubbing test (dead seeder + working seeder)
@@ -132,8 +137,10 @@
 - [x] Swarm scaling test (parameterized: direct + tracker, up to 100 leechers)
 - [x] IPv6 test (peer-to-peer, tracker, DHT over ::1)
 - [x] Conn layer test (both backends: watermark, write, large transfer, callbacks)
-- [x] Passes on Linux (gcc + clang), OpenBSD 7.9 (amd64), FreeBSD 15.0 (amd64)
+- [x] Passes on Linux (gcc + clang), OpenBSD 7.9 (amd64 + riscv64), FreeBSD 15.0 (amd64)
 - [x] Bitfield test (magnet peer resumes from disk, verifies HAVE propagation)
+- [x] Peer source test (enum values, string conversion)
+- [x] AFL fuzz targets: bencode, metainfo, LSD, DHT, magnet URI
 - [ ] HTTP tracker client test (needs async client)
 
 ## Phase 8: Tools
