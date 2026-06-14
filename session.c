@@ -175,16 +175,16 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 		goto reschedule;
 
 	/* Batch all infohashes into one announce */
-	const char *hashes[256];
+	const char *hashes[25];
 	int n = 0;
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		if (mbt_torrent_is_private(st->torrent)) continue;
-		if (n >= 256) {
-			mbt_log_warn(MBT_LOG_LSD, "LSD announce truncated at 256 torrents");
+		if (n >= 25) {
+			mbt_log_warn(MBT_LOG_LSD, "LSD announce truncated at 25 torrents");
 			break;
 		}
 		/* Use static buffer per entry — safe since we send before returning */
-		static char hexbuf[256][MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
+		static char hexbuf[25][MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
 		mbt_infohash_string(st->ih, hexbuf[n], sizeof(hexbuf[n]));
 		hashes[n] = hexbuf[n];
 		n++;

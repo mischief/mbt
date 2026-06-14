@@ -281,7 +281,7 @@ mbt_lsd_announce(struct mbt_lsd *lsd, const char *infohash_hex, uint16_t port)
 int
 mbt_lsd_announce_multi(struct mbt_lsd *lsd, const char **hashes, int count, uint16_t port)
 {
-	char buf[4096];
+	char buf[1500];
 	int off = 0;
 	struct sockaddr_in dst = {
 		.sin_family = AF_INET,
@@ -307,7 +307,7 @@ mbt_lsd_announce_multi(struct mbt_lsd *lsd, const char **hashes, int count, uint
 
 	/* Also send on IPv6 multicast if available */
 	if (lsd->fd6 >= 0) {
-		char buf6[4096];
+		char buf6[1500];
 		int off6 = 0;
 		struct sockaddr_in6 dst6 = { .sin6_family = AF_INET6, .sin6_port = htons(6771) };
 		inet_pton(AF_INET6, "ff15::efc0:988f", &dst6.sin6_addr);
