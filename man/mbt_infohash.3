@@ -1,0 +1,58 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_INFOHASH 3
+.Os
+.Sh NAME
+.Nm mbt_infohash_new ,
+.Nm mbt_infohash_ref ,
+.Nm mbt_infohash_unref ,
+.Nm mbt_infohash_unrefp ,
+.Nm mbt_infohash_string ,
+.Nm mbt_infohash_cmp
+.Nd BitTorrent infohash handling
+.Sh SYNOPSIS
+.In mbt/infohash.h
+.Ft int
+.Fn mbt_infohash_new "struct mbt_infohash **ih" "int type" "const char *str"
+.Ft "struct mbt_infohash *"
+.Fn mbt_infohash_ref "struct mbt_infohash *ih"
+.Ft void
+.Fn mbt_infohash_unref "struct mbt_infohash *ih"
+.Ft void
+.Fn mbt_infohash_unrefp "struct mbt_infohash **ih"
+.Ft int
+.Fn mbt_infohash_string "struct mbt_infohash *ih" "char *buf" "size_t sz"
+.Ft int
+.Fn mbt_infohash_cmp "struct mbt_infohash *a" "struct mbt_infohash *b"
+.Sh DESCRIPTION
+Reference-counted infohash objects for identifying torrents.
+.Pp
+.Fn mbt_infohash_new
+creates a new infohash by parsing
+.Fa str
+as a 40-character hex string.
+.Fa type
+must be
+.Dv MBT_INFOHASH_SHA1 .
+Returns 0 on success, negative errno on failure.
+.Pp
+.Fn mbt_infohash_ref
+increments the reference count.
+.Fn mbt_infohash_unref
+decrements it, freeing the object when it reaches zero.
+.Fn mbt_infohash_unrefp
+is a cleanup helper that takes a pointer-to-pointer.
+.Pp
+.Fn mbt_infohash_string
+writes the hex representation into
+.Fa buf
+(must be at least 41 bytes).
+Returns bytes written or negative errno.
+.Pp
+.Fn mbt_infohash_cmp
+returns 0 if both hashes are identical, non-zero otherwise.
+.Sh SEE ALSO
+.Xr mbt 3 ,
+.Xr mbt_torrent 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org
