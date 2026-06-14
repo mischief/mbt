@@ -1,0 +1,117 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 14, 2026
+.Dt MBT_BITMAP 3
+.Os
+.Sh NAME
+.Nm mbt_bitmap_new ,
+.Nm mbt_bitmap_new_bits ,
+.Nm mbt_bitmap_fromarray ,
+.Nm mbt_bitmap_unref ,
+.Nm mbt_bitmap_unrefp ,
+.Nm mbt_bitmap_bits ,
+.Nm mbt_bitmap_bytes ,
+.Nm mbt_bitmap_raw ,
+.Nm mbt_bitmap_set ,
+.Nm mbt_bitmap_isset ,
+.Nm mbt_bitmap_clear ,
+.Nm mbt_bitmap_count ,
+.Nm mbt_bitmap_full ,
+.Nm mbt_bitmap_first_clear ,
+.Nm mbt_bitmap_first_set ,
+.Nm mbt_bitmap_union ,
+.Nm mbt_bitmap_intersection
+.Nd reference-counted bit-accurate bitmap
+.Sh SYNOPSIS
+.In mbt/bitmap.h
+.Ft int
+.Fn mbt_bitmap_new "struct mbt_bitmap **out" "size_t sz"
+.Ft int
+.Fn mbt_bitmap_new_bits "struct mbt_bitmap **out" "size_t nbits"
+.Ft int
+.Fn mbt_bitmap_fromarray "struct mbt_bitmap **out" "uint8_t *buf" "size_t len" "size_t nbits"
+.Ft void
+.Fn mbt_bitmap_unref "struct mbt_bitmap *tb"
+.Ft void
+.Fn mbt_bitmap_unrefp "struct mbt_bitmap **tb"
+.Ft size_t
+.Fn mbt_bitmap_bits "struct mbt_bitmap *tb"
+.Ft size_t
+.Fn mbt_bitmap_bytes "struct mbt_bitmap *tb"
+.Ft void
+.Fn mbt_bitmap_raw "struct mbt_bitmap *tb" "void *out" "size_t len"
+.Ft int
+.Fn mbt_bitmap_set "struct mbt_bitmap *tb" "size_t bit"
+.Ft int
+.Fn mbt_bitmap_isset "struct mbt_bitmap *tb" "size_t bit"
+.Ft void
+.Fn mbt_bitmap_clear "struct mbt_bitmap *tb"
+.Ft size_t
+.Fn mbt_bitmap_count "struct mbt_bitmap *tb"
+.Ft int
+.Fn mbt_bitmap_full "struct mbt_bitmap *tb"
+.Ft ssize_t
+.Fn mbt_bitmap_first_clear "struct mbt_bitmap *tb"
+.Ft ssize_t
+.Fn mbt_bitmap_first_set "struct mbt_bitmap *tb"
+.Ft int
+.Fn mbt_bitmap_union "struct mbt_bitmap *a" "struct mbt_bitmap *b" "struct mbt_bitmap *out"
+.Ft int
+.Fn mbt_bitmap_intersection "struct mbt_bitmap *a" "struct mbt_bitmap *b" "struct mbt_bitmap *out"
+.Sh DESCRIPTION
+A reference-counted bitmap used for tracking piece availability
+in torrents and peer bitfields.
+.Pp
+.Fn mbt_bitmap_new
+allocates a bitmap with
+.Fa sz
+bytes of storage.
+.Fn mbt_bitmap_new_bits
+allocates a bitmap sized for exactly
+.Fa nbits
+bits (rounded up to whole bytes).
+.Fn mbt_bitmap_fromarray
+creates a bitmap from an existing byte array, capping at
+.Fa nbits .
+.Pp
+.Fn mbt_bitmap_unref
+decrements the reference count, freeing the bitmap when it reaches zero.
+.Fn mbt_bitmap_unrefp
+is a cleanup helper taking a pointer-to-pointer.
+.Pp
+.Fn mbt_bitmap_set
+sets bit
+.Fa bit
+(returns 0 on success, negative on out of bounds).
+.Fn mbt_bitmap_isset
+returns 1 if set, 0 if clear, negative on out of bounds.
+.Fn mbt_bitmap_clear
+clears all bits.
+.Pp
+.Fn mbt_bitmap_count
+returns the number of set bits.
+.Fn mbt_bitmap_full
+returns 1 if all bits are set.
+.Fn mbt_bitmap_first_clear
+returns the index of the first unset bit, or \-1.
+.Fn mbt_bitmap_first_set
+returns the index of the first set bit, or \-1.
+.Pp
+.Fn mbt_bitmap_bits
+returns the total number of bits.
+.Fn mbt_bitmap_bytes
+returns the byte size of the backing storage.
+.Fn mbt_bitmap_raw
+copies the raw bytes into
+.Fa out .
+.Pp
+.Fn mbt_bitmap_union
+and
+.Fn mbt_bitmap_intersection
+compute set operations, writing the result into
+.Fa out .
+.Sh SEE ALSO
+.Xr mbt 3 ,
+.Xr mbt_torrent 3 ,
+.Xr mbt_peer 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org
