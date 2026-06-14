@@ -1259,9 +1259,14 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	/* Allocate have bitmap */
 	mbt_bitmap_new_bits(&t->have, t->piece_count);
 
-	/* Check storage for existing pieces (resume) */
-	if (t->storage_ops && t->storage_ops->open)
-		t->storage_ops->open(t->storage_ctx, t);
+	/* Open storage for this torrent */
+	if (t->storage_ops && t->storage_ops->open) {
+		int srv = t->storage_ops->open(t->storage_ctx, t);
+		if (srv < 0) {
+			mbt_log_warn(MBT_LOG_STORAGE, "storage open failed: %s", strerror(-srv));
+			return srv;
+		}
+	}
 
 	if (t->storage_ops && t->storage_ops->read_piece) {
 		uint8_t *buf = malloc(t->piece_length);
