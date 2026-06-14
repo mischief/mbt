@@ -128,6 +128,11 @@ mbt_lsd_init(struct mbt_lsd **out, int setfl)
 		}
 	}
 
+	/* Generate random cookie to identify our own announces */
+	uint32_t r;
+	getentropy(&r, sizeof(r));
+	snprintf(lsd->cookie, sizeof(lsd->cookie), "%08x", r);
+
 	*out = lsd;
 
 	return 0;
@@ -286,7 +291,8 @@ mbt_lsd_announce_multi(struct mbt_lsd *lsd, const char **hashes, int count, uint
 	off += snprintf(buf + off, sizeof(buf) - off,
 		"BT-SEARCH * HTTP/1.1\r\n"
 		"Host: 239.192.152.143:6771\r\n"
-		"Port: %hu\r\n", port);
+		"Port: %hu\r\n"
+		"cookie: %s\r\n", port, lsd->cookie);
 
 	for (int i = 0; i < count && off < (int)sizeof(buf) - 60; i++)
 		off += snprintf(buf + off, sizeof(buf) - off, "Infohash: %s\r\n", hashes[i]);
@@ -308,7 +314,8 @@ mbt_lsd_announce_multi(struct mbt_lsd *lsd, const char **hashes, int count, uint
 		off6 += snprintf(buf6 + off6, sizeof(buf6) - off6,
 			"BT-SEARCH * HTTP/1.1\r\n"
 			"Host: [ff15::efc0:988f]:6771\r\n"
-			"Port: %hu\r\n", port);
+			"Port: %hu\r\n"
+			"cookie: %s\r\n", port, lsd->cookie);
 
 		for (int i = 0; i < count && off6 < (int)sizeof(buf6) - 60; i++)
 			off6 += snprintf(buf6 + off6, sizeof(buf6) - off6, "Infohash: %s\r\n", hashes[i]);

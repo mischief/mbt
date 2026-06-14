@@ -9,6 +9,7 @@ struct mbt_lsd
 {
 	int fd;   /* IPv4 multicast */
 	int fd6;  /* IPv6 multicast (-1 if unavailable) */
+	char cookie[9]; /* random hex, identifies our own announces */
 
 	int (*on_frame)(struct mbt_lsd_frame_info *lfi, void *v);
 	void *on_frame_arg;
