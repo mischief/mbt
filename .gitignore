@@ -8,3 +8,6 @@ ubuntu-25.10-desktop-amd64.iso
 *.mp4
 *.srt
 *.jpg
+fuzz/out_*
+core.*
+build-*

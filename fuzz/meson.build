@@ -1,0 +1,5 @@
+executable('fuzz_bencode', 'fuzz_bencode.c', link_with: [libmbt], include_directories: mbt_inc)
+executable('fuzz_metainfo', 'fuzz_metainfo.c', link_with: [libmbt], include_directories: mbt_inc)
+executable('fuzz_lsd', 'fuzz_lsd.c', link_with: [libmbt], include_directories: mbt_inc)
+executable('fuzz_dht', 'fuzz_dht.c', link_with: [libmbt], include_directories: mbt_inc)
+executable('fuzz_magnet', 'fuzz_magnet.c', link_with: [libmbt], include_directories: mbt_inc)

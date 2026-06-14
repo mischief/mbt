@@ -110,9 +110,9 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 	if (!p) p = memmem(buf, len, "4:info", 6);
 	if (!p) { mbt_metainfo_free(mi); return -EINVAL; }
 
-	unsigned char *info_start = p + 6;
+	const unsigned char *info_start = p + 6;
 	int depth = 0;
-	unsigned char *i = info_start;
+	const unsigned char *i = info_start;
 	const unsigned char *end = buf + len;
 	while (i < end) {
 		if (*i == 'd' || *i == 'l') { depth++; i++; }
@@ -123,6 +123,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 			if (!colon) break;
 			size_t slen = strtoul((char *)i, NULL, 10);
 			i = colon + 1 + slen;
+			if (i > end) { i = end; break; }
 		} else { break; }
 	}
 	size_t info_len = (size_t)(i - info_start);
