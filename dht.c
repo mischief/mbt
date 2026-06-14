@@ -814,12 +814,14 @@ static void
 dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct mbt_dht *d = v;
+	int total = mbt_dht_node_count(d);
 
-	/* Find nodes near our own ID to populate routing table */
-	for (int i = 0; i < NUM_BUCKETS; i++) {
-		if (d->buckets[i].count > 0) {
-			dht_send_find_node(d, &d->buckets[i].nodes[0].addr, d->id);
-			break;
+	/* Send find_node to up to 8 known nodes to expand routing table */
+	int sent = 0;
+	for (int i = 0; i < NUM_BUCKETS && sent < 8; i++) {
+		for (int j = 0; j < d->buckets[i].count && sent < 8; j++) {
+			dht_send_find_node(d, &d->buckets[i].nodes[j].addr, d->id);
+			sent++;
 		}
 	}
 
@@ -832,8 +834,9 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 		}
 	}
 
-	/* Reschedule */
-	mbt_ev_timer_mod(timer, REFRESH_US);
+	/* Reschedule: aggressive (10s) while small, normal (15min) when populated */
+	uint64_t next = (total < 20) ? 10 * 1000000ULL : REFRESH_US;
+	mbt_ev_timer_mod(timer, next);
 }
 
 /* --- Public API --- */
@@ -854,6 +857,9 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	/* Bind dual-stack UDP sockets */
 	int rv = mbt_listen_udp(&d->listener, ev, port, dht_recv, d);
 	if (rv < 0) { free(d); return rv; }
+	mbt_log_info(MBT_LOG_DHT, "UDP sockets: fd4=%d fd6=%d io4=%p io6=%p",
+	             d->listener.fd4, d->listener.fd6,
+	             (void*)d->listener.io4, (void*)d->listener.io6);
 
 	/* Refresh timer — first fire at 5s to populate routing table quickly */
 	mbt_ev_timer_new(ev, &d->refresh_timer, 5 * 1000000ULL, dht_refresh_cb, d);

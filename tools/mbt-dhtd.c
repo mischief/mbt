@@ -34,6 +34,7 @@ int main(int argc, char *argv[])
 
 	signal(SIGPIPE, SIG_IGN);
 
+	mbt_log_set(mbt_log_stderr, NULL);
 	if (debug)
 		mbt_log_set_debug(MBT_LOG_ALL);
 
