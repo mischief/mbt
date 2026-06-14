@@ -1,0 +1,133 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 14, 2026
+.Dt MBT_BE 3
+.Os
+.Sh NAME
+.Nm mbt_be_value_parse ,
+.Nm mbt_be_value_encode ,
+.Nm mbt_be_value_free ,
+.Nm mbt_be_value_freep ,
+.Nm mbt_be_dict_new ,
+.Nm mbt_be_dict_append ,
+.Nm mbt_be_dict_append_number ,
+.Nm mbt_be_dict_append_string ,
+.Nm mbt_be_list_new ,
+.Nm mbt_be_list_append ,
+.Nm mbt_be_string_new ,
+.Nm mbt_be_find ,
+.Nm mbt_be_walk ,
+.Nm mbt_be_pp
+.Nd Bencode parsing and construction library
+.Sh SYNOPSIS
+.In mbt/be.h
+.Fn mbt_be_value_parse "const unsigned char *buf" "size_t sz" "struct mbt_be_value **out"
+.Fn mbt_be_value_encode "struct mbt_be_value *v" "unsigned char **out" "size_t *len"
+.Fn mbt_be_value_free "struct mbt_be_value *v"
+.Fn mbt_be_value_freep "struct mbt_be_value **v"
+.Fn mbt_be_dict_new "struct mbt_be_value **out"
+.Fn mbt_be_dict_append "struct mbt_be_value *dict" "char *key" "struct mbt_be_value *value"
+.Fn mbt_be_dict_append_number "struct mbt_be_value *dict" "char *key" "int64_t num"
+.Fn mbt_be_dict_append_string "struct mbt_be_value *dict" "char *key" "const void *buf" "size_t len"
+.Fn mbt_be_list_new "struct mbt_be_value **out"
+.Fn mbt_be_list_append "struct mbt_be_value *list" "struct mbt_be_value *val"
+.Fn mbt_be_string_new "struct mbt_be_value **out" "const void *buf" "size_t len"
+.Fn mbt_be_find "struct mbt_be_value *be" "const char *key"
+.Fn mbt_be_walk "struct mbt_be_value *be" "int (*cb)(struct mbt_be_value *, void *)" "void *arg"
+.Fn mbt_be_pp "struct mbt_be_value *be" "void *arg"
+.Sh DESCRIPTION
+The
+.Nm mbt_be
+library provides utilities for parsing, constructing, and traversing
+bencoded data structures. Bencoding is the serialization format used by
+the BitTorrent protocol.
+.Pp
+All operations revolve around the
+.Vt mbt_be_value
+structure, which can represent a string, an integer, a list, or a
+dictionary.
+.Sh PARSING AND ENCODING
+.Fn mbt_be_value_parse
+takes a buffer of bencoded bytes and produces a tree of
+.Vt mbt_be_value
+structures.
+.Fn mbt_be_value_encode
+encodes a tree of
+.Vt mbt_be_value
+structures back into a dynamically allocated buffer of bencoded bytes.
+The caller is responsible for freeing the returned buffer.
+.Pp
+The following functions handle memory management:
+.Fn mbt_be_value_free
+destroys a single
+.Vt mbt_be_value
+node and its children.
+.Fn mbt_be_value_freep
+is a convenience wrapper for freeing a pointer to a
+.Vt mbt_be_value.
+.Sh CONSTRUCTION
+To create bencoded data, use the following factory functions:
+.Bl -tag -width 12
+.It .Fn mbt_be_dict_new
+Creates a new empty dictionary.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_be_list_new
+Creates a new empty list.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_be_string_new
+Creates a new string value from an existing buffer of bytes.
+.El
+.Pp
+Once structures are created, they can be populated:
+.Bl -tag -width 12
+.It .Fn mbt_be_dict_append
+Appends a previously created
+.Vt mbt_be_value
+to a dictionary using the provided key.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_be_dict_append_number
+Appends an integer value to a dictionary with the given key.
+.El
+.Bl -tag -width 12
+.It Fn mbt_be_dict_append_string
+Appends raw bytes as a string to a dictionary with the given key.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_be_list_append
+Adds a value to the end of the specified list.
+.El
+.Sh TRAVERSAL AND INSPECTION
+.Fn mbt_be_find
+searches for a key within a dictionary and returns the associated
+.Vt mbt_be_value. Returns
+.Fa NULL
+if the key is not found.
+.Pp
+.Fn mbt_be_walk
+performs a depth-first traversal of the bencoded structure, invoking a
+callback function for every node encountered.
+.Pp
+The following functions are for debugging or utility:
+.Fn mbt_be_pp
+pretty-prints the bencoded structure (e.g., to a file or stdout via an argument).
+.Fn mbt_be_streq
+(inline) checks if a bencoded string node contains the exact bytes of a
+provided C string.
+.Sh RETURN VALUES
+Most functions return 0 on success or a negative error code on failure.
+Construction and parsing functions that allocate memory return
+.Fa NULL
+on failure.
+.Sh EXAMPLES
+Constructing a simple dictionary:
+.Bd -literal
+struct mbt_be_value *dict;
+mbt_be_dict_new(&dict);
+
+mbt_be_dict_append_number(dict, "length", 1024);
+mbt_be_dict_append_string(dict, "name", "my_torrent", 9);
+
+// 'dict' now contains a bencoded dictionary: i1024e#name#my_torrent
+.Ed

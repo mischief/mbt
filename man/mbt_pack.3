@@ -1,0 +1,82 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 14, 2026
+.Dt MBT_PACK 3
+.Os
+.Sh NAME
+.Nm mbt_pack ,
+.Nm mbt_unpack
+.Nd Wire format pack/unpack helpers
+.Sh SYNOPSIS
+.In mbt/pack.h
+.Ft int
+.Fn mbt_pack "unsigned char *out" "char *v" "..."
+.Ft int
+.Fn mbt_unpack "unsigned char *in" "char *v" "..."
+.Sh DESCRIPTION
+Provides helpers for encoding and decoding data in a specific wire format.
+These functions use a format string to specify how data should be packed into or
+unpacked from buffers.
+.Pp
+The following format characters are supported:
+.Bl -tag -width 12
+.It 'b'
+1 byte.
+    .Bl -tag -width 1
+    .It pack
+Pass an `int` argument.
+    .It unpack
+Populate an `unsigned char *out` pointer.
+.El
+.Bl -tag -width 12
+.It 'l'
+4 bytes, big-endian.
+    .Bl -tag -width 1
+    .It pack
+Pass a `uint32_t` argument.
+    .It unpack
+Populate a `uint32_t *out` pointer.
+.El
+.Bl -tag -width 12
+.It '*'
+Raw bytes.
+    .Bl -tag -width 1
+    .It pack
+Pass `size_t len` and `void *data`.
+    .It unpack
+Expected `int len` is provided, populates an `unsigned char *out` pointer.
+.El
+.Pp
+.Fn mbt_pack
+encodes data into the buffer pointed to by
+.Fa out
+using the format string
+.Fa v.
+Returns the number of bytes produced.
+.Pp
+.Fn mbt_unpack
+decodes data from the buffer pointed to
+to by
+.Fa in
+using the format string
+.Fa v.
+Returns the number of bytes consumed.
+.Sh RETURN VALUES
+Both functions return the number of bytes processed (produced for `mbt_pack`,
+consumed for `mbt_unpack`). A negative value indicates an error.
+.Sh EXAMPLES
+Packing and unpacking a byte and a 32-bit integer:
+.Bd -literal
+unsigned char buf[64];
+unsigned char out_buf[64];
+int n;
+
+// Pack a byte (0x42) and a uint32 (0x12345678)
+n = mbt_pack(buf, "bl", 0x42, 0x12345678);
+
+// Unpack it
+unsigned char b;
+uint32_t l;
+if (mbt_unpack(buf, "bl", &b, &l) > 0) {
+    // b is 0x42, l is 0x12345678
+}
+.Ed
