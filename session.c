@@ -532,6 +532,11 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	STAILQ_INIT(&s->pending);
 
 	session_generate_peer_id(s->peer_id);
+	{
+		char hex[41];
+		mbt_hex_encode(s->peer_id, 20, hex, sizeof(hex));
+		mbt_log_info(MBT_LOG_SESSION, "our peer_id: %s", hex);
+	}
 
 	/* Maintenance timer: refill peers from pool every 5s */
 	mbt_ev_timer_new(s->ev, &s->maintain_timer, (uint64_t)s->timers.maintain_interval * 1000000ULL, session_maintain_cb, s);
@@ -679,8 +684,13 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	mbt_log_debug(MBT_LOG_LSD, "LSD received from %s:%hu", info->remote, info->port);
 
 	/* Ignore our own announcements (cookie match) */
-	if (info->cookie && s->lsd && strcmp(info->cookie, s->lsd->cookie) == 0)
+	if (info->cookie && s->lsd && strcmp(info->cookie, s->lsd->cookie) == 0) {
+		mbt_log_debug(MBT_LOG_LSD, "LSD self-filter: cookie=%s", info->cookie);
 		return;
+	}
+	mbt_log_debug(MBT_LOG_LSD, "LSD cookie: ours=%s theirs=%s",
+	              s->lsd ? s->lsd->cookie : "(null)",
+	              info->cookie ? info->cookie : "(null)");
 
 	STAILQ_FOREACH(ih, &info->infohashes, next) {
 		struct session_torrent *st = session_find(s, ih);

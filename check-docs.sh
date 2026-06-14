@@ -4,6 +4,9 @@
 # Returns 0 always (informational). Change to exit 1 to gate on coverage.
 set -e
 
+TMPD=$(mktemp -d)
+trap 'rm -rf "$TMPD"' EXIT
+
 LIBSO="${1:-build/libmbt.so}"
 MANDIR="${2:-man}"
 
@@ -14,19 +17,19 @@ fi
 
 # Extract exported mbt_* symbols
 nm -D --defined-only "$LIBSO" | awk '/( T | D | B )/{print $3}' \
-    | grep '^mbt_' | sed 's/@@.*//' | sort -u > /tmp/mbt_exported.txt
+    | grep '^mbt_' | sed 's/@@.*//' | sort -u > "$TMPD/exported.txt"
 
 # Extract documented symbols from man pages (.Fn and .Fo lines)
 if [ -d "$MANDIR" ] && ls "$MANDIR"/*.3 >/dev/null 2>&1; then
     grep -h '^\.\(Fn\|Fo\) ' "$MANDIR"/*.3 2>/dev/null \
-        | awk '{print $2}' | sort -u > /tmp/mbt_documented.txt
+        | awk '{print $2}' | sort -u > "$TMPD/documented.txt"
 else
-    : > /tmp/mbt_documented.txt
+    : > "$TMPD/documented.txt"
 fi
 
-TOTAL=$(wc -l < /tmp/mbt_exported.txt)
-DOCUMENTED=$(comm -12 /tmp/mbt_exported.txt /tmp/mbt_documented.txt | wc -l)
-UNDOCUMENTED=$(comm -23 /tmp/mbt_exported.txt /tmp/mbt_documented.txt | wc -l)
+TOTAL=$(wc -l < "$TMPD/exported.txt")
+DOCUMENTED=$(comm -12 "$TMPD/exported.txt" "$TMPD/documented.txt" | wc -l)
+UNDOCUMENTED=$(comm -23 "$TMPD/exported.txt" "$TMPD/documented.txt" | wc -l)
 
 echo "doc coverage: $DOCUMENTED/$TOTAL symbols documented ($UNDOCUMENTED remaining)"
 
@@ -42,8 +45,7 @@ fi
 if [ "$UNDOCUMENTED" -gt 0 ]; then
     echo ""
     echo "undocumented:"
-    comm -23 /tmp/mbt_exported.txt /tmp/mbt_documented.txt | sed 's/^/  /'
+    comm -23 "$TMPD/exported.txt" "$TMPD/documented.txt" | sed 's/^/  /'
 fi
 
-rm -f /tmp/mbt_exported.txt /tmp/mbt_documented.txt
 exit 0

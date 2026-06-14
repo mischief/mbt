@@ -389,8 +389,9 @@ on_active(struct mbt_peer *p, void *arg)
 	if (tp2) tp2->am_choking = 0;
 	mbt_peer_send_choke(p, 0);
 
-	/* Express interest only if we need pieces */
-	mbt_peer_send_interested(p, t->have_count < t->piece_count ? 1 : 0);
+	/* Express interest only if we need pieces (skip if no metadata yet) */
+	if (t->piece_count > 0)
+		mbt_peer_send_interested(p, t->have_count < t->piece_count ? 1 : 0);
 
 	/* BEP 5: advertise our DHT port if DHT is active */
 	if (t->session && (mbt_peer_flags(p) & MBT_PEER_FLAG_DHT)) {
@@ -454,6 +455,11 @@ on_have(struct mbt_peer *p, uint32_t piece, void *arg)
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
+
+	/* Become interested if peer has a piece we need */
+	if (t->have && mbt_bitmap_isset(t->have, piece) <= 0 &&
+	    !mbt_peer_interested(p))
+		mbt_peer_send_interested(p, 1);
 
 	/* If we're unchoked and need this piece, maybe request it */
 	if (!mbt_peer_choked(p) && t->pieces)
@@ -729,14 +735,20 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 
 		/* Drive all peers now that we have metadata */
 		struct torrent_peer *tp;
+		int npeers = 0;
 		SLIST_FOREACH(tp, &t->peers, entry) {
+			npeers++;
 			/* Update piece_count — applies deferred HAVE_ALL */
 			mbt_peer_set_piece_count(tp->peer, t->piece_count);
 			/* Re-send interested in case it was missed */
 			mbt_peer_send_interested(tp->peer, 1);
+			mbt_log_debug(MBT_LOG_TORRENT, "post-metadata: peer %s:%hu choked=%d pieces=%p",
+			              mbt_peer_addr(tp->peer), mbt_peer_port(tp->peer),
+			              mbt_peer_choked(tp->peer), (void*)t->pieces);
 			if (!mbt_peer_choked(tp->peer))
 				torrent_drive_peer(t, tp);
 		}
+		mbt_log_debug(MBT_LOG_TORRENT, "post-metadata: %d peers in list", npeers);
 	}
 }
 
@@ -745,6 +757,9 @@ on_interest(struct mbt_peer *p, int interested, void *arg)
 {
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
+	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: %s",
+	              mbt_peer_addr(p), mbt_peer_port(p),
+	              interested ? "peer INTERESTED" : "peer NOT_INTERESTED");
 	if (tp) tp->peer_interested = interested;
 }
 
@@ -904,8 +919,11 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 static void
 torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
-	if (!t->pieces || mbt_peer_choked(tp->peer))
+	if (!t->pieces || mbt_peer_choked(tp->peer)) {
+		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: skip (pieces=%p choked=%d)",
+		              (void*)t->pieces, mbt_peer_choked(tp->peer));
 		return;
+	}
 	if (tp->snubbed)
 		return;
 	if (t->have_count == t->piece_count)
@@ -949,6 +967,8 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		if (idx < 0)
 			idx = t->picker(t, tp->peer, t->picker_ctx);
 		if (idx < 0) {
+			mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: picker returned -1 (bf=%p have=%u/%u)",
+			              (void*)mbt_peer_bitfield(tp->peer), t->have_count, t->piece_count);
 			/* Check if we should enter endgame */
 			if (!t->endgame && t->piece_count > 0) {
 				uint32_t remaining = t->piece_count - t->have_count;

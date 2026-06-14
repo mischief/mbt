@@ -114,6 +114,8 @@ struct mbt_peer_stats {
 	int done_pct;     /* % of pieces this peer has (0-100) */
 	int hash_failures;
 	enum mbt_peer_source source;   /* mbt_peer_source */
+	uint64_t downloaded;  /* bytes received from peer */
+	uint64_t uploaded;    /* bytes sent to peer */
 };
 
 MBT_API int mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *out);

@@ -1,0 +1,144 @@
+.Dd June 14, 2026
+.Dt MBT 3
+.Os
+.Sh NAME
+.Nm mbt
+.Nd BitTorrent toolkit library
+.Sh SYNOPSIS
+.In mbt/session.h
+.In mbt/torrent.h
+.In mbt/peer.h
+.In mbt/dht.h
+.In mbt/metainfo.h
+.Sh DESCRIPTION
+.Nm
+is a production-grade BitTorrent protocol library written in C.
+It implements BEP 3 (core protocol), BEP 5 (DHT), BEP 6 (Fast Extension),
+BEP 9 (metadata exchange), BEP 10 (extension protocol), BEP 11 (PEX),
+BEP 14 (LSD), and BEP 44 (DHT storage).
+.Pp
+The library is designed for embedding: it has no global state and no threads.
+Dependencies are minimal: a C99 compiler, POSIX sockets, and a SHA-1
+implementation.
+On Linux, libbsd is required for
+.Xr queue 3
+macros.
+.Ss Architecture
+The central object is
+.Vt struct mbt_session ,
+which owns all other objects:
+.Bl -bullet -compact
+.It
+A session contains zero or more
+.Vt struct mbt_torrent
+objects.
+.It
+Each torrent contains zero or more
+.Vt struct mbt_peer
+connections.
+.It
+An optional
+.Vt struct mbt_dht
+instance provides distributed hash table functionality.
+.El
+.Ss Event Loop
+.Nm
+requires an event loop for I/O multiplexing and timers.
+The library provides built-in backends for
+.Xr sd_event 3
+and
+.Xr libevent 3 .
+A custom backend can be supplied by implementing the
+.Vt struct mbt_ev_ops
+interface.
+.Pp
+All library callbacks are dispatched from the event loop.
+The library is strictly single-threaded: all API calls and callbacks
+execute in the thread running the event loop.
+Do not call
+.Nm
+functions from other threads.
+.Ss Object Lifetimes
+Pointers returned by accessor functions (e.g.\&
+.Fn mbt_session_torrent_first ,
+.Fn mbt_torrent_peer_at )
+are
+.Em borrowed references
+owned by their parent object.
+They are valid only until the next event loop iteration or until
+the parent is modified.
+Do not store these pointers across callbacks.
+.Pp
+If a reference must survive, copy the identifying data
+(e.g.\& the infohash) and re-lookup on next use.
+.Pp
+Objects the caller creates and must free:
+.Bl -tag -width "mbt_metainfo" -compact
+.It Vt struct mbt_session
+Created with
+.Fn mbt_session_new ,
+freed with
+.Fn mbt_session_free .
+.It Vt struct mbt_metainfo
+Created with
+.Fn mbt_metainfo_parse ,
+freed with
+.Fn mbt_metainfo_free .
+.El
+.Ss Error Handling
+Functions that can fail return a negative errno value on error
+and zero or a positive value on success.
+.Pp
+Callback-based errors (e.g.\& piece hash failure, peer disconnect)
+are reported via the session's callback interface, not return values.
+.Ss Memory
+The library allocates all memory internally via
+.Xr malloc 3 .
+The caller never frees library-owned memory directly.
+Storage backends may allocate their own buffers.
+.Ss Storage
+Piece data is written and read through a pluggable
+.Vt struct mbt_storage_ops
+interface.
+The built-in
+.Fn mbt_storage_file
+backend writes to the filesystem.
+Custom backends can target any block device or memory buffer.
+.Ss Portability
+.Nm
+runs on Linux, OpenBSD, and FreeBSD.
+The hard requirements are:
+.Bl -bullet -compact
+.It
+C99 compiler
+.It
+BSD-style sockets (socket, connect, send, recv)
+.It
+DNS resolution
+.Pq Xr getaddrinfo 3
+.It
+SHA-1 implementation
+.El
+.Sh EXAMPLES
+Minimal download client:
+.Bd -literal
+#include <mbt/session.h>
+
+struct mbt_session_config cfg = {
+    .storage_ops = &mbt_storage_file_ops,
+    .storage_path = ".",
+};
+
+struct mbt_session *s = mbt_session_new(&cfg);
+mbt_session_enable_lsd(s);
+mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...");
+mbt_session_run(s);  /* blocks until shutdown */
+mbt_session_free(s);
+.Ed
+.Sh SEE ALSO
+.Xr mbt_session 3 ,
+.Xr mbt_torrent 3 ,
+.Xr mbt_peer 3 ,
+.Xr mbt_dht 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org
