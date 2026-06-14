@@ -45,4 +45,7 @@ MBT_API void mbt_tracker_http_free(struct mbt_tracker_http *th);
 MBT_API int mbt_tracker_http_num_torrents(struct mbt_tracker_http *th);
 MBT_API int mbt_tracker_http_num_peers(struct mbt_tracker_http *th);
 
+/* Expire stale peers (>30min) and remove empty torrents */
+MBT_API void mbt_tracker_store_gc(struct mbt_tracker_store *s);
+
 #endif

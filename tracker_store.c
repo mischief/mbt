@@ -9,10 +9,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include "mbt/log.h"
 
 #include "mbt/tracker_server.h"
 
 #define MAX_PEERS_PER_TORRENT 200
+#define MAX_TORRENTS 4096
+#define PEER_EXPIRE_SECS (30 * 60) /* 30 minutes */
 #define TORRENT_BUCKETS 256
 
 struct ts_peer {
@@ -169,6 +172,10 @@ mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih)
 {
 	struct ts_torrent *t = mbt_tracker_store_find(s, ih);
 	if (t) return t;
+	if (s->num_torrents >= MAX_TORRENTS) {
+		mbt_log_warn(MBT_LOG_TRACKER, "tracker: torrent limit reached (%d)", MAX_TORRENTS);
+		return NULL;
+	}
 	t = calloc(1, sizeof(*t));
 	if (!t) return NULL;
 	memcpy(t->infohash, ih, 20);
@@ -260,3 +267,31 @@ mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *excl
 int mbt_tracker_store_torrent_seeders(struct ts_torrent *t) { return t->seeders; }
 int mbt_tracker_store_torrent_leechers(struct ts_torrent *t) { return t->leechers; }
 int mbt_tracker_store_torrent_peer_count(struct ts_torrent *t) { return t->peer_count; }
+
+void
+mbt_tracker_store_gc(struct mbt_tracker_store *s)
+{
+	time_t now = time(NULL);
+
+	for (int i = 0; i < TORRENT_BUCKETS; i++) {
+		struct ts_torrent *t, *tmp;
+		SLIST_FOREACH_SAFE(t, &s->torrents[i], entry, tmp) {
+			/* Expire stale peers */
+			int j = 0;
+			while (j < t->peer_count) {
+				if (now - t->peers[j].last_seen > PEER_EXPIRE_SECS) {
+					s->num_peers--;
+					t->peers[j] = t->peers[--t->peer_count];
+				} else {
+					j++;
+				}
+			}
+			/* Remove empty torrents */
+			if (t->peer_count == 0) {
+				SLIST_REMOVE(&s->torrents[i], t, ts_torrent, entry);
+				s->num_torrents--;
+				free(t);
+			}
+		}
+	}
+}
