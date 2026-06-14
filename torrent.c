@@ -688,6 +688,8 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 	size_t copy_len = MIN(len, t->metadata_len - offset);
 	memcpy(t->metadata + offset, data, copy_len);
 	t->metadata_have += copy_len;
+	if (t->metadata_have > t->metadata_len)
+		t->metadata_have = t->metadata_len;
 
 	/* All metadata received? */
 	if (t->metadata_have >= t->metadata_len) {
