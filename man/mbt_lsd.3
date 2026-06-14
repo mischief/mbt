@@ -1,31 +1,65 @@
-.\" SPDX-License-Identifier: ISC
-.Dd June 9, 2026
+.Dd June 14, 2026
 .Dt MBT_LSD 3
 .Os
 .Sh NAME
-.Nm mbt_lsd_new ,
-.Nm mbt_lsd_free ,
+.Nm mbt_lsd_init ,
+.Nm mbt_lsd_recv ,
 .Nm mbt_lsd_announce ,
-.Nd LSD listener + announcer (BEP 14 multicast discovery)
+.Nm mbt_lsd_announce_multi ,
+.Nm mbt_lsd_frame_parse ,
+.Nm mbt_lsd_freep ,
+.Nm mbt_lsd_frame_freep ,
+.Nm mbt_lsd_frame_info_freep
+.Nd Local Service Discovery (LSD) implementation for BitTorrent.
 .Sh SYNOPSIS
 .In mbt/lsd.h
 .Ft int
-.Fn mbt_lsd_new "struct mbt_lsd **out" "struct mbt_ev *ev"
-.Ft void
-.Fn mbt_lsd_free "struct mbt_lsd *h"
+.Fn mbt_lsd_init "struct mbt_lsd **out" "int setfl"
+.Ft "struct mbt_lsd *"
+.Fn mbt_lsd_recv "struct mbt_lsd *lsd" "struct mbt_lsd_frame **out"
 .Ft int
-.Fn mbt_lsd_announce "struct mbt_lsd *lsd" "const struct mbt_infohash *ih"
+.Fn mbt_lsd_announce "struct mbt_lsd *lsd" "const char *infohash_hex" "uint16_t port"
+.Ft int
+.Fn mbt_lsd_announce_multi "struct mbt_lsd *lsd" "const char **hashes" "int count" "uint16_t port"
+.Ft int
+.Fn mbt_lsd_frame_parse "struct mbt_lsd_frame *frame" "struct mbt_lsd_frame_info **out"
+.Ft void
+.Fn mbt_lsd_freep "struct mbt_lsd **v"
+.Ft void
+.Fn mbt_lsd_frame_freep "struct mbt_lsd_frame **v"
+.Ft void
+.Fn mbt_lsd_frame_info_freep "struct mbt_lsd_frame_info **v"
 .Sh DESCRIPTION
-Local Service Discovery via UDP multicast on 239.192.152.143:6771.
-
-.Pp
-Fn mbt_lsd_new
-creates the interface.  Announce sends advertisements for local discovery.
-.Sh RETURN VALUES
-Fn mbt_lsd_new
-returns 0 success otherwise negative errno opening the socket failed.
+The
+.Nm mbt_lsd
+module provides tools for implementing Local Service Discovery (LSD) in BitTorrent, facilitating peer discovery within a local network via IPv4 and IPv6 multicast.
+.Sh FUNCTIONS
+The following functions manage LSD operations:
+.Bl -tag -width 12
+.It .Fn mbt_lsd_init
+Initializes a new LSD instance on the specified socket options.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_lsd_recv
+Receives and returns a new LSD frame from the socket.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_lsd_announce
+Announces an infohash on the local network using multicast.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_lsd_announce_multi
+Announces multiple infohashes simultaneously via multicast.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_lsd_frame_parse
+Parses a raw LSD frame into an information structure containing the peer address and discovered infohashes.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_lsd_freep ,
+.Nm mbt_lsd_frame_freep ,
+.Nm mbt_lsd_frame_info_freep
+Free the allocated LSD structures and their contents.
+.El
 .Sh SEE ALSO
-.Xr mbt_session 3 ,
-.Xr mbt_dht 3
-.Sh AUTHORS
-.An Nick Owens Aq Mt mischief@offblast.org
+.Xr mbt 3

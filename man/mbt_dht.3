@@ -1,5 +1,4 @@
-.\" SPDX-License-Identifier: ISC
-.Dd June 9, 2026
+.Dd June 14, 2026
 .Dt MBT_DHT 3
 .Os
 .Sh NAME
@@ -11,7 +10,12 @@
 .Nm mbt_dht_node_count ,
 .Nm mbt_dht_port ,
 .Nm mbt_dht_set_node_id ,
-.Nd Kademlia DHT node (BEP 5) with BEP 44 data storage
+.Nm mbt_dht_set_verify ,
+.Nm mbt_dht_get_immutable ,
+.Nm mbt_dht_put_immutable ,
+.Nm mbt_dht_get_mutable ,
+.Nm mbt_dht_put_mutable
+.Nd Distributed Hash Table (DHT) implementation for BitTorrent.
 .Sh SYNOPSIS
 .In mbt/dht.h
 .Ft int
@@ -30,38 +34,41 @@
 .Fn mbt_dht_port "struct mbt_dht *d"
 .Ft void
 .Fn mbt_dht_set_node_id "struct mbt_dht *d" "const uint8_t id[20]"
+.Ft void
+.Fn mbt_dht_set_verify "struct mbt_dht *d" "mbt_dht_verify_cb cb" "void *arg"
+.Ft int
+.Fn mbt_dht_get_immutable "struct mbt_dht *d" "const uint8_t target[20]" "mbt_dht_item_cb cb" "void *arg"
+.Ft int
+.Fn mbt_dht_put_immutable "struct mbt_dht *d" "const void *v" "size_t vlen" "mbt_dht_done_cb done_cb" "void *arg"
+.Ft int
+.Fn mbt_dht_get_mutable "struct mbt_dht *d" "const uint8_t k[32]" "const char *salt" "size_t salt_len"
+.Ft int
+.Fn mbt_dht_put_mutable "struct mbt_dht *d" "const uint8_t k[32]" "const uint8_t sig[64]" "int64_t seq" "const char *salt" "size_t salt_len" "const void *v" "size_t vlen" "mbt_dht_done_cb done_cb" "void *arg"
 .Sh DESCRIPTION
-A Kademlia distributed key-value store for peer discovery and bootstrap.
-.Pp
-.Pp
-.Fn mbt_dht_new
-creates the node, bound to UDP
-.Fa port
-(use 0 for ephemeral).
-.Fn mbt_dht_bootstrap
-sends find_node to populate the routing table.
-.Pp
-.Pp
-.Fn mbt_dht_get_peers
-looks up peers for an infohash;
-.Fa peers_cb
-is called for each discovered peer,
-.Fa done_cb
-when the lookup ends.
-.Fn mbt_dht_announce
-registers our listen port as a seeder/leecher so others can find us.
-.Pp
-.Pp
-.Fn mbt_dht_node_count
-reports nodes in the routing table;
-.Fn mbt_dht_port
-returns the actual bound port (useful when 0 was requested at creation time).
-.Pp
-.Pp
-.Fn mbt_dht_set_node_id
-overrides the random node ID (call before bootstrap).
+The
+.Nm mbt_dht
+module provides a BitTorrent DHT implementation, supporting both standard node operations and BEP 44 (Arbitrary data storage) capabilities.
+.Sh PEER DISCOVERY AND ANNOUNCEMENT
+.Bl -tag -width 12
+.It Fn mbt_dht_bootstrap
+Sends a find_node request to a known node to populate the local routing table.
+.It Fn mbt_dht_get_peers
+Searches the DHT for peers associated with the given infohash.
+.It Fn mbt_dht_announce
+Announces the caller's presence as a peer for the specified infohash.
+.El
+.Sh DATA STORAGE (BEP 44)
+.Bl -tag -width 12
+.It Fn mbt_dht_get_immutable
+Retrieves an immutable item from the DHT using its SHA-1 hash.
+.It Fn mbt_dht_put_immutable
+Stores an immutable item. The key is derived from the value's SHA-1 hash.
+.It Fn mbt_dht_get_mutable
+Retrieves a mutable item using its public key and optional salt.
+.It Fn mbt_dht_put_mutable
+Stores a mutable item with key, signature, sequence number, and value.
+.El
 .Sh SEE ALSO
-.Xr mbt 3 ,
-.Xr mbt_session 3
+.Xr mbt 3
 .Sh AUTHORS
 .An Nick Owens Aq Mt mischief@offblast.org
