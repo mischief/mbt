@@ -968,9 +968,6 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	/* Bind dual-stack UDP sockets */
 	int rv = mbt_listen_udp(&d->listener, ev, port, dht_recv, d);
 	if (rv < 0) { free(d); return rv; }
-	mbt_log_info(MBT_LOG_DHT, "UDP sockets: fd4=%d fd6=%d io4=%p io6=%p",
-	             d->listener.fd4, d->listener.fd6,
-	             (void*)d->listener.io4, (void*)d->listener.io6);
 
 	/* Refresh timer — first fire at 5s to populate routing table quickly */
 	mbt_ev_timer_new(ev, &d->refresh_timer, 5 * 1000000ULL, dht_refresh_cb, d);
