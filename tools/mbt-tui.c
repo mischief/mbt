@@ -195,8 +195,8 @@ draw_detail(void)
 	} else if (detail_view == 1) {
 		/* Peers */
 		int np = mbt_torrent_peer_count(t);
-		mvwprintw(win_detail, 1, 1, "%-28s %5s %4s %4s %4s %s",
-		          "ENDPOINT", "DONE", "REQ", "SNUB", "FAIL", "FLAGS");
+		mvwprintw(win_detail, 1, 1, "%-28s %5s %4s %4s %4s %-5s %s",
+		          "ENDPOINT", "DONE", "REQ", "SNUB", "FAIL", "FLAGS", "SRC");
 		int maxrow = getmaxy(win_detail) - 2;
 		for (int i = 0; i < np && i + 2 <= maxrow; i++) {
 			struct mbt_peer_stats ps;
@@ -209,9 +209,10 @@ draw_detail(void)
 			flags[fi] = 0;
 			char endpoint[64];
 			snprintf(endpoint, sizeof(endpoint), "%s:%hu", ps.addr, ps.port);
-			mvwprintw(win_detail, i + 2, 1, "%-28s %4d%% %4d %4s %4d %s",
+			mvwprintw(win_detail, i + 2, 1, "%-28s %4d%% %4d %4s %4d %-5s %s",
 			          endpoint, ps.done_pct, ps.outstanding,
-			          ps.snubbed ? "yes" : "", ps.hash_failures, flags);
+			          ps.snubbed ? "yes" : "", ps.hash_failures, flags,
+			          mbt_peer_source_str(ps.source));
 		}
 
 	} else if (detail_view == 2) {

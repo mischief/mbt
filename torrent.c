@@ -1576,6 +1576,7 @@ mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *ou
 			out->snubbed = tp->snubbed;
 			out->outstanding = tp->outstanding;
 			out->hash_failures = tp->hash_failures;
+			out->source = mbt_peer_source(tp->peer);
 			struct mbt_bitmap *bf = mbt_peer_bitfield(tp->peer);
 			if (bf && t->piece_count > 0)
 				out->done_pct = 100 * mbt_bitmap_count(bf) / t->piece_count;

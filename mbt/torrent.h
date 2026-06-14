@@ -112,6 +112,7 @@ struct mbt_peer_stats {
 	int outstanding;  /* in-flight requests */
 	int done_pct;     /* % of pieces this peer has (0-100) */
 	int hash_failures;
+	uint8_t source;   /* mbt_peer_source */
 };
 
 MBT_API int mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *out);
