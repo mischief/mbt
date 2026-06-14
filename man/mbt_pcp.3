@@ -1,0 +1,69 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 14, 2026
+.Dt MBT_PCP 3
+.Os
+.Sh NAME
+.Nm mbt_pcp_new ,
+.Nm mbt_pcp_free ,
+.Nm mbt_pcp_map ,
+.Nm mbt_pcp_unmap ,
+.Nm mbt_pcp_external_addr ,
+.Nm mbt_pcp_external_port
+.Nd PCP implementation for BitTorrent
+.Sh SYNOPSIS
+.In mbt/pcp.h
+.Sh DESCRIPTION
+PCP (Port Control Protocol) is used to request port mappings from a gateway
+(e.g., a router). This implementation provides an interface for managing these
+mappings within the MBT event loop.
+.Pp
+.Fn mbt_pcp_new "struct mbt_pcp **out" "struct mbt_ev *ev" "const char *gateway"
+creates a new PCP client. The
+.Fa gateway
+parameter specifies the gateway to use; if
+.Fa NULL ,
+the implementation attempts to auto-detect the default gateway.
+.Pp
+.Fn mbt_pcp_free "struct mbt_pcp *p"
+destroys the PCP client and cleans up any associated resources.
+.Pp
+.Fn mbt_pcp_map "struct mbt_pcp *p" "uint8_t protocol" "uint16_t internal_port" "uint32_t lifetime" "mbt_pcp_cb cb" "void *arg"
+requests a port mapping for the specified protocol and internal port. It handles
+retransmission of requests and automatic renewal of mappings. The
+.Fa cb
+callback is invoked when the mapping is successfully established or renewed,
+providing the external address, external port, lifetime, and user-provided
+argument.
+.Pp
+.Fn mbt_pcp_unmap "struct mbt_pcp *p" "uint8_t protocol" "uint16_t internal_port"
+requests the deletion of an existing port mapping for the specified protocol
+and internal port.
+.Pp
+.Fn mbt_pcp_external_addr "struct mbt_pcp *p"
+returns the external IP address currently assigned to the PCP client's
+mapping. Returns
+.Fa NULL
+if no active mapping exists.
+.Pp
+.Fn mbt_pcp_external_port "struct mbt_pcp *p"
+returns the external port number currently assigned to the PCP client's
+mapping. Returns 0 if no active mapping exists.
+.Sh RETURN VALUES
+Functions returning
+.Ft int
+return 0 on success or a negative errno value on failure.
+.Sh EXAMPLES
+Example of requesting a UDP port mapping:
+.Bd -literal
+struct mbt_ev *ev;
+struct mbt_pcp *pcp;
+mbt_pcp_new(&pcp, ev, NULL);
+
+void my_cb(const char *addr, uint16_t port, uint32_t lifetime, void *arg) {
+    printf("extern: %s:%u\n", addr, port);
+}
+
+mbt_pcp_map(pcp, IPPROTO_UDP, 6881, 3600, my_cb, NULL);
+.Ed
+.Sh SEE ALSO
+.Xr mbt_session 3
