@@ -4,6 +4,7 @@
 
 /* Timer configuration — all values in seconds, 0 = use default */
 struct mbt_timers {
+	int maintain_interval;   /* default 5 */
 	int choke_interval;      /* default 10 */
 	int pex_interval;        /* default 60 */
 	int request_timeout;     /* default 15 */

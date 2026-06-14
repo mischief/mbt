@@ -250,7 +250,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 		}
 	}
 
-	mbt_ev_timer_mod(timer, 5 * 1000000ULL);
+	mbt_ev_timer_mod(timer, (uint64_t)s->timers.maintain_interval * 1000000ULL);
 }
 
 static void session_generate_peer_id(uint8_t *id);
@@ -520,6 +520,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (cfg->download_rate)
 		mbt_ratelimit_new(&s->download_limit, cfg->download_rate, 0);
 	/* Apply defaults for zero values */
+	if (!s->timers.maintain_interval) s->timers.maintain_interval = 5;
 	if (!s->timers.choke_interval) s->timers.choke_interval = 10;
 	if (!s->timers.pex_interval) s->timers.pex_interval = 60;
 	if (!s->timers.request_timeout) s->timers.request_timeout = 15;
@@ -539,7 +540,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	session_generate_peer_id(s->peer_id);
 
 	/* Maintenance timer: refill peers from pool every 5s */
-	mbt_ev_timer_new(s->ev, &s->maintain_timer, 5 * 1000000ULL, session_maintain_cb, s);
+	mbt_ev_timer_new(s->ev, &s->maintain_timer, (uint64_t)s->timers.maintain_interval * 1000000ULL, session_maintain_cb, s);
 
 	/* Listen socket for incoming peers */
 	session_listen(s);
