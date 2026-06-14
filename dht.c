@@ -816,6 +816,18 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 	struct mbt_dht *d = v;
 	int total = mbt_dht_node_count(d);
 
+	/* Evict stale nodes (no activity in 5 min) */
+	time_t now = time(NULL);
+	for (int i = 0; i < NUM_BUCKETS; i++) {
+		int j = 0;
+		while (j < d->buckets[i].count) {
+			if (now - d->buckets[i].nodes[j].last_seen > 300) {
+				d->buckets[i].nodes[j] = d->buckets[i].nodes[--d->buckets[i].count];
+			} else {
+				j++;
+			}
+		}
+	}
 	/* Send find_node to up to 8 known nodes to expand routing table */
 	int sent = 0;
 	for (int i = 0; i < NUM_BUCKETS && sent < 8; i++) {
