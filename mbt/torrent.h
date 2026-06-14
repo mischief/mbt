@@ -113,6 +113,7 @@ struct mbt_peer_stats {
 	int outstanding;  /* in-flight requests */
 	int done_pct;     /* % of pieces this peer has (0-100) */
 	int hash_failures;
+	int score;            /* peer penalty score (lower = better, 0 = clean) */
 	enum mbt_peer_source source;   /* mbt_peer_source */
 	uint64_t downloaded;  /* bytes received from peer */
 	uint64_t uploaded;    /* bytes sent to peer */
