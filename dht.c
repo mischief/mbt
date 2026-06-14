@@ -623,6 +623,11 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 		if (!q || !t || !a) goto out;
 
+		char _qaddr[64];
+		mbt_log_debug(MBT_LOG_DHT, "query %.*s from %s",
+		              (int)q->string.iov_len, (char *)q->string.iov_base,
+		              sa_str(&from, _qaddr, sizeof(_qaddr)));
+
 		/* Add querying node to routing table */
 		struct mbt_be_value *qid = mbt_be_find(a, "id");
 		if (qid && qid->type == BE_STRING && qid->string.iov_len == 20)

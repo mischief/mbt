@@ -146,6 +146,7 @@ endif
 executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 executable('mbt-torrent', 'tools/mbt-torrent.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+executable('mbt-dhtd', 'tools/mbt-dhtd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
 libcurl_dep = dependency('libcurl', required: false)
