@@ -85,7 +85,7 @@ mbt_storage_file_open(void *ctx, struct mbt_torrent *t)
 
 	for (int i = 0; i < fc; i++) {
 		const struct mbt_file *f = mbt_torrent_file(t, i);
-		char path[4096];
+		char path[256];
 
 		if (fc == 1) {
 			/* Single-file: dir/filename */

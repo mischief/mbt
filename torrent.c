@@ -701,7 +701,12 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 
 		/* Compare with our infohash */
 		if (memcmp(digest, t->ih->hash_sha1, 20) != 0) {
-			mbt_log_warn(MBT_LOG_TORRENT, "metadata hash mismatch, discarding");
+			char got[41], want[41];
+			mbt_hex_encode(digest, 20, got, sizeof(got));
+			mbt_hex_encode(t->ih->hash_sha1, 20, want, sizeof(want));
+			mbt_log_warn(MBT_LOG_TORRENT,
+			    "metadata hash mismatch: got=%s want=%s len=%zu have=%zu",
+			    got, want, t->metadata_len, t->metadata_have);
 			t->metadata_have = 0;
 			memset(t->metadata, 0, t->metadata_len);
 			return;
