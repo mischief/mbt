@@ -1,30 +1,146 @@
-.\" SPDX-License-Identifier: ISC
-.Dd June 9, 2026
+.Dd June 14, 2026
 .Dt MBT_STORAGE 3
 .Os
 .Sh NAME
-.Nm mbt_torrent_open_storage_file ,
-.Nm mbt_torrent_open_storage_memory
-.Nd torrent storage backends
+.Nm mbt_storage_file_ops ,
+.Nm mbt_storage_file_open ,
+.Nm mbt_storage_file_write_piece ,
+.Nm mbt_storage_file_read_piece ,
+.Nm mbt_storage_file_have_piece ,
+.Nm mbt_storage_file_close ,
+.Nm mbt_storage_memory_ops ,
+.Nm mbt_storage_memory_new ,
+.Nm mbt_storage_memory_destroy ,
+.Nm mbt_storage_memory_put_file ,
+.Nm mbt_storage_memory_get_file ,
+.Nm mbt_storage_memory_data ,
+.Nm mbt_storage_memory_length ,
+.Nm mbt_storage_memory_open ,
+.Nm mbt_storage_memory_write_piece ,
+.Nm mbt_storage_memory_read_piece ,
+.Nm mbt_storage_memory_have_piece ,
+.Nm mbt_storage_memory_close
+.Nd Storage backend interfaces for torrent data.
 .Sh SYNOPSIS
 .In mbt/storage.h
+.Ft const struct mbt_storage_ops *
+.Fn mbt_storage_file_ops
+.Ft const struct mbt_storage_ops *
+.Fn mbt_storage_memory_ops
 .Ft int
-.Fn mbt_torrent_open_storage_file "struct mbt_torrent *t" "const struct mbt_storage_config *cfg"
+.Fn mbt_storage_file_open "void *ctx" "struct mbt_torrent *t"
+.Ft void
+.Fn mbt_storage_file_close "void *ctx"
 .Ft int
-.Fn mbt_torrent_open_storage_memory "struct mbt_torrent *t" "const struct mbt_sdbuf *buf" "const struct mbt_bitmap *bm"
+.Fn mbt_storage_file_write_piece "void *ctx" "uint32_t index" "const void *data" "size_t len"
+.Ft int
+.Fn mbt_storage_file_read_piece "void *ctx" "uint32_t index" "void *buf" "size_t len"
+.Ft int
+.Fn mbt_storage_file_have_piece "void *ctx" "uint32_t index"
+.Ft struct mbt_storage_memory *
+.Fn mbt_storage_memory_new
+.Ft void
+.Fn mbt_storage_memory_destroy "struct mbt_storage_memory *m"
+.Ft int
+.Fn mbt_storage_memory_put_file "struct mbt_storage_memory *m" "uint64_t offset" "const void *data" "size_t len"
+.Ft int
+.Fn mbt_storage_memory_get_file "struct mbt_storage_memory *m" "uint64_t offset" "void *buf" "size_t len"
+.Ft uint8_t *
+.Fn mbt_storage_memory_data "struct mbt_storage_memory *m"
+.Ft uint64_t
+.Fn mbt_storage_memory_length "struct mbt_storage_memory *m"
+.Ft int
+.Fn mbt_storage_memory_open "void *ctx" "struct mbt_torrent *t"
+.Ft int
+.Fn mbt_storage_memory_write_piece "void *ctx" "uint32_t index" "const void *data" "size_t len"
+.Ft int
+.Fn mbt_storage_memory_read_piece "void *ctx" "uint32_t index" "void *buf" "size_t len"
+.Ft int
+.Fn mbt_storage_memory_have_piece "void *ctx" "uint32_t index"
+.Ft void
+.Fn mbt_storage_memory_close "void *ctx"
 .Sh DESCRIPTION
-Storage backends manage torrent piece data on disk or in memory.
-
-.Pp
-.Fn mbt_torrent_open_storage_file
-lays out pieces according to the file list.
-.Fn mbt_torrent_open_storage_memory
-is suitable for testing or when an entire torrent fits in RAM;
-.Sh RETURN VALUES
-Functions returning
-.Ft int
-Return 0 on success or a negative errno value on failure.
+The
+.Nm mbt_storage
+library provides interfaces for different storage backends to persist or manage torrent pieces.
+It defines a standard
+.Vt mbt_storage_ops
+structure that all backends must implement, allowing the library to interact with file-based or memory-based storage polymorphically.
+.Sh FILE STORAGE
+The file-based backend implements storage on the local filesystem.
+For this backend, the
+.Vt ctx
+pointer is expected to be a null-terminated string containing the path to the output file.
+.Bl -tag -width 12
+.It .Fn mbt_storage_file_ops
+Returns the operations structure for the file storage backend.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_file_open
+Opens the target file for writing.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_file_write_piece
+Writes a piece of data to the specified index in the file.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_file_read_piece
+Reads a piece of data from the specified index in the file.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_file_have_piece
+Checks if the piece at the given index has been written to the file.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_file_close
+Closes the target file and flushes buffers.
+.El
+.Sh MEMORY STORAGE
+The memory-based backend provides an in-memory buffer for storage, useful for testing or handling small torrents.
+It allows direct manipulation of the underlying buffer.
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_new
+Creates a new memory storage context.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_destroy
+Destroys the memory storage context and frees its contents.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_put_file
+Writes data into the memory buffer at a given offset, simulating file-like behavior.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_get_file
+Reads data from the memory buffer starting at a given offset.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_data
+Returns a pointer to the raw underlying byte array.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_length
+Returns the total size of the memory buffer.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_open
+Initializes the memory backend for a specific torrent.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_write_piece
+Writes a piece into the memory buffer.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_read_piece
+Reads a piece from the memory buffer.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_have_piece
+Checks if a piece has been written to the buffer.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_storage_memory_close
+Closes the memory backend for the torrent.
+.El
 .Sh SEE ALSO
-.Xr mbt_torrent 3
-.Sh AUTHORS
-.An Nick Owens Aq Mt mischief@offblast.org
+.Xr mbt 3

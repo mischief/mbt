@@ -53,6 +53,7 @@ Prose here.
 - NO `.Fs`, `.Ff` — these don't exist
 - `.Dt` is NOT a type reference — use `.Vt` for types in prose
 - `.Bl` requires a list type: `.Bl -bullet`, `.Bl -tag -width 8`, `.Bl -item`
+- Inside `.It`, don't prefix macros with dot: `.It Fn name` not `.It .Fn name`
 - Keep lines under 80 chars
 - Descriptions: concise, factual, no filler
 - One `.Ft` + `.Fn` pair per function in SYNOPSIS

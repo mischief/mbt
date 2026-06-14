@@ -1,0 +1,34 @@
+.Dd June 14, 2026
+.Dt MBT_MAGNET 3
+.Os
+.Sh NAME
+.Nm mbt_magnet_parse ,
+.Nm mbt_magnet_free
+.Nd Magnet URI parsing and management.
+.Sh SYNOPSIS
+.In mbt/magnet.h
+.Ft int
+.Fn mbt_magnet_parse "const char *uri" "struct mbt_magnet *out"
+.Ft void
+.Fn mbt_magnet_free "struct mbt_magnet *m"
+.Sh DESCRIPTION
+The
+.Nm mbt_magnet
+module provides utilities for parsing and managing BitTorrent magnet URIs.
+A magnet URI contains information such as the infohash, display name, tracker URLs, and known peer addresses.
+.Sh FUNCTIONS
+The following functions manage magnet URI structures:
+.Bl -tag -width 12
+.It Fn mbt_magnet_parse
+Parses a magnet URI string into a
+.Vt mbt_magnet
+structure. Returns 0 on success or a negative error code on failure.
+.El
+.Bl -tag -width 12
+.It Fn mbt_magnet_free
+Frees the internal dynamically allocated members of a
+.Vt mbt_magnet
+structure, such as the display name and tracker strings. It does not free the structure itself.
+.El
+.Sh SEE ALSO
+.Xr mbt 3

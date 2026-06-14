@@ -1,0 +1,128 @@
+.Dd June 14, 2026
+.Dt MBT_TRACKER_SERVER 3
+.Os
+.Sh NAME
+.Nm mbt_tracker_store_new ,
+.Nm mbt_tracker_store_free ,
+.Nm mbt_tracker_store_num_torrents ,
+.Nm mbt_tracker_store_num_peers ,
+.Nm mbt_tracker_store_stats ,
+.Nm mbt_tracker_server_new ,
+.Nm mbt_tracker_server_free ,
+.Nm mbt_tracker_server_port ,
+.Nm mbt_tracker_server_num_torrents ,
+.Nm mbt_tracker_server_num_peers ,
+.Nm mbt_tracker_http_new ,
+.Nm mbt_tracker_http_free ,
+.Nm mbt_tracker_http_num_torrents ,
+.Nm mbt_tracker_http_num_peers ,
+.Nm mbt_tracker_store_gc
+.Nd Tracker server implementation and peer storage.
+.Sh SYNOPSIS
+.In mbt/tracker_server.h
+.Ft int
+.Fn mbt_tracker_store_new "struct mbt_tracker_store **out"
+.Ft void
+.Fn mbt_tracker_store_free "struct mbt_tracker_store *s"
+.Ft int
+.Fn mbt_tracker_store_num_torrents "struct mbt_tracker_store *s"
+.Ft int
+.Fn mbt_tracker_store_num_peers "struct mbt_tracker_store *s"
+.Ft void
+.Fn mbt_tracker_store_stats "struct mbt_tracker_store *s" "struct mbt_tracker_stats *out"
+.Ft int
+.Fn mbt_tracker_server_new "struct mbt_tracker_server **out" "struct mbt_ev *ev" "uint16_t port" "struct mbt_tracker_store *store"
+.Ft void
+.Fn mbt_tracker_server_free "struct mbt_tracker_server *ts"
+.Ft uint16_t
+.Fn mbt_tracker_server_port "struct mbt_tracker_server *ts"
+.Ft int
+.Fn mbt_tracker_server_num_torrents "struct mbt_tracker_server *ts"
+.Ft int
+.Fn mbt_tracker_server_num_peers "struct mbt_tracker_server *ts"
+.Ft int
+.Fn mbt_tracker_http_new "struct mbt_tracker_http **out" "struct mbt_ev *ev" "uint16_t port" "struct mbt_tracker_store *store"
+.Ft void
+.Fn mbt_tracker_http_free "struct mbt_tracker_http *th"
+.Ft int
+.Fn mbt_tracker_http_num_torrents "struct mbt_tracker_http *th"
+.Ft int
+.Fn mbt_tracker_http_num_peers "struct mbt_tracker_http *th"
+.Ft void
+.Fn mbt_tracker_store_gc "struct mbt_tracker_store *s"
+.Sh DESCRIPTION
+The
+.Nm mbt_tracker_server
+module provides the backend infrastructure for running BitTorrent tracker services, including a shared peer store and both UDP and HTTP server implementations.
+.Sh PEER STORE
+The
+.Vt mbt_tracker_store
+manages the shared database of active torrents and peers. It is used by both the UDP and HTTP servers to persist session information.
+.Bl -tag -width 12
+.It .Fn mbt_tracker_store_new
+Creates a new peer store. If the provided pointer is NULL, an internal store is created.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_store_free
+Destroys the store and frees all associated resources.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_store_num_torrents
+Returns the number of active torrents in the store.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_store_num_peers
+Returns the total number of peers across all torrents.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_store_stats
+Populates a
+.Vt mbt_tracker_stats
+structure with current counts for torrents, peers, seeders, and leechers.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_store_gc
+Performs garbage collection by expiring stale peers (those inactive for >30 minutes) and removing empty torrent entries.
+.El
+.Sh UDP TRACKER SERVER
+The UDP implementation handles BEP 15 announced requests.
+.Bl -tag -width 12
+.It .Fn mbt_tracker_server_new
+Initializes a new UDP tracker server on the specified port, using the provided event loop and peer store.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_server_free
+Destroys the UDP tracker server instance.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_server_port
+Returns the port number the server is listening on.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_server_num_torrents
+Returns the number of torrents currently known by this server instance.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_server_num_peers
+Returns the number of peers currently known by this server instance.
+.El
+.Sh HTTP TRACKER SERVER
+The HTTP implementation handles BEP 3 announced requests. This implementation relies on a user-provided HTTP callback function for transport.
+.Bl -tag -width 12
+.It .Fn mbt_tracker_http_free
+Destroys the HTTP tracker server instance.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_http_new
+Initializes a new HTTP tracker server on the specified port, using the provided event loop and peer store.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_http_num_torrents
+Returns the number of torrents known by this HTTP server instance.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_http_num_peers
+Returns the number of peers known by this HTTP server instance.
+.El
+.Sh SEE ALSO
+.Xr mbt 3

@@ -1,0 +1,69 @@
+.Dd June 14, 2026
+.Dt MBT_TRACKER 3
+.Os
+.Sh NAME
+.Nm mbt_tracker_udp_announce ,
+.Nm mbt_tracker_http_announce ,
+.Nm mbt_tracker_announce
+.Nd Tracker announcement client functions for BitTorrent.
+.Sh SYNOPSIS
+.In mbt/tracker.h
+.Ft int
+.Fn mbt_tracker_udp_announce "const char *url" "struct mbt_tracker_request *req"
+.Ft int
+.Fn mbt_tracker_http_announce "const char *url" "struct mbt_tracker_request *req" "mbt_http_fn http" "void *http_arg"
+.Ft int
+.Fn mbt_tracker_announce "const char *url" "struct mbt_tracker_request *req" "mbt_http_fn http" "void *http_arg"
+.Sh DESCRIPTION
+The
+.Nm mbt_tracker
+library provides functions to announce torrent progress to trackers using the UDP (BEP 15) and HTTP (BEP 3) protocols.
+All functions provided are asynchronous or rely on callbacks to notify when an announcement is completed or an error occurs.
+.Sh STRUCTURES AND CALLBACKS
+The primary structure used in these functions is
+.Vt mbt_tracker_request
+.Pp
+This structure contains the necessary context for the announcement, including:
+.Bl -tag -width 12
+.It .Vt ev
+The event loop to which the request is attached.
+.El
+.Bl -tag -width 12
+.It .Vt ih
+A pointer to the Torrent infohash.
+.El
+.Bl -tag -width 12
+.It .Vt peer_id
+The 20-byte peer identifier.
+.El
+.Bl -tag -width 12
+.It .Vt listen_port
+The port the peer is listening on.
+.El
+.Bl -tag -width 12
+.It .Vt peer_cb
+A callback invoked for each peer returned by the tracker.
+.El
+.Bl -tag -width 12
+.It .Vt done_cb
+A callback invoked when the announcement completes or fails.
+.El
+.Sh FUNCTIONS
+The following functions perform the announcements:
+.Bl -tag -width 12
+.It .Fn mbt_tracker_udp_announce
+Performs an asynchronous UDP tracker announcement (BEP 15). The function returns 0 if the request was successfully initiated, or a negative error code on failure.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_http_announce
+Performs an HTTP tracker announcement (BEP 3). This function requires an implementation of the
+.Vt mbt_http_fn
+callback to handle the underlying HTTP transport. It returns 0 on success or a negative error code on failure.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_tracker_announce
+A dispatcher function that selects between UDP and HTTP announcement based on the scheme provided in the
+.Vt url.
+.El
+.Sh SEE ALSO
+.Xr mbt 3

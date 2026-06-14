@@ -1,33 +1,105 @@
-.\" SPDX-License-Identifier: ISC
-.Dd June 9, 2026
+.Dd June 14, 2026
 .Dt MBT_RATELIMIT 3
 .Os
 .Sh NAME
 .Nm mbt_ratelimit_new ,
 .Nm mbt_ratelimit_free ,
-.Nm mbt_torrent_set_upload_rate ,
-.Nm mbt_torrent_set_download_rate ,
-.Nd token bucket rate limiting for bandwidth control
+.Nm mbt_ratelimit_allow ,
+.Nm mbt_ratelimit_delay ,
+.Nm mbt_ratelimit_consume ,
+.Nm mbt_ratelimit_tokens ,
+.Nm mbt_ratelimit_set_rate ,
+.Nm mbt_ratelimit_set_burst ,
+.Nm mbt_ratelimit_rate ,
+.Nm mbt_ratelimit_burst
+.Nd Token bucket rate limiter
 .Sh SYNOPSIS
 .In mbt/ratelimit.h
 .Ft int
-.Fn mbt_ratelimit_new "struct mbt_torrent *t" "uint64_t bytes_per_sec"
+.Fn mbt_ratelimit_new "struct mbt_ratelimit **out" "uint64_t rate" "uint64_t burst"
 .Ft void
-.Fn mbt_ratelimit_free "struct mbt_session *s"
+.Fn mbt_ratelimit_free "struct mbt_ratelimit *rl"
+.Fn mbt_ratelimit_allow "struct mbt_ratelimit *rl" "size_t n"
+.Fn mbt_ratelimit_delay "struct mbt_ratelimit *rl" "size_t n"
+.Fn mbt_ratelimit_consume "struct mbt_ratelimit *rl" "size_t n"
+.Fn mbt_ratelimit_tokens "struct mbt_ratelimit *rl"
+.Ft void
+.Fn mbt_ratelimit_set_rate "struct mbt_ratelimit *rl" "uint64_t rate"
+.Fn mbt_ratelimit_set_burst "struct mbt_ratelimit *rl" "uint64_t burst"
+.Ft uint64_t
+.Fn mbt_ratelimit_rate "struct mbt_ratelimit *rl"
+.Fn mbt_ratelimit_burst "struct mbt_ratelimit *rl"
 .Sh DESCRIPTION
-A token bucket limiter enforcing per-torrent or session bandwidth caps.
-
+The
+.Nm mbt_ratelimit
+library implements a token bucket rate limiter. Tokens
+refill at the specified
+.Vt rate
+(bytes per second) up to a maximum of
+.Vt burst
+tokens. A transfer of
+.Vt N
+bytes requires
+.Vt N
+tokens. If the
+.Nm mbt_ratelimit
+rate is set to 0, the limiter allows unlimited transfers immediately.
 .Pp
-Fn mbt_ratelimit_new
-creates a bucket filling at
-Fa bytes_per_sec .
-Callers consume tokens at request time; the bucket refills continuously
-allowing smooth pacing across varying transfer rates.
-.Sh RETURN VALUES
-Fn mbt_ratelimit_new
-returns 0 on success or negative errno if the rate value is invalid.
+The following functions manage the lifetime and configuration:
+.Bl -tag -width 12
+.It .Fn mbt_ratelimit_new
+Creates a new rate limiter. Returns 0 on success or error code on failure.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_ratelimit_free
+Destroys the rate limiter and frees its resources.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_ratelimit_set_rate
+Updates the refill rate at runtime.
+.El
+.Bl -tag -width 8
+.It .Fn mbt_ratelimit_set_burst
+Updates the maximum burst size at runtime.
+.El
+.Sh RATE LIMITING OPERATIONS
+The following functions perform rate-limited operations:
+.Bl -tag -width 12
+.It .Fn mbt_ratelimit_allow
+Attempts to consume
+.Vt n
+tokens immediately. If successful, returns
+.Fa true
+and consumes the tokens. If insufficient tokens are available, returns
+.Fa false
+and does not consume any tokens.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_ratelimit_delay
+Returns the number of microseconds until
+.Vt n
+tokens become available. Returns 0 if enough tokens are currently available.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_ratelimit_consume
+Unconditionally consumes
+.Vt n
+tokens. This should be called after a sufficient delay has elapsed, as reported by
+.Fn mbt_ratelimit_delay.
+.El
+.Sh INSPECTION
+The following functions allow inspecting the current state:
+.Bl -tag -width 12
+.It .Fn mbt_ratelimit_tokens
+Returns the number of tokens currently available in the bucket.
+.El
+.Bl -tag -width 8
+.It .Fn mbt_ratelimit_rate
+Returns the current refill rate in bytes per second.
+.El
+.Bl -tag -width 8
+.It .Fn mbt_ratelimit_burst
+Returns the current maximum burst size.
+.El
 .Sh SEE ALSO
-.Xr mbt_torrent 3 ,
-.Xr mbt_session 3
-.Sh AUTHORS
-.An Nick Owens Aq Mt mischief@offblast.org
+.Xr mbt 3

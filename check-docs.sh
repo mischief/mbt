@@ -21,7 +21,7 @@ nm -D --defined-only "$LIBSO" | awk '/( T | D | B )/{print $3}' \
 
 # Extract documented symbols from man pages (.Fn and .Fo lines)
 if [ -d "$MANDIR" ] && ls "$MANDIR"/*.3 >/dev/null 2>&1; then
-    grep -h '^\.\(Fn\|Fo\) ' "$MANDIR"/*.3 2>/dev/null \
+    grep -h '\.\(Fn\|Fo\) ' "$MANDIR"/*.3 2>/dev/null \
         | awk '{print $2}' | sort -u > "$TMPD/documented.txt"
 else
     : > "$TMPD/documented.txt"
@@ -49,3 +49,21 @@ if [ "$UNDOCUMENTED" -gt 0 ]; then
 fi
 
 exit 0
+
+# Lint man pages for common errors
+if [ -d "$MANDIR" ] && ls "$MANDIR"/*.3 >/dev/null 2>&1; then
+    LINT_ERRORS=0
+    for f in "$MANDIR"/*.3; do
+        errs=$(mandoc -Tlint "$f" 2>&1 | grep "ERROR" | wc -l)
+        if [ "$errs" -gt 0 ]; then
+            echo ""
+            echo "mandoc errors in $f:"
+            mandoc -Tlint "$f" 2>&1 | grep "ERROR" | sed 's/^/  /'
+            LINT_ERRORS=$((LINT_ERRORS + errs))
+        fi
+    done
+    if [ "$LINT_ERRORS" -gt 0 ]; then
+        echo ""
+        echo "total mandoc errors: $LINT_ERRORS"
+    fi
+fi

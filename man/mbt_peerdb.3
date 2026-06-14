@@ -1,0 +1,79 @@
+.Dd June 14, 2026
+.Dt MBT_PEERDB 3
+.Os
+.Sh NAME
+.Nm mbt_peerdb_init ,
+.Nm mbt_peerdb_insert ,
+.Nm mbt_peerdb_find ,
+.Nm mbt_peerdb_select ,
+.Nm mbt_peerdb_count ,
+.Nm mbt_peerdb_total ,
+.Nm mbt_peerdb_free
+.Nd Peer database management for BitTorrent.
+.Sh SYNOPSIS
+.In mbt/peerdb.h
+.Ft void
+.Fn mbt_peerdb_init "struct mbt_peerdb *db"
+.Ft struct mbt_peer_entry *
+.Fn mbt_peerdb_insert "struct mbt_peerdb *db" "const char *addr" "uint16_t port" "int source"
+.Ft struct mbt_peer_entry *
+.Fn mbt_peerdb_find "struct mbt_peerdb *db" "const char *addr" "uint16_t port"
+.Ft struct mbt_peer_entry *
+.Fn mbt_peerdb_select "struct mbt_peerdb *db"
+.Ft int
+.Fn mbt_peerdb_count "struct mbt_peerdb *db" "enum mbt_peerdb_state state"
+.Ft int
+.Fn mbt_peerdb_total "struct mbt_peerdb *db"
+.Ft void
+.Fn mbt_peerdb_free "struct mbt_peerdb *db"
+.Sh DESCRIPTION
+The
+.Nm mbt_peerdb
+module provides a mechanism to manage and track the state of discovered peers in a Bit
+torrent swarm. It maintains an internal database of peers, recording their
+connection status (e.g., known, connecting, active, failed, or banned), the source
+from which they were found (DHT, Tracker, PEX), and metadata such as the last time
+they were seen.
+.Sh FUNCTIONS
+The following functions manage the peer database:
+.Bl -tag -width 12
+.It .Fn mbt_peerdb_init
+Initializes an empty peer database structure.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_peerdb_insert
+Inserts a new peer into the database or updates an existing one based on the
+provided address and port. It also records the source of discovery. Returns a
+pointer to the created or found
+.Vt mbt_peer_entry.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_peerdb_find
+Searches for a peer in the database using its IP address and port. Returns
+.Fa NULL
+if no matching peer is found.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_peerdb_select
+Selects the best available peer to attempt a connection. This function
+implements a selection strategy that prioritizes peers in the
+.Vt MBT_PEERDB_KNOWN
+state, preferring those with recent activity and fewer recorded failures. Returns
+.Fa NULL
+if no suitable peer is available.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_peerdb_count
+Returns the number of peers currently in a specific
+.Vt mbt_peerdb_state.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_peerdb_total
+Returns the total number of peers present in the database.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_peerdb_free
+Clears the database and frees all stored peer entries and resources.
+.El
+.Sh SEE ALSO
+.Xr mbt 3
