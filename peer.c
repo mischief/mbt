@@ -709,8 +709,6 @@ mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn 
 	p->cb_arg = arg;
 	p->source = source;
 
-	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: incoming peer from %s", p->addr, p->port,
-	              mbt_peer_source_str(source));
 	p->peer_choking = 1;
 	p->am_choking = 1;
 	p->piece_count = piece_count;
@@ -723,6 +721,8 @@ mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn 
 	if (ext[5] & 0x10) p->flags |= MBT_PEER_FLAG_EXTENSION;
 
 	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->port);
+	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: incoming peer from %s", p->addr, p->port,
+	              mbt_peer_source_str(source));
 	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);
 
 	/* Set metadata size so extension handshake includes it */
