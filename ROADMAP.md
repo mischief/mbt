@@ -168,3 +168,13 @@
 - [ ] µTP transport (BEP 29)
 - [ ] Holepunch (BEP 55)
 - [ ] HTTP seeding (BEP 19)
+
+## Phase 10: Portability hardening
+
+- [ ] Replace peerdb RB tree (sys/tree.h) with flat array — drop libbsd dependency
+- [ ] Bundle sys/queue.h or remove need for libbsd-overlay on Linux
+- [ ] Replace struct iovec in be.h with plain {void*,size_t} struct
+- [ ] Remove err.h usage from library code (errx/warnx → tools only)
+- [ ] Guard syslog.h behind #ifdef in log.c
+- [ ] Reduce stack-heavy functions (4KB path buffers → 256)
+- [ ] Bring-your-own event loop documented + tested (ev_esp32 as reference)
