@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <errno.h>
 
-#include <hex.h>
+#include "mbt/hex.h"
 
 static int
 mchrtobin(char h, unsigned char *out)

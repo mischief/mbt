@@ -31,8 +31,9 @@ make_nonblock(int fd)
 static int
 bind_listen_tcp(int family, uint16_t port)
 {
-	int fd = socket(family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	int fd = socket(family, SOCK_STREAM, 0);
 	if (fd < 0) return -errno;
+	make_nonblock(fd);
 
 	int yes = 1;
 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
@@ -67,8 +68,9 @@ bind_listen_tcp(int family, uint16_t port)
 static int
 bind_udp(int family, uint16_t port)
 {
-	int fd = socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	int fd = socket(family, SOCK_DGRAM, 0);
 	if (fd < 0) return -errno;
+	make_nonblock(fd);
 
 	int yes = 1;
 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
@@ -207,8 +209,9 @@ mbt_connect_tcp(const char *addr, uint16_t port)
 		freeaddrinfo(res);
 	}
 
-	int fd = socket(sa.ss_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	int fd = socket(sa.ss_family, SOCK_STREAM, 0);
 	if (fd < 0) return -errno;
+	make_nonblock(fd);
 
 	if (connect(fd, (struct sockaddr *)&sa, salen) < 0 && errno != EINPROGRESS) {
 		int e = errno; close(fd); return -e;
