@@ -119,3 +119,6 @@ test('ipv6', ipv6_test, timeout: 30)
 
 torrent_nodes_test = executable('torrent_nodes_test', 'torrent_nodes_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('torrent_nodes', torrent_nodes_test)
+
+bep44_test = executable('bep44_test', 'bep44_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('bep44', bep44_test, timeout: 10)

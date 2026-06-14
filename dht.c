@@ -135,10 +135,32 @@ struct mbt_dht {
 
 	/* Query rate limit (messages/sec as bytes, 1 msg = 1 token) */
 	struct mbt_ratelimit *send_limit;
+
+	/* BEP 44: item storage */
+#define DHT_MAX_ITEMS 64
+#define DHT_ITEM_EXPIRE 7200
+	struct dht_item {
+		uint8_t target[20];
+		uint8_t *v;
+		size_t vlen;
+		uint8_t k[MBT_DHT_PUBKEY_LEN];
+		uint8_t sig[MBT_DHT_SIG_LEN];
+		int64_t seq;
+		char *salt;
+		size_t salt_len;
+		int mutable;
+		time_t stored_at;
+	} items[DHT_MAX_ITEMS];
+	int item_count;
+
+	mbt_dht_verify_cb verify_cb;
+	void *verify_arg;
 };
 
 /* --- Helpers --- */
 
+static struct dht_item *dht_item_find(struct mbt_dht *d, const uint8_t *target);
+static struct dht_item *dht_item_alloc(struct mbt_dht *d, const uint8_t *target);
 static void
 random_bytes(uint8_t *buf, size_t len)
 {
@@ -800,6 +822,89 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			dht_send(d, &from, enc, enc_len);
 			free(enc);
 			mbt_be_value_free(resp);
+		} else if (q->type == BE_STRING && q->string.iov_len == 3 &&
+		           memcmp(q->string.iov_base, "get", 3) == 0) {
+			/* BEP 44: get */
+			struct mbt_be_value *tgt = mbt_be_find(a, "target");
+			if (!tgt || tgt->type != BE_STRING || tgt->string.iov_len != 20)
+				goto out;
+			struct dht_item *it = dht_item_find(d, tgt->string.iov_base);
+			struct mbt_be_value *resp = NULL, *rb = NULL;
+			mbt_be_dict_new(&resp);
+			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
+			mbt_be_dict_append_string(resp, "y", "r", 1);
+			mbt_be_dict_new(&rb);
+			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			uint8_t tok[4]; make_txn(d, tok);
+			mbt_be_dict_append_string(rb, "token", tok, 4);
+			struct dht_node closest[K];
+			int nc2 = routing_closest(d, tgt->string.iov_base, closest, K);
+			uint8_t cn[K * NODE_COMPACT_LEN]; int cl = 0;
+			for (int j = 0; j < nc2; j++) {
+				if (closest[j].addr.ss_family != AF_INET) continue;
+				memcpy(cn + cl, closest[j].id, 20);
+				struct sockaddr_in *s4 = (struct sockaddr_in *)&closest[j].addr;
+				memcpy(cn + cl + 20, &s4->sin_addr, 4);
+				memcpy(cn + cl + 24, &s4->sin_port, 2);
+				cl += 26;
+			}
+			if (cl > 0) mbt_be_dict_append_string(rb, "nodes", cn, cl);
+			if (it) {
+				mbt_be_dict_append_string(rb, "v", it->v, it->vlen);
+				if (it->mutable) {
+					mbt_be_dict_append_string(rb, "k", it->k, MBT_DHT_PUBKEY_LEN);
+					mbt_be_dict_append_string(rb, "sig", it->sig, MBT_DHT_SIG_LEN);
+					mbt_be_dict_append_number(rb, "seq", it->seq);
+				}
+			}
+			mbt_be_dict_append(resp, "r", rb);
+			unsigned char *enc; size_t enc_len;
+			mbt_be_value_encode(resp, &enc, &enc_len);
+			dht_send(d, &from, enc, enc_len);
+			free(enc);
+			mbt_be_value_free(resp);
+		} else if (q->type == BE_STRING && q->string.iov_len == 3 &&
+		           memcmp(q->string.iov_base, "put", 3) == 0) {
+			/* BEP 44: put */
+			struct mbt_be_value *v_val = mbt_be_find(a, "v");
+			if (!v_val) goto out;
+			unsigned char *v_enc = NULL; size_t v_enc_len = 0;
+			if (mbt_be_value_encode(v_val, &v_enc, &v_enc_len) < 0) goto out;
+			if (v_enc_len > MBT_DHT_MAX_VALUE) { free(v_enc); goto out; }
+			struct mbt_be_value *k_val = mbt_be_find(a, "k");
+			if (k_val && k_val->type == BE_STRING &&
+			    k_val->string.iov_len == MBT_DHT_PUBKEY_LEN) {
+				struct mbt_be_value *sig_val = mbt_be_find(a, "sig");
+				struct mbt_be_value *seq_val = mbt_be_find(a, "seq");
+				struct mbt_be_value *salt_val = mbt_be_find(a, "salt");
+				if (!sig_val || sig_val->string.iov_len != MBT_DHT_SIG_LEN ||
+				    !seq_val || seq_val->type != BE_INTEGER) {
+					free(v_enc); goto out;
+				}
+				const char *salt = NULL; size_t slen = 0;
+				if (salt_val && salt_val->type == BE_STRING) {
+					salt = salt_val->string.iov_base; slen = salt_val->string.iov_len;
+				}
+				mbt_dht_put_mutable(d, k_val->string.iov_base,
+				    sig_val->string.iov_base, seq_val->integer,
+				    salt, slen, v_enc, v_enc_len, NULL, NULL);
+			} else {
+				mbt_dht_put_immutable(d, v_enc, v_enc_len, NULL, NULL);
+			}
+			free(v_enc);
+			/* Respond */
+			struct mbt_be_value *resp = NULL, *rb = NULL;
+			mbt_be_dict_new(&resp);
+			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
+			mbt_be_dict_append_string(resp, "y", "r", 1);
+			mbt_be_dict_new(&rb);
+			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			mbt_be_dict_append(resp, "r", rb);
+			unsigned char *enc; size_t enc_len;
+			mbt_be_value_encode(resp, &enc, &enc_len);
+			dht_send(d, &from, enc, enc_len);
+			free(enc);
+			mbt_be_value_free(resp);
 		}
 	}
 	/* Ignore errors ('e') */
@@ -1024,8 +1129,174 @@ mbt_dht_node_count(struct mbt_dht *d)
 	return total;
 }
 
+uint16_t
+mbt_dht_port(struct mbt_dht *d)
+{
+	return d->listener.port;
+}
+
 void
 mbt_dht_set_node_id(struct mbt_dht *d, const uint8_t id[20])
 {
 	memcpy(d->id, id, 20);
+}
+
+/* --- BEP 44 --- */
+
+static struct dht_item *
+dht_item_find(struct mbt_dht *d, const uint8_t *target)
+{
+	for (int i = 0; i < d->item_count; i++)
+		if (memcmp(d->items[i].target, target, 20) == 0)
+			return &d->items[i];
+	return NULL;
+}
+
+static struct dht_item *
+dht_item_alloc(struct mbt_dht *d, const uint8_t *target)
+{
+	time_t now = time(NULL);
+	for (int i = 0; i < d->item_count; ) {
+		if (now - d->items[i].stored_at > DHT_ITEM_EXPIRE) {
+			free(d->items[i].v);
+			free(d->items[i].salt);
+			d->items[i] = d->items[--d->item_count];
+		} else {
+			i++;
+		}
+	}
+	if (d->item_count >= DHT_MAX_ITEMS) return NULL;
+	struct dht_item *it = &d->items[d->item_count++];
+	memset(it, 0, sizeof(*it));
+	memcpy(it->target, target, 20);
+	it->stored_at = now;
+	return it;
+}
+
+void
+mbt_dht_set_verify(struct mbt_dht *d, mbt_dht_verify_cb cb, void *arg)
+{
+	d->verify_cb = cb;
+	d->verify_arg = arg;
+}
+
+int
+mbt_dht_put_immutable(struct mbt_dht *d, const void *v, size_t vlen,
+                      mbt_dht_done_cb done_cb, void *arg)
+{
+	if (vlen > MBT_DHT_MAX_VALUE) return -EINVAL;
+	uint8_t target[20];
+	SHA1_CTX ctx;
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, v, vlen);
+	SHA1Final(target, &ctx);
+
+	struct dht_item *it = dht_item_find(d, target);
+	if (!it) {
+		it = dht_item_alloc(d, target);
+		if (!it) return -ENOMEM;
+		it->v = malloc(vlen);
+		if (!it->v) { d->item_count--; return -ENOMEM; }
+		memcpy(it->v, v, vlen);
+		it->vlen = vlen;
+		it->mutable = 0;
+		it->seq = -1;
+	}
+	(void)done_cb; (void)arg;
+	return 0;
+}
+
+int
+mbt_dht_get_immutable(struct mbt_dht *d, const uint8_t target[20],
+                      mbt_dht_item_cb cb, void *arg)
+{
+	struct dht_item *it = dht_item_find(d, target);
+	if (it) {
+		if (cb) cb(it->v, it->vlen, -1, NULL, arg);
+		return 0;
+	}
+	return -ENOENT;
+}
+
+int
+mbt_dht_put_mutable(struct mbt_dht *d,
+                    const uint8_t k[MBT_DHT_PUBKEY_LEN],
+                    const uint8_t sig[MBT_DHT_SIG_LEN],
+                    int64_t seq,
+                    const char *salt, size_t salt_len,
+                    const void *v, size_t vlen,
+                    mbt_dht_done_cb done_cb, void *arg)
+{
+	if (vlen > MBT_DHT_MAX_VALUE) return -EINVAL;
+	if (salt_len > 64) return -EINVAL;
+
+	uint8_t target[20];
+	SHA1_CTX ctx;
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, k, MBT_DHT_PUBKEY_LEN);
+	if (salt && salt_len > 0)
+		SHA1Update(&ctx, (const uint8_t *)salt, salt_len);
+	SHA1Final(target, &ctx);
+
+	if (d->verify_cb) {
+		uint8_t buf[1200];
+		int off = 0;
+		if (salt && salt_len > 0)
+			off += snprintf((char *)buf + off, sizeof(buf) - off,
+			                "4:salt%zu:%.*s", salt_len, (int)salt_len, salt);
+		off += snprintf((char *)buf + off, sizeof(buf) - off, "3:seqi%lde1:v",
+		                (long)seq);
+		if ((size_t)off + vlen > sizeof(buf)) return -EINVAL;
+		memcpy(buf + off, v, vlen);
+		off += vlen;
+		if (!d->verify_cb(k, sig, buf, off, d->verify_arg))
+			return -EACCES;
+	} else {
+		return -ENOSYS;
+	}
+
+	struct dht_item *it = dht_item_find(d, target);
+	if (it) {
+		if (seq <= it->seq) return -EEXIST;
+		free(it->v);
+	} else {
+		it = dht_item_alloc(d, target);
+		if (!it) return -ENOMEM;
+	}
+	it->v = malloc(vlen);
+	if (!it->v) { d->item_count--; return -ENOMEM; }
+	memcpy(it->v, v, vlen);
+	it->vlen = vlen;
+	memcpy(it->k, k, MBT_DHT_PUBKEY_LEN);
+	memcpy(it->sig, sig, MBT_DHT_SIG_LEN);
+	it->seq = seq;
+	it->mutable = 1;
+	free(it->salt);
+	it->salt = (salt && salt_len > 0) ? strndup(salt, salt_len) : NULL;
+	it->salt_len = salt_len;
+	it->stored_at = time(NULL);
+	(void)done_cb; (void)arg;
+	return 0;
+}
+
+int
+mbt_dht_get_mutable(struct mbt_dht *d,
+                    const uint8_t k[MBT_DHT_PUBKEY_LEN],
+                    const char *salt, size_t salt_len,
+                    mbt_dht_item_cb cb, void *arg)
+{
+	uint8_t target[20];
+	SHA1_CTX ctx;
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, k, MBT_DHT_PUBKEY_LEN);
+	if (salt && salt_len > 0)
+		SHA1Update(&ctx, (const uint8_t *)salt, salt_len);
+	SHA1Final(target, &ctx);
+
+	struct dht_item *it = dht_item_find(d, target);
+	if (it) {
+		if (cb) cb(it->v, it->vlen, it->seq, it->k, arg);
+		return 0;
+	}
+	return -ENOENT;
 }
