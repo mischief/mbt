@@ -152,27 +152,16 @@ usage(void)
 int
 main(int argc, char *argv[])
 {
-	int ch;
-	while ((ch = getopt(argc, argv, "h")) != -1) {
-		switch (ch) {
-		case 'h':
-		default:
-			usage();
-		}
-	}
-	argc -= optind;
-	argv += optind;
+	if (argc < 2) usage();
 
-	if (argc < 1) usage();
-
-	if (strcmp(argv[0], "create") == 0)
-		return cmd_create(argc, argv);
-	else if (strcmp(argv[0], "show") == 0) {
-		if (argc < 2) usage();
-		return cmd_show(argv[1]);
-	} else if (strcmp(argv[0], "magnet") == 0) {
-		if (argc < 2) usage();
-		return cmd_magnet(argv[1]);
+	if (strcmp(argv[1], "create") == 0)
+		return cmd_create(argc - 1, argv + 1);
+	else if (strcmp(argv[1], "show") == 0) {
+		if (argc < 3) usage();
+		return cmd_show(argv[2]);
+	} else if (strcmp(argv[1], "magnet") == 0) {
+		if (argc < 3) usage();
+		return cmd_magnet(argv[2]);
 	} else {
 		usage();
 	}
