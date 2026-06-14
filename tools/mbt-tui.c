@@ -124,6 +124,7 @@ draw_torrent_list(void)
 	int row = 1;
 	int idx = 0;
 	int maxrow = getmaxy(win_list) - 2;
+	int width = getmaxx(win_list) - 2;
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
 	while (t && row <= maxrow) {
 		const char *name = mbt_torrent_name(t);
@@ -131,10 +132,29 @@ draw_torrent_list(void)
 		uint32_t have = mbt_torrent_have_count(t);
 		uint32_t total = mbt_torrent_piece_count(t);
 		float pct = total ? (100.0f * have / total) : 0;
+		int peers = mbt_torrent_peer_count(t);
+
+		/* Truncate name with ... */
+		int name_width = width - 30; /* space for stats */
+		if (name_width < 10) name_width = 10;
+		char namebuf[256];
+		int nlen = strlen(name);
+		if (nlen > name_width) {
+			snprintf(namebuf, sizeof(namebuf), "%.*s...", name_width - 3, name);
+		} else {
+			snprintf(namebuf, sizeof(namebuf), "%s", name);
+		}
+
+		const char *state = "";
+		if (!total) state = "meta";
+		else if (pct >= 100.0f) state = "seed";
+		else if (peers == 0) state = "wait";
+		else state = "dl";
 
 		if (idx == selected)
 			wattron(win_list, A_REVERSE);
-		mvwprintw(win_list, row, 1, " %d %-30.30s %5.1f%%", idx + 1, name, pct);
+		mvwprintw(win_list, row, 1, " %-*s %5.1f%% %3dp %-4s",
+		          name_width, namebuf, pct, peers, state);
 		if (idx == selected)
 			wattroff(win_list, A_REVERSE);
 		row++;
