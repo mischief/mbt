@@ -3,6 +3,7 @@
 #include <sys/queue.h>
 #include <arpa/inet.h>
 #include "net.h"
+#include "mbt/log.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
@@ -78,8 +79,10 @@ mbt_lsd_init(struct mbt_lsd **out, int setfl)
 	if(setfl)
 		fcntl(fd, F_SETFL, setfl); /* best effort */
 
-	if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &y, sizeof(y)) < 0)
+	if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &y, sizeof(y)) < 0) {
+		mbt_log_warn(MBT_LOG_LSD, "SO_REUSEADDR: %s", strerror(errno));
 		goto err;
+	}
 
 	//memset(&sa, 0, sizeof(sa));
 	sa = (struct sockaddr_in){
@@ -88,16 +91,20 @@ mbt_lsd_init(struct mbt_lsd **out, int setfl)
 		.sin_port = htons(6771),
 	};
 
-	if(bind(fd, (struct sockaddr*)&sa, sizeof(sa)) < 0)
+	if(bind(fd, (struct sockaddr*)&sa, sizeof(sa)) < 0) {
+		mbt_log_warn(MBT_LOG_LSD, "bind 6771: %s", strerror(errno));
 		goto err;
+	}
 
 	mreq = (struct ip_mreq){
 		.imr_multiaddr = (struct in_addr){ .s_addr = inet_addr("239.192.152.143") },
 		.imr_interface = (struct in_addr){ .s_addr = htonl(INADDR_ANY) },
 	};
 
-	if(setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*) &mreq, sizeof(mreq)) < 0)
+	if(setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*) &mreq, sizeof(mreq)) < 0) {
+		mbt_log_warn(MBT_LOG_LSD, "IP_ADD_MEMBERSHIP: %s", strerror(errno));
 		goto err;
+	}
 
 	lsd = calloc(1, sizeof(*lsd));
 	if(!lsd)
