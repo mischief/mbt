@@ -769,6 +769,9 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 
+	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: on_request piece=%u off=%u len=%u",
+	              mbt_peer_addr(p), mbt_peer_port(p), piece, offset, length);
+
 	/* Only serve if we have the piece */
 	if (mbt_bitmap_isset(t->have, piece) <= 0)
 		return;
@@ -1377,6 +1380,8 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 	}
 
 	mbt_peer_set_our_metadata_size(peer, t->metadata_len);
+	if (mbt_session_reqq(t->session) > 0)
+		mbt_peer_set_our_reqq(peer, mbt_session_reqq(t->session));
 
 	tp->peer = peer;
 	tp->last_recv = time(NULL);

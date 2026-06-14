@@ -99,6 +99,7 @@ MBT_API int mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, stru
                           struct mbt_peer_callbacks *cb, void *arg);
 
 MBT_API void mbt_peer_set_our_metadata_size(struct mbt_peer *p, size_t sz);
+MBT_API void mbt_peer_set_our_reqq(struct mbt_peer *p, int reqq);
 MBT_API void mbt_peer_set_piece_count(struct mbt_peer *p, uint32_t count);
 MBT_API uint8_t mbt_peer_ut_pex_id(struct mbt_peer *p);
 

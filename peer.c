@@ -63,6 +63,7 @@ struct mbt_peer {
 	struct mbt_bitmap *bitfield;
 	uint32_t piece_count;
 	size_t our_metadata_size; /* metadata we can serve (0 = unknown) */
+	int our_reqq;            /* max requests we accept (0 = don't advertise) */
 
 	/* message framing */
 	size_t msglen;
@@ -193,6 +194,8 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	mbt_be_dict_append_number(m, "ut_pex", 4);
 	if (p->our_metadata_size > 0)
 		mbt_be_dict_append_number(be, "metadata_size", (int64_t)p->our_metadata_size);
+	if (p->our_reqq > 0)
+		mbt_be_dict_append_number(be, "reqq", p->our_reqq);
 
 	rv = mbt_be_value_encode(be, &encoded, &sz);
 	if (rv < 0)
@@ -755,6 +758,12 @@ void
 mbt_peer_set_our_metadata_size(struct mbt_peer *p, size_t sz)
 {
 	p->our_metadata_size = sz;
+}
+
+void
+mbt_peer_set_our_reqq(struct mbt_peer *p, int reqq)
+{
+	p->our_reqq = reqq;
 }
 
 void

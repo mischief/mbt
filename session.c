@@ -81,6 +81,7 @@ struct mbt_session {
 	struct mbt_timers timers;
 	int max_peers;
 	int max_pieces_per_peer;
+	int reqq;
 	mbt_http_fn http;
 	void *http_arg;
 	uint8_t peer_id[20];
@@ -524,6 +525,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (!s->timers.tracker_interval) s->timers.tracker_interval = 1800;
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->max_pieces_per_peer = cfg->max_pieces_per_peer ? cfg->max_pieces_per_peer : 4;
+	s->reqq = cfg->reqq;
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
 
@@ -1294,6 +1296,12 @@ mbt_session_max_pieces_per_peer(struct mbt_session *s)
 	return s ? s->max_pieces_per_peer : 4;
 }
 
+
+int
+mbt_session_reqq(struct mbt_session *s)
+{
+	return s ? s->reqq : 0;
+}
 void
 mbt_session_set_upload_rate(struct mbt_session *s, uint64_t bytes_per_sec)
 {
