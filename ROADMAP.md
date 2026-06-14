@@ -178,3 +178,19 @@
 - [ ] Guard syslog.h behind #ifdef in log.c
 - [ ] Reduce stack-heavy functions (4KB path buffers → 256)
 - [ ] Bring-your-own event loop documented + tested (ev_esp32 as reference)
+
+## Phase 11: Seeding & transfer improvements
+
+- [ ] Fix PEX peers not triggering outbound connects from peerdb
+- [ ] Seed-mode unchoking: unchoke all interested peers (not tit-for-tat)
+- [ ] Upload speed tracking per peer (rate, not just cumulative)
+- [ ] mbt-tui: DOWN/UP columns in peer list
+- [ ] Persisted bitfield for resume without full re-hash
+- [ ] Incremental SHA-1 verification (hash blocks in-order, avoid full piece buffer)
+- [ ] Async disk I/O for upload under heavy load (stretch goal)
+
+## Phase 12: Documentation
+
+- [ ] mbt.3 overview man page (architecture, lifetimes, threading model)
+- [ ] Man pages for all public headers (check-docs.sh tracks coverage)
+- [ ] DESIGN.md kept current (test count, feature list)
