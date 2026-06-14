@@ -465,7 +465,9 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	int cfd;
 	(void)io; (void)events;
 
-	cfd = accept4(fd, (struct sockaddr *)&addr, &alen, SOCK_NONBLOCK | SOCK_CLOEXEC);
+	cfd = accept(fd, (struct sockaddr *)&addr, &alen);
+	if (cfd >= 0)
+		fcntl(cfd, F_SETFL, fcntl(cfd, F_GETFL) | O_NONBLOCK);
 	if (cfd < 0)
 		return;
 
