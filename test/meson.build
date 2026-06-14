@@ -116,3 +116,6 @@ ipv6_test = executable('ipv6_test', 'ipv6_test.c', link_with: [libmbt], include_
 peer_source_test = executable('peer_source_test', 'peer_source_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('peer_source', peer_source_test)
 test('ipv6', ipv6_test, timeout: 30)
+
+torrent_nodes_test = executable('torrent_nodes_test', 'torrent_nodes_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('torrent_nodes', torrent_nodes_test)

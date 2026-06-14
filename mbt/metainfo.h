@@ -50,6 +50,12 @@ MBT_API const char *mbt_metainfo_tracker(struct mbt_metainfo *mi, int idx);
 MBT_API int mbt_metainfo_is_private(struct mbt_metainfo *mi);
 MBT_API const char *mbt_metainfo_comment(struct mbt_metainfo *mi);
 
+/* DHT bootstrap nodes */
+MBT_API int mbt_metainfo_add_node(struct mbt_metainfo *mi, const char *host, uint16_t port);
+MBT_API int mbt_metainfo_node_count(struct mbt_metainfo *mi);
+MBT_API const char *mbt_metainfo_node_host(struct mbt_metainfo *mi, int idx);
+MBT_API uint16_t mbt_metainfo_node_port(struct mbt_metainfo *mi, int idx);
+
 /* Raw info dict bytes (for infohash computation, BEP 9 serving) */
 MBT_API const void *mbt_metainfo_raw_info(struct mbt_metainfo *mi, size_t *len);
 

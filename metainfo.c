@@ -43,6 +43,9 @@ struct mbt_metainfo {
 	char *trackers[MAX_TRACKERS];
 	int tracker_count;
 
+	struct { char host[64]; uint16_t port; } nodes[MAX_TRACKERS];
+	int node_count;
+
 	/* Raw info dict (for infohash + BEP 9) */
 	uint8_t *raw_info;
 	size_t raw_info_len;
@@ -228,6 +231,25 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 	if (v && v->type == BE_STRING)
 		mi->comment = strndup(v->string.iov_base, v->string.iov_len);
 
+	/* DHT bootstrap nodes: "nodes" = [["host", port], ...] */
+	struct mbt_be_value *nodes = mbt_be_find(be, "nodes");
+	if (nodes && nodes->type == BE_LIST) {
+		struct mbt_be_value *pair;
+		TAILQ_FOREACH(pair, &nodes->listhead, next) {
+			if (pair->type != BE_LIST) continue;
+			struct mbt_be_value *host = TAILQ_FIRST(&pair->listhead);
+			if (!host || host->type != BE_STRING) continue;
+			struct mbt_be_value *port = TAILQ_NEXT(host, next);
+			if (!port || port->type != BE_INTEGER) continue;
+			if (mi->node_count >= MAX_TRACKERS) break;
+			snprintf(mi->nodes[mi->node_count].host,
+			         sizeof(mi->nodes[0].host), "%.*s",
+			         (int)host->string.iov_len, (char *)host->string.iov_base);
+			mi->nodes[mi->node_count].port = (uint16_t)port->integer;
+			mi->node_count++;
+		}
+	}
+
 	mbt_be_value_free(be);
 	*out = mi;
 	return 0;
@@ -397,6 +419,24 @@ int mbt_metainfo_tracker_count(struct mbt_metainfo *mi) { return mi->tracker_cou
 const char *mbt_metainfo_tracker(struct mbt_metainfo *mi, int idx) { return (idx < mi->tracker_count) ? mi->trackers[idx] : NULL; }
 int mbt_metainfo_is_private(struct mbt_metainfo *mi) { return mi->is_private; }
 const char *mbt_metainfo_comment(struct mbt_metainfo *mi) { return mi->comment; }
+
+int mbt_metainfo_add_node(struct mbt_metainfo *mi, const char *host, uint16_t port)
+{
+	if (mi->node_count >= MAX_TRACKERS) return -1;
+	snprintf(mi->nodes[mi->node_count].host, sizeof(mi->nodes[0].host), "%s", host);
+	mi->nodes[mi->node_count].port = port;
+	mi->node_count++;
+	return 0;
+}
+int mbt_metainfo_node_count(struct mbt_metainfo *mi) { return mi->node_count; }
+const char *mbt_metainfo_node_host(struct mbt_metainfo *mi, int idx) {
+	if (idx < 0 || idx >= mi->node_count) return NULL;
+	return mi->nodes[idx].host;
+}
+uint16_t mbt_metainfo_node_port(struct mbt_metainfo *mi, int idx) {
+	if (idx < 0 || idx >= mi->node_count) return 0;
+	return mi->nodes[idx].port;
+}
 const void *mbt_metainfo_raw_info(struct mbt_metainfo *mi, size_t *len) { if (len) *len = mi->raw_info_len; return mi->raw_info; }
 const char *mbt_metainfo_infohash_hex(struct mbt_metainfo *mi) { return mi->infohash_hex; }
 
@@ -473,6 +513,24 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 	}
 
 	mbt_be_dict_append(root, "info", info);
+
+	/* DHT bootstrap nodes */
+	if (mi->node_count > 0) {
+		struct mbt_be_value *nlist;
+		mbt_be_list_new(&nlist);
+		for (int i = 0; i < mi->node_count; i++) {
+			struct mbt_be_value *pair, *h;
+			mbt_be_list_new(&pair);
+			mbt_be_string_new(&h, mi->nodes[i].host, strlen(mi->nodes[i].host));
+			mbt_be_list_append(pair, h);
+			struct mbt_be_value *p = calloc(1, sizeof(*p));
+			p->type = BE_INTEGER;
+			p->integer = mi->nodes[i].port;
+			mbt_be_list_append(pair, p);
+			mbt_be_list_append(nlist, pair);
+		}
+		mbt_be_dict_append(root, "nodes", nlist);
+	}
 
 	int rv = mbt_be_value_encode(root, out, len);
 	mbt_be_value_free(root);

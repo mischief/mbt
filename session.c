@@ -1030,6 +1030,13 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len)
 			session_do_announce(s, sta);
 	}
 
+	/* Bootstrap DHT from torrent's nodes list */
+	if (s->dht) {
+		for (int i = 0; i < mbt_metainfo_node_count(mi); i++)
+			mbt_dht_bootstrap(s->dht, mbt_metainfo_node_host(mi, i),
+			                  mbt_metainfo_node_port(mi, i));
+	}
+
 	mbt_metainfo_free(mi);
 	return 0;
 }
