@@ -151,13 +151,14 @@ usage(const char *prog)
 	fprintf(stderr, "usage: %s [-dDPSL] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] <file.torrent | magnet:?...>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
 	fprintf(stderr, "  -D            enable DHT\n");
+	fprintf(stderr, "  -L            disable LSD (Local Service Discovery)\n");
 	fprintf(stderr, "  -P            enable PCP port mapping\n");
+	fprintf(stderr, "  -S            seed after download completes\n");
 	fprintf(stderr, "  -l port       listen port (default: 6881)\n");
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
 	fprintf(stderr, "  -r KB/s       download rate limit (default: unlimited)\n");
 	fprintf(stderr, "  -s strategy   piece picker: sequential (default) or random\n");
-	fprintf(stderr, "  -S            seed after download completes\n");
 	exit(1);
 }
 
