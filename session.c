@@ -62,6 +62,7 @@ struct pending_connect {
 	int fd;
 	char addr[INET6_ADDRSTRLEN];
 	uint16_t port;
+	uint8_t source;
 	STAILQ_ENTRY(pending_connect) next;
 };
 
@@ -308,7 +309,7 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	}
 
 	/* Hand to torrent — torrent takes ownership of conn */
-	rv = mbt_torrent_add_peer(pc->torrent, conn);
+	rv = mbt_torrent_add_peer(pc->torrent, conn, pc->source);
 	if (rv < 0) {
 		mbt_conn_free(conn);
 		goto fail;
@@ -1234,6 +1235,7 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	pc->session = s;
 	pc->torrent = st->torrent;
 	pc->fd = fd;
+	pc->source = source;
 	snprintf(pc->addr, sizeof(pc->addr), "%s", addr);
 	pc->port = port;
 
