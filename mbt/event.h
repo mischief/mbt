@@ -61,7 +61,8 @@ mbt_ev_new_default(struct mbt_ev **out)
 #elif defined(HAVE_LIBEVENT)
 	return mbt_ev_libevent_new(out);
 #else
-#error "No event backend configured"
+	(void)out;
+	return -1; /* no built-in backend; caller must provide their own */
 #endif
 }
 
