@@ -10,7 +10,7 @@
 #include "infohash.h"
 
 #define MBT_MAGNET_MAX_TRACKERS 16
-#define MBT_MAGNET_MAX_PEERS    64
+#define MBT_MAGNET_MAX_PEERS    8
 
 struct mbt_magnet_peer {
 	char addr[INET6_ADDRSTRLEN];
