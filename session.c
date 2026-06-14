@@ -616,7 +616,7 @@ mbt_session_default(struct mbt_session **out, const char *path)
 #elif defined(HAVE_LIBEVENT)
 	rv = mbt_ev_libevent_new(&ev);
 #else
-#error "No event backend configured"
+return -ENOSYS; /* no built-in backend */
 #endif
 	if (rv < 0)
 		return rv;
