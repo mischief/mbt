@@ -73,11 +73,10 @@ mbt_lsd_init(struct mbt_lsd **out, int setfl)
 		return -errno;
 
 	if(fcntl(fd, F_SETFD, FD_CLOEXEC) < 0)
-		goto err;
+		{} /* ignore — not supported on all platforms */
 
 	if(setfl)
-		if(fcntl(fd, F_SETFL, setfl) < 0)
-			goto err;
+		fcntl(fd, F_SETFL, setfl); /* best effort */
 
 	if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &y, sizeof(y)) < 0)
 		goto err;
