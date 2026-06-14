@@ -1197,8 +1197,8 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	/* Check peer limit (active + pending connects) */
 	int pending = 0;
 
-	/* Don't initiate outbound connections when seeding */
-	if (mbt_torrent_complete(st->torrent))
+	/* Don't initiate outbound connections when seeding (except LSD/incoming) */
+	if (mbt_torrent_complete(st->torrent) && source != MBT_SOURCE_LSD)
 		return 0;
 
 	struct pending_connect *pcc;
