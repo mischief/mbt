@@ -441,15 +441,7 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	char paddr[INET6_ADDRSTRLEN];
 	uint16_t pport;
-	if (pa->addr.ss_family == AF_INET6) {
-		struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&pa->addr;
-		inet_ntop(AF_INET6, &s6->sin6_addr, paddr, sizeof(paddr));
-		pport = ntohs(s6->sin6_port);
-	} else {
-		struct sockaddr_in *s4 = (struct sockaddr_in *)&pa->addr;
-		inet_ntop(AF_INET, &s4->sin_addr, paddr, sizeof(paddr));
-		pport = ntohs(s4->sin_port);
-	}
+	mbt_sockaddr_split(&pa->addr, paddr, sizeof(paddr), &pport);
 	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, pport);
 
 	mbt_ev_io_free(pa->io);

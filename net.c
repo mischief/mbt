@@ -268,3 +268,35 @@ mbt_parse_endpoint(const char *str, uint16_t default_port,
 	}
 	return 0;
 }
+
+const char *
+mbt_sockaddr_str(const struct sockaddr_storage *sa, char *buf, size_t len)
+{
+	if (sa->ss_family == AF_INET6) {
+		const struct sockaddr_in6 *s6 = (const struct sockaddr_in6 *)sa;
+		char tmp[INET6_ADDRSTRLEN];
+		inet_ntop(AF_INET6, &s6->sin6_addr, tmp, sizeof(tmp));
+		snprintf(buf, len, "[%s]:%hu", tmp, ntohs(s6->sin6_port));
+	} else {
+		const struct sockaddr_in *s4 = (const struct sockaddr_in *)sa;
+		char tmp[INET_ADDRSTRLEN];
+		inet_ntop(AF_INET, &s4->sin_addr, tmp, sizeof(tmp));
+		snprintf(buf, len, "%s:%hu", tmp, ntohs(s4->sin_port));
+	}
+	return buf;
+}
+
+void
+mbt_sockaddr_split(const struct sockaddr_storage *sa,
+                   char *addr, size_t addrlen, uint16_t *port)
+{
+	if (sa->ss_family == AF_INET6) {
+		const struct sockaddr_in6 *s6 = (const struct sockaddr_in6 *)sa;
+		inet_ntop(AF_INET6, &s6->sin6_addr, addr, addrlen);
+		*port = ntohs(s6->sin6_port);
+	} else {
+		const struct sockaddr_in *s4 = (const struct sockaddr_in *)sa;
+		inet_ntop(AF_INET, &s4->sin_addr, addr, addrlen);
+		*port = ntohs(s4->sin_port);
+	}
+}

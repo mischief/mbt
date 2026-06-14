@@ -42,4 +42,12 @@ int mbt_sendto(int fd4, int fd6, const void *buf, size_t len,
 int mbt_parse_endpoint(const char *str, uint16_t default_port,
                        struct sockaddr_storage *out, socklen_t *outlen);
 
+/* Format sockaddr_storage as "ip:port" string. Returns buf. */
+const char *mbt_sockaddr_str(const struct sockaddr_storage *sa,
+                             char *buf, size_t len);
+
+/* Format sockaddr_storage into separate addr + port. */
+void mbt_sockaddr_split(const struct sockaddr_storage *sa,
+                        char *addr, size_t addrlen, uint16_t *port);
+
 #endif

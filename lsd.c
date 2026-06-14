@@ -2,6 +2,7 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <arpa/inet.h>
+#include "net.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
@@ -168,14 +169,8 @@ mbt_lsd_recv(struct mbt_lsd *lsd, struct mbt_lsd_frame **out)
 
 	assert(strlcpy(frame->remote, "Unknown", sizeof(frame->remote)) < sizeof(frame->remote));
 
-	switch(frame->sa.ss_family){
-	case AF_INET:
-		inet_ntop(frame->sa.ss_family, &((struct sockaddr_in*)&frame->sa)->sin_addr, frame->remote, salen);
-		break;
-	case AF_INET6:
-		inet_ntop(frame->sa.ss_family, &((struct sockaddr_in6*)&frame->sa)->sin6_addr, frame->remote, salen);
-		break;
-	}
+	uint16_t _lsd_port;
+	mbt_sockaddr_split(&frame->sa, frame->remote, sizeof(frame->remote), &_lsd_port);
 
 	*out = frame;
 

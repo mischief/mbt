@@ -49,18 +49,7 @@
 static const char *
 sa_str(const struct sockaddr_storage *sa, char *buf, size_t len)
 {
-	if (sa->ss_family == AF_INET6) {
-		struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)sa;
-		char tmp[INET6_ADDRSTRLEN];
-		inet_ntop(AF_INET6, &s6->sin6_addr, tmp, sizeof(tmp));
-		snprintf(buf, len, "[%s]:%hu", tmp, ntohs(s6->sin6_port));
-	} else {
-		struct sockaddr_in *s4 = (struct sockaddr_in *)sa;
-		char tmp[INET_ADDRSTRLEN];
-		inet_ntop(AF_INET, &s4->sin_addr, tmp, sizeof(tmp));
-		snprintf(buf, len, "%s:%hu", tmp, ntohs(s4->sin_port));
-	}
-	return buf;
+	return mbt_sockaddr_str(sa, buf, len);
 }
 
 static int
