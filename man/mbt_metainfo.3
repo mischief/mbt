@@ -1,0 +1,151 @@
+.\" SPDX-License-Identifier: ISC
+.Dd January 15, 2024
+.Dt MBT_METAINFO 3
+.Os
+.Sh NAME
+.Nm mbt_metainfo_new ,
+.Nm mbt_metainfo_parse ,
+.Nm mbt_metainfo_free ,
+.Nm mbt_metainfo_set_content ,
+.Nm mbt_metainfo_add_tracker ,
+.Nm mbt_metainfo_add_node ,
+.Nm mbt_metainfo_set_comment ,
+.Nm mbt_metainfo_set_private ,
+.Nm mbt_metainfo_name ,
+.Nm mbt_metainfo_infohash ,
+.Nm mbt_metainfo_infohash_hex ,
+.Nm mbt_metainfo_piece_count ,
+.Nm mbt_metainfo_piece_length ,
+.Nm mbt_metainfo_total_length ,
+.Nm mbt_metainfo_file_count ,
+.Nm mbt_metainfo_file_path ,
+.Nm mbt_metainfo_file_length ,
+.Nm mbt_metainfo_tracker_count ,
+.Nm mbt_metainfo_tracker ,
+.Nm mbt_metainfo_is_private ,
+.Nm mbt_metainfo_comment ,
+.Nm mbt_metainfo_node_count ,
+.Nm mbt_metainfo_node_host ,
+.Nm mbt_metainfo_node_port ,
+.Nm mbt_metainfo_raw_info ,
+.Nm mbt_metainfo_encode
+.Nd torrent metadata parser and builder (.torrent files)
+.Sh SYNOPSIS
+.In mbt/metainfo.h
+.Ft int
+.Fn mbt_metainfo_new "struct mbt_metainfo **out"
+.Ft int
+.Fn mbt_metainfo_parse "struct mbt_metainfo **out" "const void *data" "size_t len"
+.Ft void
+.Fn mbt_metainfo_free "struct mbt_metainfo *mi"
+.Ft int
+.Fn mbt_metainfo_set_content "struct mbt_metainfo *mi" "const char *path" "uint32_t piece_length"
+.Ft int
+.Fn mbt_metainfo_add_tracker "struct mbt_metainfo *mi" "const char *url"
+.Ft int
+.Fn mbt_metainfo_add_node "struct mbt_metainfo *mi" "const char *host" "uint16_t port"
+.Ft void
+.Fn mbt_metainfo_set_comment "struct mbt_metainfo *mi" "const char *comment"
+.Ft void
+.Fn mbt_metainfo_set_private "struct mbt_metainfo *mi" "int is_private"
+.Ft const char *
+.Fn mbt_metainfo_name "struct mbt_metainfo *mi"
+.Ft "struct mbt_infohash *"
+.Fn mbt_metainfo_infohash "struct mbt_metainfo *mi"
+.Ft const char *
+.Fn mbt_metainfo_infohash_hex "struct mbt_metainfo *mi"
+.Ft uint32_t
+.Fn mbt_metainfo_piece_count "struct mbt_metainfo *mi"
+.Ft uint32_t
+.Fn mbt_metainfo_piece_length "struct mbt_metainfo *mi"
+.Ft uint64_t
+.Fn mbt_metainfo_total_length "struct mbt_metainfo *mi"
+.Ft int
+.Fn mbt_metainfo_file_count "struct mbt_metainfo *mi"
+.Ft const char *
+.Fn mbt_metainfo_file_path "struct mbt_metainfo *mi" "int idx"
+.Ft uint64_t
+.Fn mbt_metainfo_file_length "struct mbt_metainfo *mi" "int idx"
+.Ft int
+.Fn mbt_metainfo_tracker_count "struct mbt_metainfo *mi"
+.Ft const char *
+.Fn mbt_metainfo_tracker "struct mbt_metainfo *mi" "int idx"
+.Ft int
+.Fn mbt_metainfo_is_private "struct mbt_metainfo *mi"
+.Ft const char *
+.Fn mbt_metainfo_comment "struct mbt_metainfo *mi"
+.Ft int
+.Fn mbt_metainfo_node_count "struct mbt_metainfo *mi"
+.Ft const char *
+.Fn mbt_metainfo_node_host "struct mbt_metainfo *mi" "int idx"
+.Ft uint16_t
+.Fn mbt_metainfo_node_port "struct mbt_metainfo *mi" "int idx"
+.Ft const void *
+.Fn mbt_metainfo_raw_info "struct mbt_metainfo *mi" "size_t *len"
+.Ft int
+.Fn mbt_metainfo_encode "struct mbt_metainfo *mi" "unsigned char **out" "size_t *len"
+.Sh DESCRIPTION
+Parses and builds .torrent metainfo files.
+.Pp
+.Fn mbt_metainfo_parse
+loads from a bencoded buffer.
+.Fn mbt_metainfo_new
+allocates an empty object for programmatic construction.
+.Fn mbt_metainfo_free
+releases all resources, including embedded pieces and strings.
+.Pp
+The builder functions are:
+.Fn mbt_metainfo_set_content
+which reads files and computes SHA-1 piece hashes,
+.Fn mbt_metainfo_add_tracker
+for announce URLs,
+.Fn mbt_metainfo_add_node
+for DHT bootstrap entries,
+.Fn mbt_metainfo_set_comment
+and
+.Fn mbt_metainfo_set_private
+for optional top-level fields.
+.Pp
+All accessors return borrowed data valid only until
+.Fa mi
+is freed or rebuilt.
+Accessors taking an
+.Fa idx
+are 0-based over the respective item list.
+.Pp
+.Fn mbt_metainfo_raw_info
+returns the encoded info dict bytes, used for infohash computation
+and BEP 9 info exchange serving.
+.Fn mbt_metainfo_encode
+serializes the full .torrent structure into a caller-allocated buffer
+which must be freed by the caller after use.
+.Sh RETURN VALUES
+Functions returning
+.Ft int
+return 0 on success or a negative errno value on failure.
+Functions returning pointers return NULL on error.
+.Sh EXAMPLES
+Parse and print a torrent:
+.Bd -literal
+struct mbt_metainfo *mi;
+unsigned char buf[128 * 1024];
+size_t fsize = /* ... read file into buf ... */;
+
+mbt_metainfo_parse(&mi, buf, fsize);
+printf("name    : %s\n", mbt_metainfo_name(mi));
+for (int i = 0; i < mbt_metainfo_file_count(mi); i++)
+    printf("%2d: %s (%zu)\n", i,
+        mbt_metainfo_file_path(mi, i),
+        mbt_metainfo_file_length(mi, i));
+
+unsigned char *encoded;
+size_t elen;
+mbt_metainfo_encode(mi, &encoded, &elen);
+free(encoded);
+mbt_metainfo_free(mi);
+.Ed
+.Sh SEE ALSO
+.Xr mbt_torrent 3 ,
+.Xr mbt_session 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

@@ -1,0 +1,98 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_EVENT 3
+.Os
+.Sh NAME
+.Nm mbt_ev_new_default ,
+.Nm mbt_ev_sd_new ,
+.Nm mbt_ev_sd_new_from ,
+.Nm mbt_ev_libevent_new ,
+.Nm mbt_ev_libevent_new_from ,
+.Nm mbt_ev_run ,
+.Nm mbt_ev_stop ,
+.Nm mbt_ev_destroy ,
+.Nm mbt_ev_io_new ,
+.Nm mbt_ev_io_mod ,
+.Nm mbt_ev_io_free ,
+.Nm mbt_ev_timer_new ,
+.Nm mbt_ev_timer_mod ,
+.Nm mbt_ev_timer_free
+.Nd async event loop abstraction with sd-event and libevent backends
+.Sh SYNOPSIS
+.In mbt/event.h
+.Ft int
+.Fn mbt_ev_new_default "struct mbt_ev **out"
+.Ft int
+.Op "HAVE_SD_EVENT"
+.Fn mbt_ev_sd_new "struct mbt_ev **out"
+.Ft int
+.Op "HAVE_SD_EVENT"
+.Cm "struct sd_event *"
+.Fn mbt_ev_sd_new_from "struct mbt_ev **out" "struct sd_event *loop"
+.Ft int
+.Op "HAVE_LIBEVENT"
+.Fn mbt_ev_libevent_new "struct mbt_ev **out"
+.Ft int
+.Op "HAVE_LIBEVENT"
+.Cm "struct event_base *"
+.Fn mbt_ev_libevent_new_from "struct mbt_ev **out" "struct event_base *base"
+.Ft int
+.Fn mbt_ev_run "const struct mbt_ev *ev"
+.Ft void
+.Fn mbt_ev_stop "const struct mbt_ev *ev"
+.Ft void
+.Fn mbt_ev_destroy "struct mbt_ev *ev"
+.Ft int
+.Fn mbt_ev_io_new "struct mbt_ev *ev" "struct mbt_ev_io **out" "int fd" "uint32_t events" "mbt_ev_io_cb cb" "void *arg"
+.Ft int
+.Fn mbt_ev_io_mod "struct mbt_ev_io *io" "uint32_t events"
+.Ft void
+.Fn mbt_ev_io_free "struct mbt_ev_io *io"
+.Ft int
+.Fn mbt_ev_timer_new "struct mbt_ev *ev" "struct mbt_ev_timer **out" "uint64_t usec" "mbt_ev_timer_cb cb" "void *arg"
+.Ft int
+.Fn mbt_ev_timer_mod "struct mbt_ev_timer *timer" "uint64_t usec"
+.Ft void
+.Fn mbt_ev_timer_free "struct mbt_ev_timer *timer"
+.Sh DESCRIPTION
+The event loop abstraction provides platform-independent async I/O and timer support.
+Callers select a backend at compile time via Meson or supply their own event base.
+.Pp
+.Fn mbt_ev_new_default
+creates an event loop using whichever backend is compiled in.
+.Fn mbt_ev_sd_new
+uses sd-event (systemd event loop) when available;
+.Fn mbt_ev_libevent_new
+uses libevent.
+The
+.Ql _new_from
+variants wrap an externally-owned event base, enabling integration with applications that manage their own loops.
+.Ss I/O watches
+.Fn mbt_ev_io_new
+registers interest in a file descriptor for read and/or write events
+(defined by the
+.Va MBT_EV_READ / Va MBT_EV_WRITE
+bitmask passed through
+.Fa events ).
+The callback fires when readable or writable depending on mask.
+.Pp
+.Fn mbt_ev_io_mod
+changes the event mask without re-creating the watch.
+.Fn mbt_ev_io_free
+deregisters and frees it.
+.Ss Timers
+.Fn mbt_ev_timer_new
+creates an absolute timer firing once after
+.Fa usec
+microseconds elapse, invoking its callback.
+.Fn mbt_ev_timer_mod
+reschedules it for a new absolute time value.
+.Sh RETURN VALUES
+Functions returning
+.Ft int
+return 0 on success or a negative errno value on failure.
+.Sh SEE ALSO
+.Xr mbt_session 3 ,
+.Xr mbt_conn 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

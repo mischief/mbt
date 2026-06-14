@@ -1,0 +1,67 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_DHT 3
+.Os
+.Sh NAME
+.Nm mbt_dht_new ,
+.Nm mbt_dht_free ,
+.Nm mbt_dht_bootstrap ,
+.Nm mbt_dht_get_peers ,
+.Nm mbt_dht_announce ,
+.Nm mbt_dht_node_count ,
+.Nm mbt_dht_port ,
+.Nm mbt_dht_set_node_id ,
+.Nd Kademlia DHT node (BEP 5) with BEP 44 data storage
+.Sh SYNOPSIS
+.In mbt/dht.h
+.Ft int
+.Fn mbt_dht_new "struct mbt_dht **out" "struct mbt_ev *ev" "uint16_t port"
+.Ft void
+.Fn mbt_dht_free "struct mbt_dht *d"
+.Ft int
+.Fn mbt_dht_bootstrap "struct mbt_dht *d" "const char *addr" "uint16_t port"
+.Ft int
+.Fn mbt_dht_get_peers "struct mbt_dht *d" "struct mbt_infohash *ih" "mbt_dht_peers_cb peers_cb" "mbt_dht_done_cb done_cb" "void *arg"
+.Ft int
+.Fn mbt_dht_announce "struct mbt_dht *d" "struct mbt_infohash *ih" "uint16_t listen_port"
+.Ft int
+.Fn mbt_dht_node_count "struct mbt_dht *d"
+.Ft uint16_t
+.Fn mbt_dht_port "struct mbt_dht *d"
+.Ft void
+.Fn mbt_dht_set_node_id "struct mbt_dht *d" "const uint8_t id[20]"
+.Sh DESCRIPTION
+A Kademlia distributed key-value store for peer discovery and bootstrap.
+.Pp
+.Pp
+.Fn mbt_dht_new
+creates the node, bound to UDP
+.Fa port
+(use 0 for ephemeral).
+.Fn mbt_dht_bootstrap
+sends find_node to populate the routing table.
+.Pp
+.Pp
+.Fn mbt_dht_get_peers
+looks up peers for an infohash;
+.Fa peers_cb
+is called for each discovered peer,
+.Fa done_cb
+when the lookup ends.
+.Fn mbt_dht_announce
+registers our listen port as a seeder/leecher so others can find us.
+.Pp
+.Pp
+.Fn mbt_dht_node_count
+reports nodes in the routing table;
+.Fn mbt_dht_port
+returns the actual bound port (useful when 0 was requested at creation time).
+.Pp
+.Pp
+.Fn mbt_dht_set_node_id
+overrides the random node ID (call before bootstrap).
+.Sh SEE ALSO
+.Xr mbt 3 ,
+.Xr mbt_session 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

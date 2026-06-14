@@ -1,0 +1,32 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_PICKER 3
+.Os
+.Sh NAME
+.Nm mbt_picker_sequential ,
+.Nm mbt_picker_random ,
+.Nm mbt_picker_rarest
+.Nd piece picker interface for torrent download strategy
+.Sh SYNOPSIS
+.In mbt/picker.h
+.Ft int
+.Fn mbt_picker_sequential "const struct mbt_torrent *t" "void *peer" "void *ctx"
+.Ft int
+.Fn mbt_picker_random "const struct mbt_torrent *t" "void *peer" "void *ctx"
+.Ft int
+.Fn mbt_picker_rarest "const struct mbt_torrent *t" "void *peer" "void *ctx"
+.Sh DESCRIPTION
+Picker functions select which piece to request next from a peer.
+.Pp
+.Fn mbt_picker_sequential
+returns pieces in order from first to last.
+.Fn mbt_picker_random
+picks a random piece the peer has that we need.
+.Fn mbt_picker_rarest
+picks the rarest piece among connected peers (standard BitTorrent strategy).
+.Pp
+Each returns the piece index, or \-1 if no suitable piece is available.
+.Sh SEE ALSO
+.Xr mbt_torrent 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

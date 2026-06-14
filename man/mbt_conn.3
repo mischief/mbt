@@ -1,0 +1,62 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_CONN 3
+.Os
+.Sh NAME
+.Nm mbt_conn_new ,
+.Nm mbt_conn_read ,
+.Nm mbt_conn_write ,
+.Nm mbt_conn_available ,
+.Nm mbt_conn_set_watermark ,
+.Nm mbt_conn_peer_addr ,
+.Nm mbt_conn_free
+.Nd buffered bidirectional connection with watermark callbacks
+.Sh SYNOPSIS
+.In mbt/conn.h
+.Ft int
+.Fn mbt_conn_new "struct mbt_ev *ev" "struct mbt_conn **out" "int fd" "mbt_conn_read_cb readcb" "mbt_conn_event_cb eventcb" "void *arg"
+.Ft ssize_t
+.Fn mbt_conn_read "struct mbt_conn *c" "void *buf" "size_t len"
+.Ft ssize_t
+.Fn mbt_conn_write "struct mbt_conn *c" "const void *buf" "size_t len"
+.Ft size_t
+.Fn mbt_conn_available "struct mbt_conn *c"
+.Ft void
+.Fn mbt_conn_set_watermark "struct mbt_conn *c" "size_t low"
+.Ft int
+.Fn mbt_conn_peer_addr "struct mbt_conn *c" "char *buf" "size_t buflen" "uint16_t *port"
+.Ft void
+.Fn mbt_conn_free "struct mbt_conn *c"
+.Sh DESCRIPTION
+A connection wraps a socket fd in a buffered stream with watermark-based read callbacks.
+
+.Pp
+Fn mbt_conn_new
+takes ownership of
+Fa fd .
+When enough data has arrived and hits the low watermark threshold set via
+Fn mbt_conn_set_watermark ,
+the read callback fires so the caller can drain it.
+.Fn mbt_conn_available
+returns how many bytes are readable without blocking;
+.Fn mbt_conn_read
+drains them into
+Fa buf .
+
+.Pp
+Fn mbt_conn_write
+pushes data toward the peer asynchronously (never blocks the event loop).
+Return value indicates how many bytes were staged for transmission.
+.Fn mbt_conn_peer_addr
+resolves and returns the remote address string plus port via getpeername().
+.Sh RETURN VALUES
+Functions returning
+.Ft int
+or
+.Ft ssize_t
+return 0 on success or a negative errno value on failure.
+.Sh SEE ALSO
+.Xr mbt_event 3 ,
+.Xr mbt_peer 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

@@ -1,0 +1,30 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_STORAGE 3
+.Os
+.Sh NAME
+.Nm mbt_torrent_open_storage_file ,
+.Nm mbt_torrent_open_storage_memory
+.Nd torrent storage backends
+.Sh SYNOPSIS
+.In mbt/storage.h
+.Ft int
+.Fn mbt_torrent_open_storage_file "struct mbt_torrent *t" "const struct mbt_storage_config *cfg"
+.Ft int
+.Fn mbt_torrent_open_storage_memory "struct mbt_torrent *t" "const struct mbt_sdbuf *buf" "const struct mbt_bitmap *bm"
+.Sh DESCRIPTION
+Storage backends manage torrent piece data on disk or in memory.
+
+.Pp
+.Fn mbt_torrent_open_storage_file
+lays out pieces according to the file list.
+.Fn mbt_torrent_open_storage_memory
+is suitable for testing or when an entire torrent fits in RAM;
+.Sh RETURN VALUES
+Functions returning
+.Ft int
+Return 0 on success or a negative errno value on failure.
+.Sh SEE ALSO
+.Xr mbt_torrent 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

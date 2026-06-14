@@ -1,0 +1,129 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_LOG 3
+.Os
+.Sh NAME
+.Nm mbt_log_set ,
+.Nm mbt_log_set_debug ,
+.Nm mbt_log_stderr ,
+.Nm mbt_log_syslog ,
+.Nm mbt_log_level_str ,
+.Nm mbt_log_component_str ,
+.Nm mbt_log_emit
+.Nd BitTorrent logging utility
+.Sh SYNOPSIS
+.In mbt/log.h
+.Ft void
+.Fn mbt_log_set "mbt_log_fn fn" "void *arg"
+.Ft void
+.Fn mbt_log_set_debug "uint32_t component_mask"
+.Ft void
+.Fn mbt_log_stderr "enum mbt_log_level level" "enum mbt_log_component comp" "const char *fmt" "va_list ap" "void *arg"
+.Ft void
+.Fn mbt_log_syslog "enum mbt_log_level level" "enum mbt_log_component comp" "const char *fmt" "va_list ap" "void *arg"
+.Ft const char *
+.Fn mbt_log_level_str "enum mbt_log_level level"
+.Ft const char *
+.Fn mbt_log_component_str "enum mbt_log_component comp"
+.Ft void
+.Fn mbt_log_emit "enum mbt_log_level level" "enum mbt_log_component comp" "const char *fmt" "..."
+.Sh DESCRIPTION
+The logging module provides a structured logging system for the library.
+Logs are categorized by level and component.
+.Pp
+.Sh Log Levels
+The
+.Fa mbt_log_level
+enumeration defines the severity of the log:
+.Bl -tag -width on_level
+.It MBT_LOG_ERROR
+Fatal errors.
+.It MBT_LOG_WARN
+Warnings and potential issues.
+.It MBT_LOG_INFO
+Informational messages about normal operation.
+.It MBT_LOG_DEBUG
+Fine-grained debugging information.
+.El
+.Pp
+.Sh Log Components
+The
+.Fa mbt_log_component
+enumeration defines the source of the log using a bitmask:
+.Bl -tag -width on_comp
+.It MBT_LOG_SESSION
+Session management.
+.It MBT_LOG_TORRENT
+Torrent operations.
+.It MBT_LOG_PEER
+Peer interaction.
+.It MBT_LOG_CONN
+Connection/Network events.
+.It MBT_LOG_LSD
+Local Service Discovery.
+.It MBT_LOG_DHT
+Distributed Hash Table.
+.It MBT_LOG_STORAGE
+Storage operations.
+.It MBT_LOG_PICKER
+Piece picking logic.
+.It MBT_LOG_TRACKER
+Tracker client interaction.
+.It MBT_LOG_TRACKERD
+Tracker server logic.
+.It MBT_LOG_ALL
+All components (0x7FFFFFFF).
+.El
+.Pp
+.Sh Functions
+.Fn mbt_log_set
+registers a custom log callback function. This function will be invoked
+whenever a log event is emitted. If
+.Fa fn
+is
+.Fa NULL, logging is disabled by default.
+.Pp
+.Fn mbt_log_set_debug
+enables debug-level logging for specific components. The
+.Fa component_mask
+is a bitmask of
+.Fa mbt_log_component
+values. By default, no components emit debug messages unless explicitly set here.
+.Pp
+.Fn mbt_log_stderr
+and
+.Fn mbt_log_syslog
+are built-in callback implementations that write logs to standard error or
+system logger, respectively.
+.Pp
+.Fn mbt_log_level_str
+and
+.Fn mbt_log_component_str
+return a human-readable string representation of the level and component.
+.Pp
+.Fn mbt_log_emit
+is used to emit log messages at a specific level and component. It is primarily
+used by the convenience macros, but can be called directly.
+.Sh Macros
+The following macros are used throughout the library to simplify logging at
+designated levels. They all take an
+.Fa mbt_log_component
+as the first argument, followed by a format string and variadic arguments:
+.Bl -tag -width on_macro
+.It mbt_log_error(comp, ...)
+Logs an error message with component
+.Fa comp .
+.It mbt_log_warn(comp, ...)
+Logs a warning message with component
+.Fa comp .
+.It mbt_log_info(comp, ...)
+Logs an info message with component
+.Fa comp .
+.It mbt_log_debug(comp, ...)
+Logs a debug message with component
+.Fa comp .
+.El
+.Sh SEE ALSO
+.Xr mbt_session 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

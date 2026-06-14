@@ -1,0 +1,174 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 9, 2026
+.Dt MBT_TORRENT 3
+.Os
+.Sh NAME
+.Nm mbt_torrent_new ,
+.Nm mbt_torrent_free ,
+.Nm mbt_torrent_set_callbacks ,
+.Nm mbt_torrent_set_metadata ,
+.Nm mbt_torrent_add_peer ,
+.Nm mbt_torrent_add_peer_incoming ,
+.Nm mbt_torrent_peerdb ,
+.Nm mbt_torrent_infohash ,
+.Nm mbt_torrent_name ,
+.Nm mbt_torrent_progress ,
+.Nm mbt_torrent_complete ,
+.Nm mbt_torrent_is_private ,
+.Nm mbt_torrent_has_metadata ,
+.Nm mbt_torrent_state ,
+.Nm mbt_torrent_piece_count ,
+.Nm mbt_torrent_piece_length ,
+.Nm mbt_torrent_have_count ,
+.Nm mbt_torrent_peer_count ,
+.Nm mbt_torrent_peer_at ,
+.Nm mbt_torrent_has_piece ,
+.Nm mbt_torrent_piece_active ,
+.Nm mbt_torrent_piece_fully_requested ,
+.Nm mbt_torrent_piece_map ,
+.Nm mbt_torrent_file_count ,
+.Nm mbt_torrent_file ,
+.Nm mbt_torrent_set_upload_rate ,
+.Nm mbt_torrent_set_download_rate ,
+.Nm mbt_torrent_upload_rate ,
+.Nm mbt_torrent_download_rate ,
+.Nm mbt_torrent_peer_stats
+.Nd torrent lifecycle, piece management, and per-peer statistics
+.Sh SYNOPSIS
+.In mbt/torrent.h
+.Ft int
+.Fn mbt_torrent_new "struct mbt_torrent **out" "struct mbt_torrent_config *cfg"
+.Ft void
+.Fn mbt_torrent_free "struct mbt_torrent *t"
+.Ft void
+.Fn mbt_torrent_set_callbacks "struct mbt_torrent *t" "struct mbt_torrent_callbacks *cb" "void *arg"
+.Ft int
+.Fn mbt_torrent_set_metadata "struct mbt_torrent *t" "const void *info" "size_t len"
+.Ft int
+.Fn mbt_torrent_add_peer "struct mbt_torrent *t" "struct mbt_conn *conn" "enum mbt_peer_source source"
+.Ft int
+.Fn mbt_torrent_add_peer_incoming "struct mbt_torrent *t" "struct mbt_conn *conn" "const uint8_t ext[8]" "const uint8_t their_id[20]"
+.Ft "struct mbt_peerdb *"
+.Fn mbt_torrent_peerdb "struct mbt_torrent *t"
+.Ft "struct mbt_infohash *"
+.Fn mbt_torrent_infohash "struct mbt_torrent *t"
+.Ft "const char *"
+.Fn mbt_torrent_name "struct mbt_torrent *t"
+.Ft float
+.Fn mbt_torrent_progress "struct mbt_torrent *t"
+.Ft int
+.Fn mbt_torrent_complete "struct mbt_torrent *t"
+.Ft int
+.Fn mbt_torrent_is_private "struct mbt_torrent *t"
+.Ft int
+.Fn mbt_torrent_has_metadata "struct mbt_torrent *t"
+.Ft "enum mbt_torrent_state"
+.Fn mbt_torrent_state "struct mbt_torrent *t"
+.Ft uint32_t
+.Fn mbt_torrent_piece_count "struct mbt_torrent *t"
+.Ft uint32_t
+.Fn mbt_torrent_piece_length "struct mbt_torrent *t"
+.Ft uint32_t
+.Fn mbt_torrent_have_count "struct mbt_torrent *t"
+.Ft int
+.Fn mbt_torrent_peer_count "struct mbt_torrent *t"
+.Ft "struct mbt_peer *"
+.Fn mbt_torrent_peer_at "struct mbt_torrent *t" "int idx"
+.Ft int
+.Fn mbt_torrent_has_piece "struct mbt_torrent *t" "uint32_t piece"
+.Ft int
+.Fn mbt_torrent_piece_active "struct mbt_torrent *t" "uint32_t piece"
+.Ft int
+.Fn mbt_torrent_piece_fully_requested "struct mbt_torrent *t" "uint32_t piece"
+.Ft void
+.Fn mbt_torrent_piece_map "struct mbt_torrent *t" "uint8_t *out" "uint32_t count"
+.Ft int
+.Fn mbt_torrent_file_count "struct mbt_torrent *t"
+.Ft "const struct mbt_file *"
+.Fn mbt_torrent_file "struct mbt_torrent *t" "int index"
+.Ft void
+.Fn mbt_torrent_set_upload_rate "struct mbt_torrent *t" "uint64_t bytes_per_sec"
+.Ft void
+.Fn mbt_torrent_set_download_rate "struct mbt_torrent *t" "uint64_t bytes_per_sec"
+.Ft uint64_t
+.Fn mbt_torrent_upload_rate "struct mbt_torrent *t"
+.Ft uint64_t
+.Fn mbt_torrent_download_rate "struct mbt_torrent *t"
+.Ft int
+.Fn mbt_torrent_peer_stats "struct mbt_torrent *t" "int idx" "struct mbt_peer_stats *out"
+.Sh DESCRIPTION
+A torrent manages a single download or seed operation.
+It owns peer connections, piece state, storage access, and the piece picker.
+.Pp
+.Fn mbt_torrent_new
+creates a torrent with explicit configuration;
+.Fa cfg
+specifies the event loop, infohash, peer ID, storage backend, picker, and timers.
+.Fn mbt_torrent_free
+destroys it and all associated resources.
+.Ss Life cycle
+.Fn mbt_torrent_set_metadata
+imports the info dict (from a
+.Pa .torrent
+file or completed BEP 9 fetch) so the torrent can begin downloading.
+Before metadata arrives the torrent stays in the
+.Dq init
+state.
+.Pp
+.Fn mbt_torrent_add_peer
+attaches an outbound connection; the torrent takes ownership of
+.Fa conn .
+.Fn mbt_torrent_add_peer_incoming
+attaches an inbound connection (already completed handshake).
+.Ss Queries
+.Fn mbt_torrent_state
+returns one of:
+.Bl -tag -width MBT_TORRENT_SEEDING
+.It Va MBT_TORRENT_INIT
+No metadata.
+.It Va MBT_TORRENT_DOWNLOADING
+Actively receiving pieces.
+.It Va MBT_TORRENT_STALLED
+Incomplete, no progress possible.
+.It Va MBT_TORRENT_SEEDING
+All pieces present and verified.
+.El
+.Pp
+.Fn mbt_torrent_progress
+returns a fraction between 0 and 1 of the download completed.
+.Fn mbt_torrent_complete
+returns true if the torrent has all pieces.
+.Pp
+.Fn mbt_torrent_piece_map
+fills an output array with per-piece state:
+.Dq 0
+(pending),
+.Dq 1
+(active/requested),
+.Dq 2
+(have).
+Suitable for TUI piece-map rendering.
+.Ss File list
+Multi-file torrents expose their file layout via
+.Fn mbt_torrent_file_count
+and
+.Fn mbt_torrent_file .
+Each entry has a relative path, byte offset, and length.
+.Ss Rate limiting
+.Fn mbt_torrent_set_upload_rate
+and
+.Fn mbt_torrent_set_download_rate
+cap per-torrent bandwidth; 0 means unlimited.
+These override the session-level limits set via
+.Xr mbt_session 3 .
+.Sh RETURN VALUES
+Functions returning
+.Ft int
+return 0 on success or a negative errno value on failure.
+Functions returning pointers return NULL on error.
+.Sh SEE ALSO
+.Xr mbt_session 3 ,
+.Xr mbt_peer 3 ,
+.Xr mbt_storage 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org
