@@ -813,9 +813,16 @@ static void
 dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct mbt_dht *d = v;
-	(void)timer;
 
-	/* Ping a random node from a random bucket to keep routing table alive */
+	/* Find nodes near our own ID to populate routing table */
+	for (int i = 0; i < 160; i++) {
+		if (d->buckets[i].count > 0) {
+			dht_send_find_node(d, &d->buckets[i].nodes[0].addr, d->id);
+			break;
+		}
+	}
+
+	/* Ping a random node to keep routing table alive */
 	for (int i = 0; i < 160; i++) {
 		if (d->buckets[i].count > 0) {
 			int j = rand() % d->buckets[i].count;
@@ -823,6 +830,9 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 			break;
 		}
 	}
+
+	/* Reschedule */
+	mbt_ev_timer_mod(timer, REFRESH_US);
 }
 
 /* --- Public API --- */
@@ -844,8 +854,8 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	int rv = mbt_listen_udp(&d->listener, ev, port, dht_recv, d);
 	if (rv < 0) { free(d); return rv; }
 
-	/* Refresh timer */
-	mbt_ev_timer_new(ev, &d->refresh_timer, REFRESH_US, dht_refresh_cb, d);
+	/* Refresh timer — first fire at 5s to populate routing table quickly */
+	mbt_ev_timer_new(ev, &d->refresh_timer, 5 * 1000000ULL, dht_refresh_cb, d);
 
 	/* Rate limit: 20 queries/sec, burst of 40 */
 	mbt_ratelimit_new(&d->send_limit, 20, 40);
