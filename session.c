@@ -684,6 +684,10 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	mbt_log_debug(MBT_LOG_LSD, "LSD received from %s:%hu", info->remote, info->port);
 
+	/* Ignore our own announcements */
+	if (info->port == s->listen_port)
+		return;
+
 	STAILQ_FOREACH(ih, &info->infohashes, next) {
 		struct session_torrent *st = session_find(s, ih);
 
