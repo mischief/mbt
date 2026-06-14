@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: ISC
+#ifndef MBT_PEER_SOURCE_H
+#define MBT_PEER_SOURCE_H
+
+enum mbt_peer_source {
+	MBT_SOURCE_TRACKER,
+	MBT_SOURCE_DHT,
+	MBT_SOURCE_PEX,
+	MBT_SOURCE_LSD,
+	MBT_SOURCE_INCOMING,
+	MBT_SOURCE_MANUAL,
+	MBT_SOURCE_MAGNET,
+};
+
+#endif

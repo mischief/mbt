@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "peer_source.h"
 #include "storage.h"
 #include "picker.h"
 #include "tracker.h"
@@ -81,7 +82,7 @@ MBT_API void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohas
 MBT_API uint16_t mbt_session_dht_port(struct mbt_session *s);
 MBT_API uint16_t mbt_session_listen_port(struct mbt_session *s);
 MBT_API int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
-                         const char *addr, uint16_t port, uint8_t source);
+                         const char *addr, uint16_t port, enum mbt_peer_source source);
 
 /* Manually trigger re-announce to all trackers (or specific torrent if ih != NULL) */
 MBT_API int mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih);

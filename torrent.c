@@ -1324,7 +1324,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 }
 
 int
-mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, uint8_t source)
+mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer_source source)
 {
 	struct torrent_peer *tp;
 	struct mbt_peer *peer;

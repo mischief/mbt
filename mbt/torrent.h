@@ -17,6 +17,7 @@ struct mbt_peerdb;
 
 #include "storage.h"
 #include "picker.h"
+#include "peer_source.h"
 #include "timers.h"
 
 /* Piece states */
@@ -60,7 +61,7 @@ MBT_API void mbt_torrent_set_callbacks(struct mbt_torrent *t, struct mbt_torrent
 MBT_API int mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len);
 
 /* Add a connected peer — torrent takes ownership of conn */
-MBT_API int mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, uint8_t source);
+MBT_API int mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer_source source);
 MBT_API int mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
                                   const uint8_t ext[8], const uint8_t their_id[20]);
 MBT_API struct mbt_peerdb *mbt_torrent_peerdb(struct mbt_torrent *t);
@@ -112,7 +113,7 @@ struct mbt_peer_stats {
 	int outstanding;  /* in-flight requests */
 	int done_pct;     /* % of pieces this peer has (0-100) */
 	int hash_failures;
-	uint8_t source;   /* mbt_peer_source */
+	enum mbt_peer_source source;   /* mbt_peer_source */
 };
 
 MBT_API int mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *out);

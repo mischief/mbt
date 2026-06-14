@@ -62,7 +62,7 @@ struct pending_connect {
 	int fd;
 	char addr[INET6_ADDRSTRLEN];
 	uint16_t port;
-	uint8_t source;
+	enum mbt_peer_source source;
 	STAILQ_ENTRY(pending_connect) next;
 };
 
@@ -1172,7 +1172,7 @@ mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih)
 
 int
 mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
-                     const char *addr, uint16_t port, uint8_t source)
+                     const char *addr, uint16_t port, enum mbt_peer_source source)
 {
 	int rv, fd;
 	struct session_torrent *st;

@@ -17,15 +17,7 @@ enum mbt_peerdb_state {
 	MBT_PEERDB_BANNED,      /* hash failures, won't retry */
 };
 
-enum mbt_peer_source {
-	MBT_SOURCE_TRACKER,
-	MBT_SOURCE_DHT,
-	MBT_SOURCE_PEX,
-	MBT_SOURCE_LSD,
-	MBT_SOURCE_INCOMING,
-	MBT_SOURCE_MANUAL,
-	MBT_SOURCE_MAGNET,
-};
+#include "peer_source.h"
 
 struct mbt_peer_entry {
 	char addr[INET6_ADDRSTRLEN];

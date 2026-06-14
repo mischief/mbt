@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "mbt/peer.h"
-#include "mbt/peerdb.h"  /* for mbt_peer_source enum */
+#include "mbt/peer_source.h"
 
 static void
 test_source_string(void)
