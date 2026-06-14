@@ -44,6 +44,7 @@
 #define LOOKUP_TIMEOUT_US (10 * 1000000ULL) /* 10s per lookup */
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
+#define NUM_BUCKETS 160
 
 /* Helper: format sockaddr_storage for logging (returns static buffer) */
 static const char *
@@ -112,7 +113,7 @@ struct mbt_dht {
 	uint16_t port;
 
 	/* Routing table: 160 buckets */
-	struct dht_bucket buckets[160];
+	struct dht_bucket buckets[NUM_BUCKETS];
 
 	/* Peer storage: announced peers for infohashes we've seen */
 #define DHT_MAX_STORED 64
@@ -244,7 +245,7 @@ routing_closest(struct mbt_dht *d, const uint8_t *target, struct dht_node *out, 
 		int b1 = idx + dist, b2 = idx - dist;
 		for (int pass = 0; pass < 2 && count < max; pass++) {
 			int bi = (pass == 0) ? b1 : b2;
-			if (bi < 0 || bi >= 160) continue;
+			if (bi < 0 || bi >= NUM_BUCKETS) continue;
 			if (pass == 1 && dist == 0) continue; /* don't double-count */
 			struct dht_bucket *b = &d->buckets[bi];
 			for (int i = 0; i < b->count && count < max; i++)
@@ -815,7 +816,7 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 	struct mbt_dht *d = v;
 
 	/* Find nodes near our own ID to populate routing table */
-	for (int i = 0; i < 160; i++) {
+	for (int i = 0; i < NUM_BUCKETS; i++) {
 		if (d->buckets[i].count > 0) {
 			dht_send_find_node(d, &d->buckets[i].nodes[0].addr, d->id);
 			break;
@@ -823,7 +824,7 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 	}
 
 	/* Ping a random node to keep routing table alive */
-	for (int i = 0; i < 160; i++) {
+	for (int i = 0; i < NUM_BUCKETS; i++) {
 		if (d->buckets[i].count > 0) {
 			int j = rand() % d->buckets[i].count;
 			dht_send_ping(d, &d->buckets[i].nodes[j].addr);
@@ -1000,7 +1001,7 @@ int
 mbt_dht_node_count(struct mbt_dht *d)
 {
 	int total = 0;
-	for (int i = 0; i < 160; i++)
+	for (int i = 0; i < NUM_BUCKETS; i++)
 		total += d->buckets[i].count;
 	return total;
 }
