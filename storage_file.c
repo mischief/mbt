@@ -6,7 +6,6 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
-#include <libgen.h>
 
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
@@ -41,18 +40,24 @@ static int
 mkdirs(const char *path)
 {
 	char *tmp = strdup(path);
-	char *dir = dirname(tmp);
-	int rv = 0;
-	if (strlen(dir) > 1) {
-		char *parent = strdup(dir);
-		rv = mkdirs(parent);
-		free(parent);
-		if (rv < 0) { free(tmp); return rv; }
-		if (mkdir(dir, 0755) < 0 && errno != EEXIST) {
-			rv = -errno;
+	if (!tmp) return -ENOMEM;
+	char *p = tmp;
+
+	/* Skip leading / */
+	if (*p == '/') p++;
+
+	while (*p) {
+		/* Find next / */
+		char *slash = strchr(p, '/');
+		if (!slash) break; /* last component is the filename */
+		*slash = '\0';
+		if (mkdir(tmp, 0755) < 0 && errno != EEXIST) {
+			int e = errno;
 			free(tmp);
-			return rv;
+			return -e;
 		}
+		*slash = '/';
+		p = slash + 1;
 	}
 	free(tmp);
 	return 0;
@@ -64,6 +69,7 @@ mbt_storage_file_open(void *ctx, struct mbt_torrent *t)
 	const char *dir = ctx;
 	int fc = mbt_torrent_file_count(t);
 	const char *name = mbt_torrent_name(t);
+
 
 	if (fs.entries)
 		return 0; /* already open */
