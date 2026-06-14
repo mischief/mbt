@@ -57,6 +57,8 @@ struct torrent_peer {
 	int snubbed;           /* peer not sending data, skip in drive_peer */
 	uint64_t bytes_from;   /* bytes received from peer in current interval */
 	uint64_t bytes_to;     /* bytes sent to peer in current interval */
+	uint64_t total_down;   /* lifetime bytes received */
+	uint64_t total_up;     /* lifetime bytes sent */
 	int peer_interested;   /* peer wants data from us */
 	int am_choking;        /* we are choking this peer */
 	time_t last_recv;      /* last time we received piece data */
@@ -533,6 +535,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	mbt_bitmap_set(pi->blocks, block_idx);
 	pi->received += len;
 	tp->bytes_from += len;
+	tp->total_down += len;
 	pi->last_activity = now_usec();
 
 	if (tp->outstanding > 0) tp->outstanding--;
@@ -749,6 +752,7 @@ static void
 on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, void *arg)
 {
 	struct mbt_torrent *t = arg;
+	struct torrent_peer *tp = find_torrent_peer(t, p);
 
 	/* Only serve if we have the piece */
 	if (mbt_bitmap_isset(t->have, piece) <= 0)
@@ -786,6 +790,10 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	mbt_ratelimit_consume(mbt_session_get_upload_limit(t->session), length);
 
 	mbt_peer_send_piece(p, piece, offset, buf + offset, length);
+	if (tp) {
+		tp->bytes_to += length;
+		tp->total_up += length;
+	}
 	free(buf);
 }
 
@@ -1275,7 +1283,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		}
 	}
 
-	if (t->storage_ops && t->storage_ops->read_piece) {
+	if (t->storage_ops && t->storage_ops->read_piece && t->have_count == 0) {
 		uint8_t *buf = malloc(t->piece_length);
 		if (buf) {
 			for (uint32_t i = 0; i < t->piece_count; i++) {
@@ -1584,6 +1592,8 @@ mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *ou
 			out->outstanding = tp->outstanding;
 			out->hash_failures = tp->hash_failures;
 			out->source = mbt_peer_source(tp->peer);
+			out->downloaded = tp->total_down;
+			out->uploaded = tp->total_up;
 			struct mbt_bitmap *bf = mbt_peer_bitfield(tp->peer);
 			if (bf && t->piece_count > 0)
 				out->done_pct = 100 * mbt_bitmap_count(bf) / t->piece_count;
