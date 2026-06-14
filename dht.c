@@ -645,8 +645,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		if (qid && qid->type == BE_STRING && qid->string.iov_len == 20)
 			routing_add(d, qid->string.iov_base, &from);
 
-		if (q->type == BE_STRING && q->string.iov_len == 4 &&
-		    memcmp(q->string.iov_base, "ping", 4) == 0) {
+		if (mbt_be_streq(q, "ping")) {
 			/* Respond to ping */
 			struct mbt_be_value *resp = NULL, *rb = NULL;
 			mbt_be_dict_new(&resp);
@@ -661,8 +660,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			dht_send(d, &from, enc, enc_len);
 			free(enc);
 			mbt_be_value_free(resp);
-		} else if (q->type == BE_STRING && q->string.iov_len == 9 &&
-		           memcmp(q->string.iov_base, "find_node", 9) == 0) {
+		} else if (mbt_be_streq(q, "find_node")) {
 			/* Respond with closest nodes */
 			struct mbt_be_value *target_v = mbt_be_find(a, "target");
 			if (!target_v || target_v->type != BE_STRING || target_v->string.iov_len != 20)
@@ -702,8 +700,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			free(enc);
 			mbt_be_value_free(resp);
 
-		} else if (q->type == BE_STRING && q->string.iov_len == 9 &&
-		           memcmp(q->string.iov_base, "get_peers", 9) == 0) {
+		} else if (mbt_be_streq(q, "get_peers")) {
 			/* Check if we have stored peers for this infohash */
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
 			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
@@ -778,8 +775,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			free(enc);
 			mbt_be_value_free(resp);
 
-		} else if (q->type == BE_STRING && q->string.iov_len == 13 &&
-		           memcmp(q->string.iov_base, "announce_peer", 13) == 0) {
+		} else if (mbt_be_streq(q, "announce_peer")) {
 			/* Store the announcing peer */
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
 			struct mbt_be_value *port_v = mbt_be_find(a, "port");
@@ -822,8 +818,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			dht_send(d, &from, enc, enc_len);
 			free(enc);
 			mbt_be_value_free(resp);
-		} else if (q->type == BE_STRING && q->string.iov_len == 3 &&
-		           memcmp(q->string.iov_base, "get", 3) == 0) {
+		} else if (mbt_be_streq(q, "get")) {
 			/* BEP 44: get */
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
 			if (!tgt || tgt->type != BE_STRING || tgt->string.iov_len != 20)
@@ -863,8 +858,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			dht_send(d, &from, enc, enc_len);
 			free(enc);
 			mbt_be_value_free(resp);
-		} else if (q->type == BE_STRING && q->string.iov_len == 3 &&
-		           memcmp(q->string.iov_base, "put", 3) == 0) {
+		} else if (mbt_be_streq(q, "put")) {
 			/* BEP 44: put */
 			struct mbt_be_value *v_val = mbt_be_find(a, "v");
 			if (!v_val) goto out;

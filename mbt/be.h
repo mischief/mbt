@@ -3,6 +3,7 @@
 #include <sys/uio.h>
 #include <sys/queue.h>
 #include <inttypes.h>
+#include <string.h>
 
 enum {
 	BE_STRING = 0,
@@ -50,3 +51,12 @@ MBT_API void mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *
 MBT_API int
 mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len);
 
+/* Check if a bencode value is a string equal to the given C string */
+static inline int
+mbt_be_streq(struct mbt_be_value *v, const char *s)
+{
+	size_t slen = strlen(s);
+	return v && v->type == BE_STRING &&
+	       v->string.iov_len == slen &&
+	       memcmp(v->string.iov_base, s, slen) == 0;
+}
