@@ -212,7 +212,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 			if (!pe)
 				break;
 			pe->state = MBT_PEERDB_CONNECTING;
-			mbt_session_add_peer(s, st->ih, pe->addr, pe->port, pe->sources);
+			mbt_session_add_peer(s, st->ih, pe->addr, pe->port, pe->source);
 		}
 
 		/* Announce event=completed once when torrent finishes */

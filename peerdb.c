@@ -40,7 +40,7 @@ mbt_peerdb_insert(struct mbt_peerdb *db, const char *addr, uint16_t port, int so
 
 	struct mbt_peer_entry *existing = RB_FIND(mbt_peerdb, db, &key);
 	if (existing) {
-		existing->sources |= source;
+		existing->source = source;
 		existing->last_seen = peerdb_now();
 		return existing;
 	}
@@ -52,7 +52,7 @@ mbt_peerdb_insert(struct mbt_peerdb *db, const char *addr, uint16_t port, int so
 	snprintf(e->addr, sizeof(e->addr), "%s", addr);
 	e->port = port;
 	e->state = MBT_PEERDB_KNOWN;
-	e->sources = source;
+	e->source = source;
 	e->last_seen = peerdb_now();
 
 	RB_INSERT(mbt_peerdb, db, e);

@@ -18,13 +18,13 @@ enum mbt_peerdb_state {
 };
 
 enum mbt_peer_source {
-	MBT_SOURCE_TRACKER = 1 << 0,
-	MBT_SOURCE_DHT     = 1 << 1,
-	MBT_SOURCE_PEX     = 1 << 2,
-	MBT_SOURCE_LSD     = 1 << 3,
-	MBT_SOURCE_INCOMING = 1 << 4,
-	MBT_SOURCE_MANUAL  = 1 << 5,
-	MBT_SOURCE_MAGNET  = 1 << 6,  /* from magnet x.pe parameter */
+	MBT_SOURCE_TRACKER,
+	MBT_SOURCE_DHT,
+	MBT_SOURCE_PEX,
+	MBT_SOURCE_LSD,
+	MBT_SOURCE_INCOMING,
+	MBT_SOURCE_MANUAL,
+	MBT_SOURCE_MAGNET,
 };
 
 struct mbt_peer_entry {
@@ -32,7 +32,7 @@ struct mbt_peer_entry {
 	uint16_t port;
 
 	enum mbt_peerdb_state state;
-	int sources;             /* bitmask of mbt_peer_source */
+	int source;              /* mbt_peer_source — how we first found this peer */
 	int failures;            /* consecutive failure count */
 	uint64_t last_seen;      /* last time reported by tracker/DHT/PEX (usec) */
 	uint64_t last_attempt;   /* last time we tried connecting (usec) */
