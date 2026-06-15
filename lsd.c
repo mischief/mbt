@@ -14,7 +14,6 @@
 #include <assert.h>
 #include <limits.h>
 #include <errno.h>
-#include <err.h>
 
 #include "mbt/infohash.h"
 #include "mbt/lsd.h"
@@ -246,7 +245,7 @@ mbt_lsd_frame_parse(struct mbt_lsd_frame *frame, struct mbt_lsd_frame_info **out
 
 			rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, p+10);
 			if(rv < 0){
-				warnx("mbt_infohash_new: %s", strerror(-rv));
+				mbt_log_warn(MBT_LOG_LSD, "mbt_infohash_new: %s", strerror(-rv));
 				goto err;
 			}
 
