@@ -32,7 +32,7 @@ echo "--- clang + ASan ---"
 rm -rf build
 CC=clang meson setup build -Devent_backend=$BACKEND -Db_sanitize=address -Ddefault_library=static
 ninja -C build
-LSAN_OPTIONS="suppressions=$(pwd)/test/lsan.supp" meson test -C build
+meson test -C build
 
 # 5. Valgrind
 echo "--- valgrind ---"
