@@ -1,0 +1,29 @@
+.Dd June 14, 2026
+.Dt MBT_RESOLVE 3
+.Os
+.Sh NAME
+.Nm mbt_resolve ,
+.Nm mbt_resolve_cancel
+.Nd Asynchronous name resolution.
+.Sh SYNOPSIS
+.In mbt/resolve.h
+.Vt int
+.Fn mbt_resolve "struct mbt_ev *ev" "const char *host" "uint16_t port" "mbt_resolve_cb cb" "void *arg" "struct mbt_resolve **out"
+.Vt void
+.Fn mbt_resolve_cancel "struct mbt_resolve *r"
+.Sh DESCRIPTION
+The
+.Nm mbt_resolve
+module provides an asynchronous mechanism to resolve hostnames to IP addresses within an event loop. This allows the application to perform DNS lookups without blocking the main execution thread.
+.Sh FUNCTIONS
+The following functions manage asynchronous resolution:
+.Bl -tag -width 12
+.It .Fn mbt_resolve
+Initiates a name resolution request for the specified host and port. Upon completion, the provided callback is executed with the resolved address. Returns an error code on failure.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_resolve_cancel
+Cancels a pending resolution request. The metadata associated with the request will be cleaned up by the event loop.
+.El
+.Sh SEE ALSO
+.Xr mbt 3

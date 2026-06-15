@@ -55,6 +55,9 @@ Functions returning
 or
 .Ft ssize_t
 return 0 on success or a negative errno value on failure.
+.Pp
+.Fn mbt_conn_set_callbacks
+replaces the read and event callbacks on an existing connection.
 .Sh SEE ALSO
 .Xr mbt_event 3 ,
 .Xr mbt_peer 3

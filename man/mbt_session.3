@@ -198,6 +198,15 @@ mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...");
 mbt_session_run(s);
 mbt_session_free(s);
 .Ed
+.Pp
+.Fn mbt_session_listen_port
+returns the actual bound listen port (useful when configured with port 0).
+.Pp
+.Fn mbt_session_dht_port
+returns the UDP port used by the DHT node, or 0 if DHT is not enabled.
+.Pp
+.Fn mbt_session_enable_dht_local
+enables the DHT node on an already-created session (alternative to enable_dht).
 .Sh SEE ALSO
 .Xr mbt_torrent 3 ,
 .Xr mbt_pcp 3 ,
