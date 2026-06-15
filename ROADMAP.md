@@ -157,11 +157,20 @@
 - [ ] `mbt-seed` — seed a file given a .torrent
 - [ ] `mbt-daemon` — long-running daemon + DBus/control interface
 
-### Persistent state ($XDG_DATA_HOME/mbt/)
-- [ ] `<infohash>.meta` — bencode dict: {"torrent": raw metainfo, "directory": path, "added": timestamp}
-- [ ] Resume on restart: scan dir, re-add each torrent with saved metadata
+### Persistent state (mbt_state)
+- [ ] Optional/pluggable — not required for oneshot clients or embedded
+- [ ] `mbt_state_open(dir)` / `mbt_state_close()` — caller chooses path
+- [ ] Per-torrent: `<infohash>.torrent` (raw metadata) + `<infohash>.resume` (bencode: have bitmap, storage path, stats, added time)
+- [ ] Session-level: `session.state` (peer_id, dht node_id, ~10 DHT bootstrap nodes — NOT full routing table)
+- [ ] `mbt_state_save(st, torrent)` — after metadata received + after each piece verified
+- [ ] `mbt_state_restore(st, session)` — scan dir, re-add all torrents with saved metadata + bitfield
+- [ ] `mbt_state_remove(st, infohash)` — delete state files (forget torrent)
+- [ ] `mbt_state_move(st, infohash, new_path)` — relocate data + update state
 - [ ] Per-torrent storage path (currently global on session config)
 - [ ] Save/load peer hints for faster reconnection
+- [ ] File follows Transmission pattern: separate .torrent + .resume files per torrent
+- [ ] Tools pick the path: `$XDG_DATA_HOME/mbt/` on Linux, `/sd/.mbt/` on ESP32
+- [ ] Tunable save frequency (every piece, every N pieces, on shutdown only)
 
 ## Phase 9: Advanced protocols
 
