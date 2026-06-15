@@ -257,7 +257,7 @@ peer_rx_message(struct mbt_peer *p)
 	ssize_t sz;
 	uint32_t length, piece, offset, req_len;
 	unsigned char lenbuf[4];
-	unsigned char buf[4096];
+	unsigned char buf[16];
 	int rv;
 
 	if (!p->msglen) {
@@ -330,14 +330,17 @@ peer_rx_message(struct mbt_peer *p)
 		break;
 
 	case BT_BITFIELD:
-		if (p->msglen > sizeof(buf))
-			return -ENOMSG;
-		sz = mbt_conn_read(p->conn, buf, p->msglen);
+		{
+		unsigned char *bfbuf = malloc(p->msglen);
+		if (!bfbuf) return -ENOMEM;
+		sz = mbt_conn_read(p->conn, bfbuf, p->msglen);
 		mbt_bitmap_unref(p->bitfield);
-		mbt_bitmap_fromarray(&p->bitfield, buf, sz, p->piece_count);
+		mbt_bitmap_fromarray(&p->bitfield, bfbuf, sz, p->piece_count);
+		free(bfbuf);
 		if (p->cb.on_bitfield)
 			p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
 		break;
+		}
 
 	case BT_REQUEST:
 		sz = mbt_conn_read(p->conn, buf, 12);
