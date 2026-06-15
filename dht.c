@@ -990,6 +990,8 @@ mbt_dht_free(struct mbt_dht *d)
 		if (d->lookups[i].timer)
 			mbt_ev_timer_free(d->lookups[i].timer);
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
+	for (int i = 0; i < DHT_MAX_ITEMS; i++)
+		free(d->items[i].v);
 	mbt_ratelimit_free(d->send_limit);
 	mbt_listener_close(&d->listener);
 	free(d);
