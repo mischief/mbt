@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: ISC
 #include <stdio.h>
-#include <syslog.h>
 
 #include "mbt/log.h"
 
@@ -82,28 +81,6 @@ mbt_log_stderr(enum mbt_log_level level, enum mbt_log_component comp,
 	fprintf(stderr, "\n");
 }
 
-/* --- Built-in: syslog --- */
-
-static int
-level_to_syslog(enum mbt_log_level level)
-{
-	switch (level) {
-	case MBT_LOG_ERROR: return LOG_ERR;
-	case MBT_LOG_WARN:  return LOG_WARNING;
-	case MBT_LOG_INFO:  return LOG_INFO;
-	case MBT_LOG_DEBUG: return LOG_DEBUG;
-	}
-	return LOG_INFO;
-}
-
-void
-mbt_log_syslog(enum mbt_log_level level, enum mbt_log_component comp,
-               const char *fmt, va_list ap, void *arg)
-{
-	(void)arg;
-	(void)comp;
-	vsyslog(level_to_syslog(level), fmt, ap);
-}
 
 const char *
 mbt_log_level_str(enum mbt_log_level level)
