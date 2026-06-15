@@ -945,8 +945,10 @@ session_do_announce(struct mbt_session *s, struct session_torrent *st)
 		.arg = s,
 	};
 
-	for (int i = 0; i < st->tracker_count; i++)
+	for (int i = 0; i < st->tracker_count; i++) {
+		mbt_log_debug(MBT_LOG_SESSION, "announcing to tracker[%d]: %s", i, st->trackers[i]);
 		mbt_tracker_announce(st->trackers[i], &treq, s->http, s->http_arg);
+	}
 }
 
 static void
