@@ -65,5 +65,10 @@ if [ -d "$MANDIR" ] && ls "$MANDIR"/*.3 >/dev/null 2>&1; then
     if [ "$LINT_ERRORS" -gt 0 ]; then
         echo ""
         echo "total mandoc errors: $LINT_ERRORS"
+        exit 1
     fi
+fi
+
+if [ "$UNDOCUMENTED" -gt 0 ]; then
+    exit 1
 fi

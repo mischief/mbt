@@ -23,9 +23,9 @@ if [ -n "$LEAKED" ]; then
 fi
 echo "OK: all exported symbols are mbt_*"
 
-# 3. Documentation coverage (informational, not gating)
+# 3. Documentation coverage
 echo "--- doc coverage ---"
-./check-docs.sh
+./check-docs.sh || exit 1
 
 # 4. Clang + ASan (static lib)
 echo "--- clang + ASan ---"
