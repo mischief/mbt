@@ -11,3 +11,5 @@ ubuntu-25.10-desktop-amd64.iso
 fuzz/out_*
 core.*
 build-*
+*.torrent
+*.bin
