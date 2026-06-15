@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include <sys/socket.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -309,7 +310,9 @@ udp_announce_resolved(struct sockaddr_storage *addr, socklen_t len, int err, voi
 		((struct sockaddr_in *)&ut->addr)->sin_port = htons(ctx->port);
 
 	/* Create UDP socket matching resolved address family */
-	ut->fd = socket(ut->addr.ss_family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	ut->fd = socket(ut->addr.ss_family, SOCK_DGRAM, 0);
+	if (ut->fd >= 0)
+		fcntl(ut->fd, F_SETFL, fcntl(ut->fd, F_GETFL) | O_NONBLOCK);
 	if (ut->fd < 0) {
 		free(ut); free(ctx);
 		return;
