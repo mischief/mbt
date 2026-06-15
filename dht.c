@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <time.h>
 #include <fcntl.h>
+#include <sys/queue.h>
 
 #include "mbt/sha1_compat.h"
 
@@ -43,7 +44,6 @@
 #define LOOKUP_TIMEOUT_US (10 * 1000000ULL) /* 10s per lookup */
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
-#define NUM_BUCKETS 160
 
 /* Helper: format sockaddr_storage for logging (returns static buffer) */
 static const char *
@@ -74,15 +74,17 @@ struct dht_node {
 	uint8_t id[20];
 	struct sockaddr_storage addr;
 	time_t last_seen;
-	int pinged;  /* outstanding ping count */
+	int pinged;
+	SLIST_ENTRY(dht_node) entry;
 };
 
 struct dht_bucket {
-	struct dht_node nodes[K];
+	SLIST_HEAD(, dht_node) nodes;
 	int count;
+	int depth;           /* bit prefix depth */
 	time_t last_changed;
+	struct dht_bucket *next;
 };
-
 /* A node encountered during lookup */
 struct lookup_node {
 	uint8_t id[20];
@@ -112,7 +114,8 @@ struct mbt_dht {
 	uint16_t port;
 
 	/* Routing table: 160 buckets */
-	struct dht_bucket buckets[NUM_BUCKETS];
+	struct dht_bucket *buckets; /* linked list of split buckets */
+	int bucket_count;
 
 	/* Peer storage: announced peers for infohashes we've seen */
 #define DHT_MAX_STORED 64
@@ -223,56 +226,154 @@ make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 	memcpy(txn, &t, TXN_LEN);
 }
 
-/* --- Routing table --- */
+/* --- Routing table (split-bucket) --- */
+
+/* Find the bucket that covers the given ID */
+static struct dht_bucket *
+routing_bucket_for(struct mbt_dht *d, const uint8_t *id)
+{
+	int depth = bucket_index(d->id, id);
+	struct dht_bucket *best = d->buckets;
+	for (struct dht_bucket *b = d->buckets; b; b = b->next) {
+		if (b->depth <= depth)
+			best = b;
+	}
+	return best;
+}
+
+/* Check if our own ID falls within this bucket's range */
+static int
+bucket_contains_self(struct mbt_dht *d, struct dht_bucket *b)
+{
+	/* The bucket at depth N covers nodes with prefix length >= N.
+	 * Our own ID always has prefix length 159 (distance 0 to itself).
+	 * The deepest bucket (highest depth) always contains us. */
+	struct dht_bucket *next = b->next;
+	if (!next) return 1; /* last bucket always contains us */
+	return 0;
+}
+
+/* Split a bucket into two: one for depth, one for depth+1 */
+static void
+routing_split(struct mbt_dht *d, struct dht_bucket *b)
+{
+	struct dht_bucket *nb = calloc(1, sizeof(*nb));
+	if (!nb) return;
+	SLIST_INIT(&nb->nodes);
+	nb->depth = b->depth + 1;
+	nb->last_changed = time(NULL);
+
+	/* Insert new bucket after b in the list */
+	nb->next = b->next;
+	b->next = nb;
+	d->bucket_count++;
+
+	/* Redistribute nodes */
+	struct dht_node *n, *tmp; (void)tmp;
+	SLIST_HEAD(, dht_node) keep = SLIST_HEAD_INITIALIZER(keep);
+	int keep_count = 0, moved_count = 0;
+
+	while ((n = SLIST_FIRST(&b->nodes)) != NULL) {
+		SLIST_REMOVE_HEAD(&b->nodes, entry);
+		int depth = bucket_index(d->id, n->id);
+		if (depth >= nb->depth) {
+			SLIST_INSERT_HEAD(&nb->nodes, n, entry);
+			moved_count++;
+		} else {
+			SLIST_INSERT_HEAD(&keep, n, entry);
+			keep_count++;
+		}
+	}
+	SLIST_FIRST(&b->nodes) = SLIST_FIRST(&keep);
+	b->count = keep_count;
+	nb->count = moved_count;
+}
 
 static void
 routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr)
 {
-	if (memcmp(id, d->id, DHT_PEER_ID_LEN) == 0) return; /* don't add ourselves */
+	if (memcmp(id, d->id, DHT_PEER_ID_LEN) == 0) return;
 
-	int idx = bucket_index(d->id, id);
-	struct dht_bucket *b = &d->buckets[idx];
+	struct dht_bucket *b = routing_bucket_for(d, id);
 
-	/* Already in bucket? Update last_seen */
-	for (int i = 0; i < b->count; i++) {
-		if (memcmp(b->nodes[i].id, id, DHT_PEER_ID_LEN) == 0) {
-			b->nodes[i].last_seen = time(NULL);
-			b->nodes[i].addr = *addr;
+	/* Already in bucket? Update */
+	struct dht_node *n;
+	SLIST_FOREACH(n, &b->nodes, entry) {
+		if (memcmp(n->id, id, DHT_PEER_ID_LEN) == 0) {
+			n->last_seen = time(NULL);
+			n->addr = *addr;
 			return;
 		}
 	}
 
 	/* Room in bucket? Add */
 	if (b->count < K) {
-		struct dht_node *n = &b->nodes[b->count++];
+		n = calloc(1, sizeof(*n));
+		if (!n) return;
 		memcpy(n->id, id, 20);
 		n->addr = *addr;
 		n->last_seen = time(NULL);
-		n->pinged = 0;
+		SLIST_INSERT_HEAD(&b->nodes, n, entry);
+		b->count++;
 		b->last_changed = time(NULL);
-		mbt_log_debug(MBT_LOG_DHT, "routing add bucket=%d count=%d", idx, b->count);
+		mbt_log_debug(MBT_LOG_DHT, "routing add bucket=%d count=%d", b->depth, b->count);
+		return;
 	}
-	/* Bucket full — could ping oldest, but skip for now */
+
+	/* Bucket full — split if it contains our own ID */
+	if (bucket_contains_self(d, b)) {
+		routing_split(d, b);
+		/* Retry add into the (now smaller) appropriate bucket */
+		routing_add(d, id, addr);
+		return;
+	}
+
+	/* Bucket full and can't split — evict stale nodes */
+	time_t now = time(NULL);
+	struct dht_node *stale = NULL;
+	SLIST_FOREACH(n, &b->nodes, entry) {
+		if (now - n->last_seen > 300) { stale = n; break; }
+	}
+	if (stale) {
+		SLIST_REMOVE(&b->nodes, stale, dht_node, entry);
+		b->count--;
+		free(stale);
+		/* Add the new node */
+		n = calloc(1, sizeof(*n));
+		if (!n) return;
+		memcpy(n->id, id, 20);
+		n->addr = *addr;
+		n->last_seen = time(NULL);
+		SLIST_INSERT_HEAD(&b->nodes, n, entry);
+		b->count++;
+		b->last_changed = time(NULL);
+	}
 }
 
 static int
 routing_closest(struct mbt_dht *d, const uint8_t *target, struct dht_node *out, int max)
 {
-	int count = 0;
-	int idx = bucket_index(d->id, target);
+	/* Collect all nodes, sort by XOR distance to target */
+	struct dht_node *all[256];
+	int total = 0;
 
-	/* Search outward from target bucket */
-	for (int dist = 0; dist < 160 && count < max; dist++) {
-		int b1 = idx + dist, b2 = idx - dist;
-		for (int pass = 0; pass < 2 && count < max; pass++) {
-			int bi = (pass == 0) ? b1 : b2;
-			if (bi < 0 || bi >= NUM_BUCKETS) continue;
-			if (pass == 1 && dist == 0) continue; /* don't double-count */
-			struct dht_bucket *b = &d->buckets[bi];
-			for (int i = 0; i < b->count && count < max; i++)
-				out[count++] = b->nodes[i];
+	for (struct dht_bucket *b = d->buckets; b && total < 256; b = b->next) {
+		struct dht_node *n;
+		SLIST_FOREACH(n, &b->nodes, entry) {
+			if (total < 256) all[total++] = n;
 		}
 	}
+
+	/* Sort by distance to target */
+	for (int i = 0; i < total - 1; i++)
+		for (int j = i + 1; j < total; j++)
+			if (closer_to(target, all[j]->id, all[i]->id) < 0) {
+				struct dht_node *tmp = all[i]; all[i] = all[j]; all[j] = tmp;
+			}
+
+	int count = total < max ? total : max;
+	for (int i = 0; i < count; i++)
+		memcpy(&out[i], all[i], sizeof(out[i]));
 	return count;
 }
 
@@ -916,32 +1017,42 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 
 	/* Evict stale nodes (no activity in 5 min) */
 	time_t now = time(NULL);
-	for (int i = 0; i < NUM_BUCKETS; i++) {
-		int j = 0;
-		while (j < d->buckets[i].count) {
-			if (now - d->buckets[i].nodes[j].last_seen > 300) {
-				d->buckets[i].nodes[j] = d->buckets[i].nodes[--d->buckets[i].count];
-			} else {
-				j++;
+	for (struct dht_bucket *b = d->buckets; b; b = b->next) {
+		struct dht_node *n, *tmp; (void)tmp;
+		SLIST_FOREACH_SAFE(n, &b->nodes, entry, tmp) {
+			if (now - n->last_seen > 300) {
+				SLIST_REMOVE(&b->nodes, n, dht_node, entry);
+				b->count--;
+				free(n);
 			}
 		}
 	}
+
 	/* Send find_node to up to 8 known nodes to expand routing table */
 	int sent = 0;
-	for (int i = 0; i < NUM_BUCKETS && sent < 8; i++) {
-		for (int j = 0; j < d->buckets[i].count && sent < 8; j++) {
-			dht_send_find_node(d, &d->buckets[i].nodes[j].addr, d->id);
+	for (struct dht_bucket *b = d->buckets; b && sent < 8; b = b->next) {
+		struct dht_node *n;
+		SLIST_FOREACH(n, &b->nodes, entry) {
+			if (sent >= 8) break;
+			dht_send_find_node(d, &n->addr, d->id);
 			sent++;
 		}
 	}
 
 	/* Ping a random node to keep routing table alive */
-	for (int i = 0; i < NUM_BUCKETS; i++) {
-		if (d->buckets[i].count > 0) {
-			int j = rand() % d->buckets[i].count;
-			dht_send_ping(d, &d->buckets[i].nodes[j].addr);
-			break;
+	if (total > 0) {
+		int pick = rand() % total;
+		int idx = 0;
+		for (struct dht_bucket *b = d->buckets; b; b = b->next) {
+			struct dht_node *n;
+			SLIST_FOREACH(n, &b->nodes, entry) {
+				if (idx++ == pick) {
+					dht_send_ping(d, &n->addr);
+					goto pinged;
+				}
+			}
 		}
+		pinged:;
 	}
 
 	/* Reschedule: aggressive (10s) while small, normal (15min) when populated */
@@ -960,6 +1071,12 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	d->ev = ev;
 	d->port = port;
 	srand(time(NULL) ^ getpid());
+
+	/* Initialize routing table with one bucket covering all IDs */
+	d->buckets = calloc(1, sizeof(struct dht_bucket));
+	if (!d->buckets) { free(d); return -ENOMEM; }
+	SLIST_INIT(&d->buckets->nodes);
+	d->bucket_count = 1;
 
 	/* Derive stable node ID from machine-id, or fall back to random */
 	dht_init_node_id(d->id);
@@ -992,6 +1109,18 @@ mbt_dht_free(struct mbt_dht *d)
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
 	for (int i = 0; i < DHT_MAX_ITEMS; i++)
 		free(d->items[i].v);
+	/* Free routing table */
+	struct dht_bucket *b = d->buckets;
+	while (b) {
+		struct dht_node *n;
+		while ((n = SLIST_FIRST(&b->nodes)) != NULL) {
+			SLIST_REMOVE_HEAD(&b->nodes, entry);
+			free(n);
+		}
+		struct dht_bucket *next = b->next;
+		free(b);
+		b = next;
+	}
 	mbt_ratelimit_free(d->send_limit);
 	mbt_listener_close(&d->listener);
 	free(d);
@@ -1116,8 +1245,8 @@ int
 mbt_dht_node_count(struct mbt_dht *d)
 {
 	int total = 0;
-	for (int i = 0; i < NUM_BUCKETS; i++)
-		total += d->buckets[i].count;
+	for (struct dht_bucket *b = d->buckets; b; b = b->next)
+		total += b->count;
 	return total;
 }
 
