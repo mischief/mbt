@@ -126,3 +126,7 @@ test('bep44', bep44_test, timeout: 10)
 poll_test = executable('poll_test', 'poll_test.c',
   link_with: [libmbt], include_directories: mbt_inc)
 test('poll', poll_test)
+
+dht_routing_test = executable('dht_routing_test', 'dht_routing_test.c',
+  link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('dht_routing', dht_routing_test, timeout: 10)
