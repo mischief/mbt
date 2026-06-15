@@ -96,3 +96,42 @@ return 0 on success or a negative errno value on failure.
 .Xr mbt_conn 3
 .Sh AUTHORS
 .An Nick Owens Aq Mt mischief@offblast.org
+.Sh POLLABLE BACKEND
+The pollable backend allows integrating libmbt into an external event loop.
+The caller drives the loop with
+.Xr poll 2
+or any equivalent mechanism (libuv, gio, kqueue wrapper, etc.).
+.Pp
+.Fn mbt_ev_new_pollable
+creates an event loop that does not own a run loop.
+.Pp
+.Fn mbt_ev_pollfd
+fills the provided
+.Fa fds
+array with file descriptors and event masks.
+Returns the number of entries written (up to
+.Fa max ) .
+.Pp
+.Fn mbt_ev_timeout_ms
+returns the number of milliseconds until the next timer fires,
+or \-1 if no timers are active.
+.Pp
+.Fn mbt_ev_dispatch
+processes fired events from the
+.Fa fds
+array (after poll returns) and fires any expired timers.
+.Pp
+Typical usage:
+.Bd -literal
+struct mbt_ev *ev;
+mbt_ev_new_pollable(&ev);
+/* ... register IOs and timers via mbt_session_new etc ... */
+
+while (running) {
+    struct pollfd fds[64];
+    int n = mbt_ev_pollfd(ev, fds, 64);
+    int ms = mbt_ev_timeout_ms(ev);
+    poll(fds, n, ms);
+    mbt_ev_dispatch(ev, fds, n);
+}
+.Ed

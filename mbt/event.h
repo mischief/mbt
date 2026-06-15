@@ -66,6 +66,13 @@ mbt_ev_new_default(struct mbt_ev **out)
 #endif
 }
 
+/* Pollable backend: caller drives the event loop with poll(2) or equivalent */
+struct pollfd;
+MBT_API int mbt_ev_new_pollable(struct mbt_ev **out);
+MBT_API int mbt_ev_pollfd(struct mbt_ev *ev, struct pollfd *fds, int max);
+MBT_API int mbt_ev_timeout_ms(struct mbt_ev *ev);
+MBT_API void mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds);
+
 /* Inline convenience wrappers */
 static inline int
 mbt_ev_io_new(struct mbt_ev *ev, struct mbt_ev_io **out, int fd, uint32_t events,

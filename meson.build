@@ -79,6 +79,7 @@ bt_src = [
   'infohash.c',
   'log.c',
   'log_syslog.c',
+  'ev_poll.c',
   'ratelimit.c',
   'lsd.c',
   'magnet.c',

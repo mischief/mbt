@@ -122,3 +122,7 @@ test('torrent_nodes', torrent_nodes_test)
 
 bep44_test = executable('bep44_test', 'bep44_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('bep44', bep44_test, timeout: 10)
+
+poll_test = executable('poll_test', 'poll_test.c',
+  link_with: [libmbt], include_directories: mbt_inc)
+test('poll', poll_test)
