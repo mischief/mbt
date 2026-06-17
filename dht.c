@@ -918,6 +918,57 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			dht_send(d, &from, enc, enc_len);
 			free(enc);
 			mbt_be_value_free(resp);
+		} else if (mbt_be_streq(q, "sample_infohashes")) {
+			/* BEP 51: return sample of stored infohashes */
+			struct mbt_be_value *tgt = mbt_be_find(a, "target");
+			if (!tgt || tgt->type != BE_STRING || tgt->string.iov_len != 20)
+				goto out;
+			/* Build samples: up to 20 random infohashes */
+			int nsamp = d->stored_count < 20 ? d->stored_count : 20;
+			uint8_t samples[20 * 20];
+			if (nsamp == d->stored_count) {
+				for (int i = 0; i < nsamp; i++)
+					memcpy(samples + i * 20, d->stored[i].infohash, 20);
+			} else {
+				/* Fisher-Yates partial shuffle */
+				int idx[DHT_MAX_STORED];
+				for (int i = 0; i < d->stored_count; i++) idx[i] = i;
+				for (int i = 0; i < nsamp; i++) {
+					int j = i + rand() % (d->stored_count - i);
+					int tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
+					memcpy(samples + i * 20, d->stored[idx[i]].infohash, 20);
+				}
+			}
+			/* Closest nodes to target */
+			struct dht_node closest[K];
+			int nclosest = routing_closest(d, tgt->string.iov_base, closest, K);
+			uint8_t compact[K * 26];
+			int clen = 0;
+			for (int i = 0; i < nclosest; i++) {
+				struct sockaddr_in *sin = (struct sockaddr_in *)&closest[i].addr;
+				if (sin->sin_family != AF_INET) continue;
+				memcpy(compact + clen, closest[i].id, 20);
+				memcpy(compact + clen + 20, &sin->sin_addr, 4);
+				memcpy(compact + clen + 24, &sin->sin_port, 2);
+				clen += 26;
+			}
+			struct mbt_be_value *resp = NULL, *rb = NULL;
+			mbt_be_dict_new(&resp);
+			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
+			mbt_be_dict_append_string(resp, "y", "r", 1);
+			mbt_be_dict_new(&rb);
+			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			mbt_be_dict_append_number(rb, "interval", 3600);
+			if (clen > 0)
+				mbt_be_dict_append_string(rb, "nodes", compact, clen);
+			mbt_be_dict_append_number(rb, "num", d->stored_count);
+			mbt_be_dict_append_string(rb, "samples", samples, nsamp * 20);
+			mbt_be_dict_append(resp, "r", rb);
+			unsigned char *enc; size_t enc_len;
+			mbt_be_value_encode(resp, &enc, &enc_len);
+			dht_send(d, &from, enc, enc_len);
+			free(enc);
+			mbt_be_value_free(resp);
 		} else if (mbt_be_streq(q, "get")) {
 			/* BEP 44: get */
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
