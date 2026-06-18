@@ -162,7 +162,7 @@ executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_di
 
 libcurl_dep = dependency('libcurl', required: false)
 if libcurl_dep.found()
-  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [libcurl_dep])
+  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [libcurl_dep], install: true)
 endif
 
 # Fuzz
@@ -171,5 +171,5 @@ executable('mbt-pcp', 'tools/mbt-pcp.c', link_with: [libmbt], include_directorie
 
 ncurses_dep = dependency('ncurses', required: false)
 if ncurses_dep.found() and libcurl_dep.found()
-  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep, libcurl_dep])
+  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep, libcurl_dep], install: true)
 endif
