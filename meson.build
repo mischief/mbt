@@ -10,6 +10,7 @@ checkargs = '''
 -Wno-unused-function
 -Wno-unused-result
 -Wno-gnu-statement-expression-from-macro-expansion
+-Wno-gnu-include-next
 '''.split()
 foreach a : checkargs
   if cc.has_argument(a)
@@ -33,6 +34,8 @@ event_backend = get_option('event_backend')
 if event_backend == 'auto'
   if host_machine.system() == 'linux'
     event_backend = 'sd-event'
+  elif host_machine.system() == 'openbsd'
+    event_backend = 'libevent1'
   else
     event_backend = 'libevent'
   endif
@@ -48,6 +51,11 @@ elif event_backend == 'libevent'
   deps += libevent_dep
   ev_src = ['ev_libevent.c', 'conn_libevent.c']
   add_project_arguments('-DHAVE_LIBEVENT', language: 'c')
+elif event_backend == 'libevent1'
+  libevent_dep = cc.find_library('event', required: true)
+  deps += libevent_dep
+  ev_src = ['ev_libevent.c', 'conn_libevent.c']
+  add_project_arguments('-DHAVE_LIBEVENT', '-DHAVE_LIBEVENT1', language: 'c')
 endif
 
 # DNS resolver backend
@@ -103,7 +111,7 @@ bt_src = [
   'dht.c',
 ] + ev_src + resolve_src
 
-mbt_inc = include_directories('.', 'mbt')
+mbt_inc = include_directories('.')
 
 libmbt = library('mbt', bt_src, dependencies: deps, install: true,
                  include_directories: mbt_inc,

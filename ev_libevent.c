@@ -2,7 +2,33 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#ifdef HAVE_LIBEVENT1
+#include <event.h>
+/* libevent 1.x shims */
+#define evutil_socket_t int
+static inline struct event *
+event_new(struct event_base *base, int fd, short flags,
+          void (*cb)(int, short, void *), void *arg)
+{
+	struct event *e = malloc(sizeof(*e));
+	if (!e) return NULL;
+	event_set(e, fd, flags, cb, arg);
+	event_base_set(base, e);
+	return e;
+}
+static inline void event_free(struct event *e) { free(e); }
+static inline struct event *
+evtimer_new(struct event_base *base, void (*cb)(int, short, void *), void *arg)
+{
+	struct event *e = malloc(sizeof(*e));
+	if (!e) return NULL;
+	evtimer_set(e, cb, arg);
+	event_base_set(base, e);
+	return e;
+}
+#else
 #include <event2/event.h>
+#endif
 
 #include "mbt/event.h"
 

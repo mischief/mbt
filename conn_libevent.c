@@ -8,9 +8,17 @@
 #include <errno.h>
 #include <string.h>
 
+#ifdef HAVE_LIBEVENT1
+#include <event.h>
+#define evbuffer_get_length(eb)      EVBUFFER_LENGTH(eb)
+#define bufferevent_get_input(bev)   EVBUFFER_INPUT(bev)
+#define BEV_EVENT_EOF                EVBUFFER_EOF
+#define BEV_EVENT_ERROR              EVBUFFER_ERROR
+#else
 #include <event2/event.h>
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
+#endif
 
 #include "mbt/event.h"
 #include "mbt/conn.h"
@@ -22,6 +30,7 @@ struct conn_lev {
 	mbt_conn_read_cb readcb;
 	mbt_conn_event_cb eventcb;
 	void *arg;
+	int fd;
 };
 
 /* Access the underlying event_base from our ev_libevent backend */
@@ -107,6 +116,9 @@ conn_lev_free(struct mbt_conn *conn)
 {
 	struct conn_lev *c = (struct conn_lev *)conn;
 	bufferevent_free(c->bev);
+#ifdef HAVE_LIBEVENT1
+	close(c->fd);
+#endif
 	free(c);
 }
 
@@ -132,7 +144,7 @@ int
 mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
 {
 	struct conn_lev *c = (struct conn_lev *)conn;
-	evutil_socket_t fd = bufferevent_getfd(c->bev);
+	int fd = c->fd;
 	struct sockaddr_storage ss;
 	socklen_t len = sizeof(ss);
 
@@ -167,13 +179,23 @@ mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
 	c->arg = arg;
 	c->watermark = 1;
 
+	c->fd = fd;
+#ifdef HAVE_LIBEVENT1
+	c->bev = bufferevent_new(fd, conn_lev_on_read, NULL, conn_lev_on_event, c);
+	if (!c->bev) {
+		free(c);
+		return -ENOMEM;
+	}
+	event_base_set(l->base_ev, &c->bev->ev_read);
+	event_base_set(l->base_ev, &c->bev->ev_write);
+#else
 	c->bev = bufferevent_socket_new(l->base_ev, fd, BEV_OPT_CLOSE_ON_FREE);
 	if (!c->bev) {
 		free(c);
 		return -ENOMEM;
 	}
-
 	bufferevent_setcb(c->bev, conn_lev_on_read, NULL, conn_lev_on_event, c);
+#endif
 	bufferevent_setwatermark(c->bev, EV_READ, 1, 0);
 	bufferevent_enable(c->bev, EV_READ | EV_WRITE);
 

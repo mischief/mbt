@@ -6,7 +6,7 @@
 #include <assert.h>
 #include <stdlib.h>
 
-#include <be.h>
+#include "mbt/be.h"
 
 static void
 test_parse_string(void)

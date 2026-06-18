@@ -6,7 +6,7 @@
 #include <errno.h>
 #include <assert.h>
 
-#include <be.h>
+#include "mbt/be.h"
 
 #ifndef __AFL_FUZZ_TESTCASE_LEN
   ssize_t fuzz_len;

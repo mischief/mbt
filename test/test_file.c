@@ -6,7 +6,7 @@
 #include <err.h>
 #include <assert.h>
 
-#include <be.h>
+#include "mbt/be.h"
 
 int
 main(int argc, char *argv[])

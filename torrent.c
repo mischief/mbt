@@ -861,6 +861,7 @@ on_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, 
 static void
 on_error(struct mbt_peer *p, int err, void *arg)
 {
+	(void)err;
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;

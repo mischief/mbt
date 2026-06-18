@@ -245,6 +245,7 @@ routing_bucket_for(struct mbt_dht *d, const uint8_t *id)
 static int
 bucket_contains_self(struct mbt_dht *d, struct dht_bucket *b)
 {
+	(void)d;
 	/* The bucket at depth N covers nodes with prefix length >= N.
 	 * Our own ID always has prefix length 159 (distance 0 to itself).
 	 * The deepest bucket (highest depth) always contains us. */

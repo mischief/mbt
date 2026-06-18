@@ -1,3 +1,3 @@
-option('event_backend', type: 'combo', choices: ['auto', 'sd-event', 'libevent'], value: 'auto', description: 'Event loop backend (auto = sd-event on Linux, libevent elsewhere)')
+option('event_backend', type: 'combo', choices: ['auto', 'sd-event', 'libevent', 'libevent1'], value: 'auto', description: 'Event loop backend (auto = sd-event on Linux, libevent1 on OpenBSD, libevent elsewhere)')
 option('tests', type: 'boolean', value: true, description: 'Build and run tests')
 option('dns_backend', type: 'combo', choices: ['auto', 'blocking', 'cares', 'asr'], value: 'auto', description: 'Async DNS backend')
