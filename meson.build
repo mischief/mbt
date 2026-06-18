@@ -115,6 +115,7 @@ mbt_inc = include_directories('.')
 
 libmbt = library('mbt', bt_src, dependencies: deps, install: true,
                  include_directories: mbt_inc,
+                 soversion: 0,
                  c_args: ['-fvisibility=hidden', '-DMBT_BUILDING'],
                  link_args: ['-Wl,--version-script=' + meson.current_source_dir() / 'libmbt.map'],
                  link_depends: files('libmbt.map'))
