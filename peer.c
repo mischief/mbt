@@ -18,6 +18,7 @@
 #include "mbt/bitmap.h"
 #include "mbt/be.h"
 #include "internal.h"
+#include "version.h"
 
 /* Protocol constants */
 enum {
@@ -55,6 +56,7 @@ struct mbt_peer {
 	int am_choking;
 
 	/* extension protocol */
+	char client_version[32]; /* BEP 10 "v" string, empty if unknown */
 	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
 	uint8_t ut_pex_id;     /* their msg id for ut_pex, 0=unsupported */
 	uint8_t have_all;      /* BEP 6: peer sent HAVE_ALL (deferred until piece_count known) */
@@ -199,6 +201,7 @@ peer_send_extension_handshake(struct mbt_peer *p)
 		if (mbt_be_dict_append_number(be, "metadata_size", (int64_t)p->our_metadata_size) < 0) return -ENOMEM;
 	if (p->our_reqq > 0)
 		if (mbt_be_dict_append_number(be, "reqq", p->our_reqq) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(be, "v", MBT_VERSION, strlen(MBT_VERSION)) < 0) return -ENOMEM;
 
 	rv = mbt_be_value_encode(be, &encoded, &sz);
 	if (rv < 0)
@@ -254,6 +257,13 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 	tmp = mbt_be_find(be, "reqq");
 	if (tmp && tmp->type == BE_INTEGER && tmp->integer > 0)
 		p->reqq = (int)tmp->integer;
+
+	tmp = mbt_be_find(be, "v");
+	if (tmp && tmp->type == BE_STRING && tmp->string.iov_len > 0) {
+		size_t n = MIN(tmp->string.iov_len, sizeof(p->client_version) - 1);
+		memcpy(p->client_version, tmp->string.iov_base, n);
+		p->client_version[n] = '\0';
+	}
 
 	return 0;
 }
@@ -909,6 +919,12 @@ uint16_t
 mbt_peer_port(struct mbt_peer *p)
 {
 	return p->listen_port;
+}
+
+const char *
+mbt_peer_version(struct mbt_peer *p)
+{
+	return p->client_version[0] ? p->client_version : NULL;
 }
 
 void

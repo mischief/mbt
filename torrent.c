@@ -1627,6 +1627,7 @@ mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *ou
 			out->hash_failures = tp->hash_failures;
 			out->score = tp->failures;
 			out->source = mbt_peer_source(tp->peer);
+			out->client_version = mbt_peer_version(tp->peer);
 			out->downloaded = tp->total_down;
 			out->uploaded = tp->total_up;
 			struct mbt_bitmap *bf = mbt_peer_bitfield(tp->peer);

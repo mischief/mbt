@@ -18,6 +18,14 @@ foreach a : checkargs
   endif
 endforeach
 
+configure_file(
+  input: 'mbt/version.h.in',
+  output: 'version.h',
+  configuration: {'VERSION': meson.project_version()},
+  install: true,
+  install_dir: get_option('includedir') / 'mbt',
+)
+
 deps = []
 
 if host_machine.system() == 'linux'

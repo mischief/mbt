@@ -106,6 +106,7 @@ MBT_API uint64_t mbt_torrent_download_rate(struct mbt_torrent *t);
 /* Per-peer stats snapshot */
 struct mbt_peer_stats {
 	const char *addr;
+	const char *client_version; /* BEP 10 "v", NULL if unknown (points into peer) */
 	uint16_t port;
 	int choked;       /* we are choked by them */
 	int interested;   /* we are interested */
