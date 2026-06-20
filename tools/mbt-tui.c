@@ -91,8 +91,8 @@ tui_log_cb(enum mbt_log_level level, enum mbt_log_component comp,
 	if (log_count < LOG_LINES) log_count++;
 }
 
-/* Rate tracking: sliding window */
-static uint32_t last_have;
+/* Rate tracking: sliding window over bytes received */
+static uint64_t last_bytes;
 static float dl_rate_kbps;
 #define RATE_SLOTS 5
 static uint64_t rate_slots[RATE_SLOTS];
@@ -369,21 +369,19 @@ on_refresh(struct mbt_ev_timer *timer, void *arg)
 {
 	(void)arg;
 
-	/* Compute download rate — only count pieces from actively downloading torrents */
-	uint32_t total_have = 0;
-	uint32_t piece_len = 0;
+	/* Compute download rate from bytes received across all active torrents */
+	uint64_t total_bytes = 0;
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
 	while (t) {
 		if (mbt_torrent_state(t) == MBT_TORRENT_DOWNLOADING)
-			total_have += mbt_torrent_have_count(t);
-		if (!piece_len) piece_len = mbt_torrent_piece_length(t);
+			total_bytes += mbt_torrent_bytes_downloaded(t);
 		t = mbt_session_torrent_next(session, t);
 	}
-	uint32_t delta = total_have - last_have;
-	last_have = total_have;
+	uint64_t delta = total_bytes >= last_bytes ? total_bytes - last_bytes : 0;
+	last_bytes = total_bytes;
 
 	rate_idx = (rate_idx + 1) % RATE_SLOTS;
-	rate_slots[rate_idx] = (uint64_t)delta * piece_len;
+	rate_slots[rate_idx] = delta;
 
 	uint64_t sum = 0;
 	for (int i = 0; i < RATE_SLOTS; i++) sum += rate_slots[i];

@@ -1503,6 +1503,16 @@ mbt_torrent_have_count(struct mbt_torrent *t)
 	return t->have_count;
 }
 
+uint64_t
+mbt_torrent_bytes_downloaded(struct mbt_torrent *t)
+{
+	uint64_t total = 0;
+	struct torrent_peer *tp;
+	SLIST_FOREACH(tp, &t->peers, entry)
+		total += tp->total_down;
+	return total;
+}
+
 int
 mbt_torrent_peer_count(struct mbt_torrent *t)
 {
