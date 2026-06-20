@@ -44,8 +44,9 @@ MBT_API int mbt_be_dict_new(struct mbt_be_value **out);
 MBT_API int mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value);
 MBT_API int mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num);
 MBT_API int mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf, size_t len);
-MBT_API void mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len);
-MBT_API void mbt_be_list_new(struct mbt_be_value **out);
+MBT_API int mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len);
+MBT_API int mbt_be_integer_new(struct mbt_be_value **out, int64_t val);
+MBT_API int mbt_be_list_new(struct mbt_be_value **out);
 MBT_API void mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val);
 
 MBT_API int

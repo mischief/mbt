@@ -477,24 +477,31 @@ mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf,
 	return 0;
 }
 
-void
+int
 mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len)
 {
-	struct mbt_be_value *v = calloc(1, sizeof(*v));
-	v->type = BE_STRING;
-	v->string.iov_base = malloc(len);
-	memcpy(v->string.iov_base, buf, len);
-	v->string.iov_len = len;
-	*out = v;
+	int rv = be_alloc(BE_STRING, NULL, out);
+	if (rv < 0) return rv;
+	(*out)->string.iov_base = malloc(len);
+	if (!(*out)->string.iov_base) { free(*out); *out = NULL; return -ENOMEM; }
+	memcpy((*out)->string.iov_base, buf, len);
+	(*out)->string.iov_len = len;
+	return 0;
 }
 
-void
+int
+mbt_be_integer_new(struct mbt_be_value **out, int64_t val)
+{
+	int rv = be_alloc(BE_INTEGER, NULL, out);
+	if (rv < 0) return rv;
+	(*out)->integer = val;
+	return 0;
+}
+
+int
 mbt_be_list_new(struct mbt_be_value **out)
 {
-	struct mbt_be_value *v = calloc(1, sizeof(*v));
-	v->type = BE_LIST;
-	TAILQ_INIT(&v->listhead);
-	*out = v;
+	return be_alloc(BE_LIST, NULL, out);
 }
 
 void
