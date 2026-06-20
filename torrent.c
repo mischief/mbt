@@ -424,7 +424,7 @@ on_choke(struct mbt_peer *p, int choked, void *arg)
 
 	struct mbt_bitmap *pb = mbt_peer_bitfield(p);
 	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: %s (peer has %zu/%u pieces)",
-	              mbt_peer_addr(p), mbt_peer_port(p),
+	              mbt_peer_addr(p), mbt_peer_conn_port(p),
 	              choked ? "choked us" : "unchoked us",
 	              pb ? mbt_bitmap_count(pb) : 0, t->piece_count);
 
@@ -477,7 +477,7 @@ on_bitfield(struct mbt_peer *p, struct mbt_bitmap *bits, void *arg)
 	if (!tp) return;
 
 	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: bitfield %zu/%u pieces",
-	              mbt_peer_addr(p), mbt_peer_port(p),
+	              mbt_peer_addr(p), mbt_peer_conn_port(p),
 	              mbt_bitmap_count(bits), t->piece_count);
 
 	if (!mbt_peer_choked(p) && t->pieces)
@@ -499,7 +499,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	if (tp->snubbed) {
 		tp->snubbed = 0;
 		mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: un-snubbed",
-		              mbt_peer_addr(p), mbt_peer_port(p));
+		              mbt_peer_addr(p), mbt_peer_conn_port(p));
 	}
 
 	if (piece >= t->piece_count)
@@ -565,7 +565,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			mbt_hex_encode(digest, 20, got, sizeof(got));
 			mbt_hex_encode(pi->hash, 20, want, sizeof(want));
 			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch from %s:%hu",
-			             piece, mbt_peer_addr(p), mbt_peer_port(p));
+			             piece, mbt_peer_addr(p), mbt_peer_conn_port(p));
 			mbt_log_debug(MBT_LOG_TORRENT, "  got=%s want=%s len=%zu received=%zu blocks=0x%x",
 			              got, want, pi->length, pi->received, pi->blocks ? mbt_bitmap_count(pi->blocks) : 0);
 			pi->received = 0;
@@ -581,7 +581,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			tp->failures += 3;
 			if (tp->hash_failures >= MAX_HASH_FAILURES) {
 				mbt_log_warn(MBT_LOG_TORRENT, "penalizing %s:%hu after %d hash failures",
-				             mbt_peer_addr(p), mbt_peer_port(p), tp->hash_failures);
+				             mbt_peer_addr(p), mbt_peer_conn_port(p), tp->hash_failures);
 				tp->failures += 5;
 				mbt_peer_disconnect(p); /* triggers deferred on_error → cleanup */
 			}
@@ -612,7 +612,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 
 			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu",
-			             piece, mbt_peer_addr(p), mbt_peer_port(p));
+			             piece, mbt_peer_addr(p), mbt_peer_conn_port(p));
 
 			/* Broadcast HAVE to all connected peers */
 			SLIST_FOREACH(hp, &t->peers, entry)
@@ -730,7 +730,7 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 
 		/* Parse and set metadata */
 		mbt_log_info(MBT_LOG_TORRENT, "metadata complete from %s:%hu (%zu bytes)",
-		             mbt_peer_addr(p), mbt_peer_port(p), t->metadata_len);
+		             mbt_peer_addr(p), mbt_peer_conn_port(p), t->metadata_len);
 		mbt_torrent_set_metadata(t, t->metadata, t->metadata_len);
 
 		if (t->pieces)
@@ -763,7 +763,7 @@ on_interest(struct mbt_peer *p, int interested, void *arg)
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: %s",
-	              mbt_peer_addr(p), mbt_peer_port(p),
+	              mbt_peer_addr(p), mbt_peer_conn_port(p),
 	              interested ? "peer INTERESTED" : "peer NOT_INTERESTED");
 	if (tp) tp->peer_interested = interested;
 }
@@ -775,7 +775,7 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 
 	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: on_request piece=%u off=%u len=%u",
-	              mbt_peer_addr(p), mbt_peer_port(p), piece, offset, length);
+	              mbt_peer_addr(p), mbt_peer_conn_port(p), piece, offset, length);
 
 	/* Only serve if we have the piece */
 	if (mbt_bitmap_isset(t->have, piece) <= 0)
