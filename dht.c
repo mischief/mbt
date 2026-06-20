@@ -1329,7 +1329,7 @@ mbt_dht_get_peers(struct mbt_dht *d, struct mbt_infohash *ih,
 
 	char hex[41];
 	mbt_hex_encode(lk->target, 20, hex, sizeof(hex));
-	mbt_log_info(MBT_LOG_DHT, "get_peers lookup for %s (%d seed nodes)", hex, n);
+	mbt_log_debug(MBT_LOG_DHT, "get_peers lookup for %s (%d seed nodes)", hex, n);
 
 	/* Set timeout */
 	mbt_ev_timer_new(d->ev, &lk->timer, LOOKUP_TIMEOUT_US, lookup_timeout_cb, lk);
