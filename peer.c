@@ -57,7 +57,7 @@ struct mbt_peer {
 	int am_choking;
 
 	/* extension protocol */
-	char client_version[32]; /* BEP 10 "v" string, empty if unknown */
+	char client_version[20]; /* BEP 10 "v" string, empty if unknown */
 	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
 	uint8_t ut_pex_id;     /* their msg id for ut_pex, 0=unsupported */
 	uint8_t have_all;      /* BEP 6: peer sent HAVE_ALL (deferred until piece_count known) */
