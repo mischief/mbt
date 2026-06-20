@@ -35,7 +35,7 @@ main(void)
 		SHA1Final(pieces_hash + i * 20, &ctx);
 	}
 
-	struct mbt_be_value *root = NULL, *info = NULL;
+	_cleanup_be_ struct mbt_be_value *root = NULL, *info = NULL;
 	mbt_be_dict_new(&root);
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append(root, "info", info);
@@ -47,7 +47,6 @@ main(void)
 	unsigned char *encoded;
 	size_t enc_len;
 	assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
-	mbt_be_value_free(root);
 
 	/* 2. Create memory storage pre-filled with zeros */
 	struct mbt_storage_memory *mem = mbt_storage_memory_new();

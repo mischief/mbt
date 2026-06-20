@@ -58,7 +58,7 @@ http_announce_done(struct mbt_http_response *resp, void *arg)
 	if (fail && fail->type == BE_STRING) {
 		mbt_log_warn(MBT_LOG_SESSION, "tracker: %.*s",
 		             (int)fail->string.iov_len, (char *)fail->string.iov_base);
-		mbt_be_value_free(be);
+		mbt_be_unref(be);
 		free(resp->data);
 		if (req->done_cb)
 			req->done_cb(req->ih, -EPROTO, 0, req->arg);
@@ -116,7 +116,7 @@ http_announce_done(struct mbt_http_response *resp, void *arg)
 	if (req->done_cb)
 		req->done_cb(req->ih, 0, interval, req->arg);
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 	free(resp->data);
 	mbt_infohash_unref(req->ih);
 	free(ctx);

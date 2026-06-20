@@ -48,17 +48,18 @@ int main(void)
 		SHA1Final(pieces_hash + i * 20, &ctx);
 	}
 
-	struct mbt_be_value *root = NULL, *info = NULL;
-	mbt_be_dict_new(&root);
-	mbt_be_dict_new(&info);
-	mbt_be_dict_append(root, "info", info);
-	mbt_be_dict_append_number(info, "length", TOTAL_LEN);
-	mbt_be_dict_append_string(info, "name", "magnet_test.bin", 15);
-	mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
-	mbt_be_dict_append_string(info, "pieces", pieces_hash, sizeof(pieces_hash));
-
 	unsigned char *encoded; size_t enc_len;
-	assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
+	{
+		_cleanup_be_ struct mbt_be_value *root = NULL, *info = NULL;
+		mbt_be_dict_new(&root);
+		mbt_be_dict_new(&info);
+		mbt_be_dict_append(root, "info", info);
+		mbt_be_dict_append_number(info, "length", TOTAL_LEN);
+		mbt_be_dict_append_string(info, "name", "magnet_test.bin", 15);
+		mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
+		mbt_be_dict_append_string(info, "pieces", pieces_hash, sizeof(pieces_hash));
+		assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
+	}
 
 	/* Compute infohash */
 	unsigned char *info_start = memmem(encoded, enc_len, "4:infod", 7);
@@ -66,12 +67,11 @@ int main(void)
 	assert(info_start); info_start += 6;
 	struct mbt_be_value *tmp = NULL;
 	int ilen = mbt_be_value_parse(info_start, enc_len - (info_start - encoded), &tmp);
-	assert(ilen > 0); mbt_be_value_free(tmp);
+	assert(ilen > 0); mbt_be_unref(tmp);
 	SHA1_CTX ctx; uint8_t digest[20]; char hex[41];
 	SHA1Init(&ctx); SHA1Update(&ctx, info_start, ilen); SHA1Final(digest, &ctx);
 	mbt_hex_encode(digest, 20, hex, sizeof(hex));
 
-	mbt_be_value_free(root);
 
 	mbt_ev_new_default(&ev);
 
@@ -82,18 +82,20 @@ int main(void)
 
 	/* Re-encode torrent with actual tracker port */
 	free(encoded);
-	mbt_be_dict_new(&root);
-	mbt_be_dict_new(&info);
-	char announce[64];
-	snprintf(announce, sizeof(announce), "udp://127.0.0.1:%hu/announce", tracker_port);
-	mbt_be_dict_append_string(root, "announce", announce, strlen(announce));
-	mbt_be_dict_append(root, "info", info);
-	mbt_be_dict_append_number(info, "length", TOTAL_LEN);
-	mbt_be_dict_append_string(info, "name", "magnet_test.bin", 15);
-	mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
-	mbt_be_dict_append_string(info, "pieces", pieces_hash, sizeof(pieces_hash));
-	assert(mbt_be_value_encode(root, &encoded, &enc_len) == 0);
-	mbt_be_value_free(root);
+	{
+		_cleanup_be_ struct mbt_be_value *root2 = NULL, *info2 = NULL;
+		mbt_be_dict_new(&root2);
+		mbt_be_dict_new(&info2);
+		char announce[64];
+		snprintf(announce, sizeof(announce), "udp://127.0.0.1:%hu/announce", tracker_port);
+		mbt_be_dict_append_string(root2, "announce", announce, strlen(announce));
+		mbt_be_dict_append(root2, "info", info2);
+		mbt_be_dict_append_number(info2, "length", TOTAL_LEN);
+		mbt_be_dict_append_string(info2, "name", "magnet_test.bin", 15);
+		mbt_be_dict_append_number(info2, "piece length", PIECE_LEN);
+		mbt_be_dict_append_string(info2, "pieces", pieces_hash, sizeof(pieces_hash));
+		assert(mbt_be_value_encode(root2, &encoded, &enc_len) == 0);
+	}
 
 	/* Seeder */
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();

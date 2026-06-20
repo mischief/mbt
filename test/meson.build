@@ -134,3 +134,7 @@ test('dht_routing', dht_routing_test, timeout: 10)
 bep51_test = executable('bep51_test', 'bep51_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('bep51', bep51_test, timeout: 10)
+
+pex_test = executable('pex_test', 'pex_test.c',
+  link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('pex', pex_test, timeout: 30)

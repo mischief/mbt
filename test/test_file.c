@@ -39,7 +39,7 @@ main(int argc, char *argv[])
 
 	mbt_be_walk(be, mbt_be_pp, NULL);
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 	free(buf);
 	fclose(fp);
 

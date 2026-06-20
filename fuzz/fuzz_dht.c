@@ -48,7 +48,7 @@ int main(void)
 			(void)nodes; (void)values; (void)token;
 		}
 
-		mbt_be_value_free(msg);
+		mbt_be_unref(msg);
 	}
 	return 0;
 }

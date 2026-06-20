@@ -45,7 +45,7 @@ build_torrent(uint8_t *data, unsigned char **encoded, size_t *enc_len, char *hex
 		SHA1Final(pieces_hash + i * 20, &ctx);
 	}
 
-	struct mbt_be_value *root = NULL, *info = NULL;
+	_cleanup_be_ struct mbt_be_value *root = NULL, *info = NULL;
 	mbt_be_dict_new(&root);
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append(root, "info", info);
@@ -55,14 +55,13 @@ build_torrent(uint8_t *data, unsigned char **encoded, size_t *enc_len, char *hex
 	mbt_be_dict_append_string(info, "pieces", pieces_hash, sizeof(pieces_hash));
 
 	mbt_be_value_encode(root, encoded, enc_len);
-	mbt_be_value_free(root);
 
 	unsigned char *is = memmem(*encoded, *enc_len, "4:infod", 7);
 	if (!is) is = memmem(*encoded, *enc_len, "4:info", 6);
 	is += 6;
 	struct mbt_be_value *tmp = NULL;
 	int ilen = mbt_be_value_parse(is, *enc_len - (is - *encoded), &tmp);
-	mbt_be_value_free(tmp);
+	mbt_be_unref(tmp);
 	SHA1_CTX ctx; uint8_t digest[20];
 	SHA1Init(&ctx); SHA1Update(&ctx, is, ilen); SHA1Final(digest, &ctx);
 	mbt_hex_encode(digest, 20, hex, 41);
@@ -142,7 +141,7 @@ test_tracker_v6(void)
 	mbt_storage_memory_put_file(memS, 0, data, TOTAL_LEN);
 
 	/* Build .torrent with IPv6 tracker announce URL */
-	struct mbt_be_value *root = NULL, *info = NULL;
+	_cleanup_be_ struct mbt_be_value *root = NULL, *info = NULL;
 	mbt_be_dict_new(&root);
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append(root, "info", info);
@@ -163,7 +162,6 @@ test_tracker_v6(void)
 
 	unsigned char *enc2; size_t enc2_len;
 	mbt_be_value_encode(root, &enc2, &enc2_len);
-	mbt_be_value_free(root);
 
 	struct mbt_session_config cfgS = {
 		.ev = ev, .storage_ops = mbt_storage_memory_ops(),

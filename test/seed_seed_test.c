@@ -47,7 +47,7 @@ int main(void)
 		SHA1Final(hashes + i * 20, &ctx);
 	}
 
-	struct mbt_be_value *info = NULL, *root = NULL;
+	_cleanup_be_ struct mbt_be_value *info = NULL, *root = NULL;
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append_string(info, "name", "seed_test.bin", 13);
 	mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
@@ -57,7 +57,6 @@ int main(void)
 	mbt_be_dict_append(root, "info", info);
 	uint8_t *enc; size_t enc_len;
 	mbt_be_value_encode(root, &enc, &enc_len);
-	mbt_be_value_free(root);
 
 	/* Session 1: seeder, listening */
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();

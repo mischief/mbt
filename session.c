@@ -1211,7 +1211,7 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	/* Check peer limit (active + pending connects) */
 	int pending = 0;
 
-	/* Don't initiate outbound connections when seeding (except LSD/incoming) */
+	/* Don't initiate outbound connections when seeding (except LSD) */
 	if (mbt_torrent_complete(st->torrent) && source != MBT_SOURCE_LSD)
 		return 0;
 
@@ -1231,7 +1231,8 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	}
 	for (int i = 0; i < mbt_torrent_peer_count(st->torrent); i++) {
 		struct mbt_peer *p = mbt_torrent_peer_at(st->torrent, i);
-		if (p && mbt_peer_port(p) == port && strcmp(mbt_peer_addr(p), addr) == 0)
+		uint16_t lp = mbt_peer_port(p);
+		if (p && lp != 0 && lp == port && strcmp(mbt_peer_addr(p), addr) == 0)
 			return 0;
 	}
 

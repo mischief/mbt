@@ -826,6 +826,7 @@ on_pex(struct mbt_peer *p, const char *addr, uint16_t port, void *arg)
 	(void)p;
 	struct mbt_torrent *t = arg;
 	if (t->is_private) return; /* BEP 27: no PEX for private torrents */
+	if (port == 0) return;    /* port 0 is invalid */
 	/* Insert into peerdb */
 	mbt_peerdb_insert(&t->peerdb, addr, port, MBT_SOURCE_PEX);
 	mbt_log_debug(MBT_LOG_TORRENT, "PEX: %s:%hu", addr, port);
@@ -1388,6 +1389,8 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 	mbt_peer_set_our_metadata_size(peer, t->metadata_len);
 	if (mbt_session_reqq(t->session) > 0)
 		mbt_peer_set_our_reqq(peer, mbt_session_reqq(t->session));
+	if (mbt_session_listen_port(t->session) > 0)
+		mbt_peer_set_our_listen_port(peer, mbt_session_listen_port(t->session));
 
 	tp->peer = peer;
 	tp->last_recv = time(NULL);
@@ -1411,7 +1414,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 
 	rv = mbt_peer_new_incoming(&peer, t->ev, conn, t->ih, t->peer_id,
 	                           t->piece_count, MBT_SOURCE_INCOMING, ext, their_id,
-	                           t->metadata_len,
+	                           t->metadata_len, mbt_session_listen_port(t->session),
 	                           &torrent_peer_cbs, t);
 	if (rv < 0) {
 		free(tp);

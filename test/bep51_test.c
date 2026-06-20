@@ -56,8 +56,9 @@ get_token(int sock, uint16_t port, const uint8_t *ih, size_t *token_len_out)
 	mbt_be_dict_append_string(a, "id", fakeid, 20);
 	mbt_be_dict_append_string(a, "info_hash", ih, 20);
 	mbt_be_dict_append(msg, "a", a);
+	mbt_be_unref(a);
 	send_msg(sock, port, msg);
-	mbt_be_value_free(msg);
+	mbt_be_unref(msg);
 
 	/* Run event loop so DHT processes the query and sends the response */
 	struct mbt_ev_timer *t;
@@ -81,7 +82,7 @@ get_token(int sock, uint16_t port, const uint8_t *ih, size_t *token_len_out)
 			*token_len_out = tok->string.iov_len;
 		}
 	}
-	mbt_be_value_free(resp);
+	mbt_be_unref(resp);
 	return token;
 }
 
@@ -104,7 +105,6 @@ send_announce(int sock, uint16_t port, const uint8_t *ih, const uint8_t *txn,
 	mbt_be_dict_append_number(a, "port", 6881);
 	mbt_be_dict_append_string(a, "token", token, token_len);
 	if (mbt_be_dict_append(msg, "a", a) < 0) return;
-	a = NULL;
 	send_msg(sock, port, msg);
 }
 
@@ -125,7 +125,6 @@ send_sample(int sock, uint16_t port, const uint8_t *txn)
 	mbt_be_dict_append_string(a, "id", fakeid, 20);
 	mbt_be_dict_append_string(a, "target", target, 20);
 	if (mbt_be_dict_append(msg, "a", a) < 0) return;
-	a = NULL;
 	send_msg(sock, port, msg);
 }
 

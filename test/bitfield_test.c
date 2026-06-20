@@ -82,7 +82,7 @@ int main(void)
 	}
 
 	/* Encode minimal torrent */
-	struct mbt_be_value *info = NULL, *root = NULL;
+	_cleanup_be_ struct mbt_be_value *info = NULL, *root = NULL;
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append_string(info, "name", "bitfield_test.bin", 17);
 	mbt_be_dict_append_number(info, "piece length", PIECE_LEN);
@@ -94,7 +94,6 @@ int main(void)
 
 	uint8_t *enc; size_t enc_len;
 	mbt_be_value_encode(root, &enc, &enc_len);
-	mbt_be_value_free(root);
 
 	/* Session 2: has pieces 0-5 (75%), must start first (listener) */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();

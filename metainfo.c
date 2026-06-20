@@ -458,12 +458,9 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 			_cleanup_be_ struct mbt_be_value *url = NULL;
 			if (mbt_be_string_new(&url, mi->trackers[i], strlen(mi->trackers[i])) < 0) return -ENOMEM;
 			mbt_be_list_append(tier, url);
-			url = NULL;
 		}
 		mbt_be_list_append(al, tier);
-		tier = NULL;
 		if (mbt_be_dict_append(root, "announce-list", al) < 0) return -ENOMEM;
-		al = NULL;
 	}
 
 	if (mi->comment)
@@ -488,16 +485,12 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 				_cleanup_be_ struct mbt_be_value *comp = NULL;
 				if (mbt_be_string_new(&comp, tok, strlen(tok)) < 0) { free(p); return -ENOMEM; }
 				mbt_be_list_append(plist, comp);
-				comp = NULL;
 			}
 			free(p);
 			if (mbt_be_dict_append(fd, "path", plist) < 0) return -ENOMEM;
-			plist = NULL;
 			mbt_be_list_append(flist, fd);
-			fd = NULL;
 		}
 		if (mbt_be_dict_append(info, "files", flist) < 0) return -ENOMEM;
-		flist = NULL;
 	}
 
 	if (mbt_be_dict_append_string(info, "name", mi->name, strlen(mi->name)) < 0) return -ENOMEM;
@@ -519,7 +512,6 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 	}
 
 	if (mbt_be_dict_append(root, "info", info) < 0) return -ENOMEM;
-	info = NULL;
 
 	/* DHT bootstrap nodes */
 	if (mi->node_count > 0) {
@@ -530,15 +522,11 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 			if (mbt_be_list_new(&pair) < 0) return -ENOMEM;
 			if (mbt_be_string_new(&h, mi->nodes[i].host, strlen(mi->nodes[i].host)) < 0) return -ENOMEM;
 			mbt_be_list_append(pair, h);
-			h = NULL;
 			if (mbt_be_integer_new(&portv, mi->nodes[i].port) < 0) return -ENOMEM;
 			mbt_be_list_append(pair, portv);
-			portv = NULL;
 			mbt_be_list_append(nlist, pair);
-			pair = NULL;
 		}
 		if (mbt_be_dict_append(root, "nodes", nlist) < 0) return -ENOMEM;
-		nlist = NULL;
 	}
 
 	int rv = mbt_be_value_encode(root, out, len);

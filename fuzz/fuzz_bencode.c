@@ -51,7 +51,7 @@ main(int argc, char *argv[])
 		(void)rv;
 		/* Reset state. e.g. libtarget_free(tmp) */
 		if(be)
-			mbt_be_value_free(be);
+			mbt_be_unref(be);
 	}
 
 	return 0;

@@ -40,7 +40,9 @@ struct mbt_peer {
 	uint8_t ext[8];
 	uint32_t flags;
 	char addr[INET6_ADDRSTRLEN];
-	uint16_t port;
+	uint16_t conn_port;    /* ephemeral TCP source port, for logging */
+	uint16_t listen_port;  /* peer's listen port from BEP 10 "p", 0 if unknown */
+	uint16_t our_listen_port; /* our listen port to advertise in extension handshake */
 	enum mbt_peer_source source;  /* mbt_peer_source flags */
 
 	struct mbt_peer_callbacks cb;
@@ -92,7 +94,7 @@ peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 static void
 peer_error(struct mbt_peer *p, int err)
 {
-	mbt_log_warn(MBT_LOG_PEER, "%s:%hu: %s", p->addr, p->port,
+	mbt_log_warn(MBT_LOG_PEER, "%s:%hu: %s", p->addr, p->conn_port,
 	             err == 0 ? "EOF" : strerror(-err));
 	p->state = MBT_PEER_CLOSED;
 	if (p->cb.on_error)
@@ -181,8 +183,7 @@ static int
 peer_send_extension_handshake(struct mbt_peer *p)
 {
 	_cleanup_be_ struct mbt_be_value *be = NULL;
-	unsigned char *encoded;
-	unsigned char packed[64];
+	unsigned char *encoded = NULL;
 	size_t sz;
 	int rv;
 
@@ -192,7 +193,8 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	if (mbt_be_dict_append_number(m, "ut_metadata", 3) < 0) return -ENOMEM;
 	if (mbt_be_dict_append_number(m, "ut_pex", 4) < 0) return -ENOMEM;
 	if (mbt_be_dict_append(be, "m", m) < 0) return -ENOMEM;
-	m = NULL;
+	if (p->our_listen_port > 0)
+		if (mbt_be_dict_append_number(be, "p", p->our_listen_port) < 0) return -ENOMEM;
 	if (p->our_metadata_size > 0)
 		if (mbt_be_dict_append_number(be, "metadata_size", (int64_t)p->our_metadata_size) < 0) return -ENOMEM;
 	if (p->our_reqq > 0)
@@ -202,12 +204,15 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	if (rv < 0)
 		return rv;
 
+	unsigned char *packed = malloc(2 + sz);
+	if (!packed) { free(encoded); return -ENOMEM; }
 	rv = mbt_pack(packed, "bb*", (int)BT_EXTENSION, (int)0, sz, encoded);
 	free(encoded);
-	if (rv < 0)
-		return rv;
+	if (rv < 0) { free(packed); return rv; }
 
-	return peer_write_msg(p, packed, rv);
+	int wr = peer_write_msg(p, packed, rv);
+	free(packed);
+	return wr;
 }
 
 static int
@@ -237,6 +242,10 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 		if (utp && utp->type == BE_INTEGER)
 			p->ut_pex_id = (uint8_t)utp->integer;
 	}
+
+	tmp = mbt_be_find(be, "p");
+	if (tmp && tmp->type == BE_INTEGER && tmp->integer > 0 && tmp->integer < 65536)
+		p->listen_port = (uint16_t)tmp->integer;
 
 	tmp = mbt_be_find(be, "metadata_size");
 	if (tmp && tmp->type == BE_INTEGER && tmp->integer > 0)
@@ -272,13 +281,13 @@ peer_rx_message(struct mbt_peer *p)
 
 		if (length > (1 << 18)) {
 			mbt_log_warn(MBT_LOG_PEER, "%s:%hu: msg too large: %u (raw: %02x%02x%02x%02x)",
-			             p->addr, p->port, length,
+			             p->addr, p->conn_port, length,
 			             lenbuf[0], lenbuf[1], lenbuf[2], lenbuf[3]);
 			/* Peek at next bytes for debugging */
 			unsigned char peek[8] = {0};
 			mbt_conn_read(p->conn, peek, sizeof(peek));
 			mbt_log_warn(MBT_LOG_PEER, "%s:%hu: next 8 bytes: %02x %02x %02x %02x %02x %02x %02x %02x",
-			             p->addr, p->port, peek[0], peek[1], peek[2], peek[3],
+			             p->addr, p->conn_port, peek[0], peek[1], peek[2], peek[3],
 			             peek[4], peek[5], peek[6], peek[7]);
 			return -ENOMSG;
 		}
@@ -532,13 +541,13 @@ peer_on_read(struct mbt_conn *c, void *v)
 		rv = peer_recv_handshake(p);
 		if (rv < 0) {
 			mbt_log_debug(MBT_LOG_PEER, "%s:%hu: handshake failed: %s",
-			              p->addr, p->port, strerror(-rv));
+			              p->addr, p->conn_port, strerror(-rv));
 			peer_error(p, rv);
 			return;
 		}
 
 		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: handshake OK, flags=%s%s%s",
-		              p->addr, p->port,
+		              p->addr, p->conn_port,
 		              (p->flags & MBT_PEER_FLAG_DHT) ? "DHT " : "",
 		              (p->flags & MBT_PEER_FLAG_FAST) ? "FAST " : "",
 		              (p->flags & MBT_PEER_FLAG_EXTENSION) ? "EXT" : "");
@@ -614,7 +623,7 @@ peer_on_read(struct mbt_conn *c, void *v)
 
 		p->state = MBT_PEER_ACTIVE;
 		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: ACTIVE (metadata_size=%zu reqq=%d)",
-		              p->addr, p->port, p->metadata_size, p->reqq);
+		              p->addr, p->conn_port, p->metadata_size, p->reqq);
 		mbt_conn_set_watermark(p->conn, 4);
 		if (p->cb.on_active)
 			p->cb.on_active(p, p->cb_arg);
@@ -669,13 +678,13 @@ mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
 	p->piece_count = piece_count;
 	p->state = MBT_PEER_HANDSHAKE;
 
-	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->port);
+	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->conn_port);
 
 	/* Point conn callbacks to this peer */
 	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);
 	mbt_conn_set_watermark(p->conn, HANDSHAKE_SIZE);
 
-	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: sending handshake", p->addr, p->port);
+	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: sending handshake", p->addr, p->conn_port);
 
 	rv = peer_send_handshake(p);
 	if (rv < 0) {
@@ -698,7 +707,7 @@ int
 mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
                       struct mbt_infohash *ih, const uint8_t peer_id[20],
                       uint32_t piece_count, enum mbt_peer_source source, const uint8_t ext[8], const uint8_t their_id[20],
-                      size_t metadata_size,
+                      size_t metadata_size, uint16_t our_listen_port,
                       struct mbt_peer_callbacks *cb, void *arg)
 {
 	struct mbt_peer *p;
@@ -727,13 +736,14 @@ mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn 
 	if (ext[7] & 0x04) p->flags |= MBT_PEER_FLAG_FAST;
 	if (ext[5] & 0x10) p->flags |= MBT_PEER_FLAG_EXTENSION;
 
-	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->port);
-	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: incoming peer from %s", p->addr, p->port,
+	mbt_conn_peer_addr(conn, p->addr, sizeof(p->addr), &p->conn_port);
+	mbt_log_debug(MBT_LOG_PEER, "%s:%hu: incoming peer from %s", p->addr, p->conn_port,
 	              mbt_peer_source_str(source));
 	mbt_conn_set_callbacks(p->conn, peer_on_read, peer_on_event, p);
 
-	/* Set metadata size so extension handshake includes it */
+	/* Set metadata size and listen port so extension handshake includes them */
 	p->our_metadata_size = metadata_size;
+	p->our_listen_port = our_listen_port;
 
 	/* Send our handshake as response */
 	rv = peer_send_handshake(p);
@@ -898,7 +908,13 @@ mbt_peer_source_str(enum mbt_peer_source source)
 uint16_t
 mbt_peer_port(struct mbt_peer *p)
 {
-	return p->port;
+	return p->listen_port;
+}
+
+void
+mbt_peer_set_our_listen_port(struct mbt_peer *p, uint16_t port)
+{
+	p->our_listen_port = port;
 }
 
 /* --- Send commands --- */

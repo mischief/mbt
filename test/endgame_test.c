@@ -47,7 +47,7 @@ int main(void)
 		SHA1Final(pieces_hash + i * 20, &ctx);
 	}
 
-	struct mbt_be_value *root = NULL, *info = NULL;
+	_cleanup_be_ struct mbt_be_value *root = NULL, *info = NULL;
 	mbt_be_dict_new(&root);
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append(root, "info", info);
@@ -58,7 +58,6 @@ int main(void)
 
 	unsigned char *encoded; size_t enc_len;
 	mbt_be_value_encode(root, &encoded, &enc_len);
-	mbt_be_value_free(root);
 
 	mbt_ev_new_default(&ev);
 
@@ -99,7 +98,7 @@ int main(void)
 	is += 6;
 	struct mbt_be_value *tmp = NULL;
 	int ilen = mbt_be_value_parse(is, enc_len - (is - encoded), &tmp);
-	mbt_be_value_free(tmp);
+	mbt_be_unref(tmp);
 	SHA1_CTX ctx; uint8_t digest[20]; char hex[41];
 	SHA1Init(&ctx); SHA1Update(&ctx, is, ilen); SHA1Final(digest, &ctx);
 	mbt_hex_encode(digest, 20, hex, sizeof(hex));

@@ -19,7 +19,7 @@ test_parse_string(void)
 	assert(be->type == BE_STRING);
 	assert(be->string.iov_len == 4);
 	assert(memcmp(be->string.iov_base, "eggs", 4) == 0);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -32,18 +32,18 @@ test_parse_integer(void)
 	assert(rv == 4);
 	assert(be->type == BE_INTEGER);
 	assert(be->integer == 42);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 
 	rv = mbt_be_value_parse((const unsigned char *)"i-1e", 4, &be);
 	assert(rv == 4);
 	assert(be->type == BE_INTEGER);
 	assert(be->integer == -1);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 
 	rv = mbt_be_value_parse((const unsigned char *)"i0e", 3, &be);
 	assert(rv == 3);
 	assert(be->integer == 0);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -66,7 +66,7 @@ test_parse_list(void)
 	assert(second->type == BE_STRING);
 	assert(memcmp(second->string.iov_base, "eggs", 4) == 0);
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -91,7 +91,7 @@ test_parse_dict(void)
 
 	assert(mbt_be_find(be, "missing") == NULL);
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -110,7 +110,7 @@ test_parse_nested(void)
 	assert(a);
 	assert(a->type == BE_LIST);
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -145,7 +145,7 @@ test_encode_string(void)
 	assert(memcmp(out, "4:test", 6) == 0);
 
 	free(out);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -165,7 +165,7 @@ test_encode_integer(void)
 	assert(memcmp(out, "i999e", 5) == 0);
 
 	free(out);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -188,7 +188,7 @@ test_encode_dict(void)
 	assert(memcmp(out, "d4:porti6881ee", len) == 0);
 
 	free(out);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -208,6 +208,7 @@ test_dict_build(void)
 
 	rv = mbt_be_dict_append(be, "m", inner);
 	assert(rv == 0);
+	mbt_be_unref(inner); /* drop creator ref; be holds its own */
 
 	struct mbt_be_value *m = mbt_be_find(be, "m");
 	assert(m);
@@ -217,7 +218,7 @@ test_dict_build(void)
 	assert(utm);
 	assert(utm->integer == 3);
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -231,7 +232,7 @@ test_walk(void)
 
 	mbt_be_walk(be, mbt_be_pp, NULL);
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 static void
@@ -261,7 +262,7 @@ test_binary_string_roundtrip(void)
 	assert(memcmp(out, input, 6) == 0);
 
 	free(out);
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 }
 
 int

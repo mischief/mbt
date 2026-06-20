@@ -56,7 +56,7 @@ build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz, size_t *out_len
 		SHA1Final(pieces_hash + i * 20, &ctx);
 	}
 
-	struct mbt_be_value *root = NULL, *info = NULL;
+	_cleanup_be_ struct mbt_be_value *root = NULL, *info = NULL;
 	mbt_be_dict_new(&root);
 	mbt_be_dict_new(&info);
 	mbt_be_dict_append(root, "info", info);
@@ -76,7 +76,7 @@ build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz, size_t *out_len
 	struct mbt_be_value *tmp = NULL;
 	int ilen = mbt_be_value_parse(info_start, enc_len - (info_start - encoded), &tmp);
 	assert(ilen > 0);
-	mbt_be_value_free(tmp);
+	mbt_be_unref(tmp);
 
 	SHA1_CTX ctx;
 	uint8_t digest[20];
@@ -85,7 +85,6 @@ build_torrent(const uint8_t *data, char *hex_out, size_t hex_sz, size_t *out_len
 	SHA1Final(digest, &ctx);
 	mbt_hex_encode(digest, 20, hex_out, hex_sz);
 
-	mbt_be_value_free(root);
 	*out_len = enc_len;
 	return encoded;
 }
