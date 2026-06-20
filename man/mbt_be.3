@@ -5,6 +5,9 @@
 .Sh NAME
 .Nm mbt_be_value_parse ,
 .Nm mbt_be_value_encode ,
+.Nm mbt_be_ref ,
+.Nm mbt_be_unref ,
+.Nm mbt_be_unrefp ,
 .Nm mbt_be_value_free ,
 .Nm mbt_be_value_freep ,
 .Nm mbt_be_dict_new ,
@@ -14,6 +17,7 @@
 .Nm mbt_be_list_new ,
 .Nm mbt_be_list_append ,
 .Nm mbt_be_string_new ,
+.Nm mbt_be_integer_new ,
 .Nm mbt_be_find ,
 .Nm mbt_be_walk ,
 .Nm mbt_be_pp
@@ -22,6 +26,11 @@
 .In mbt/be.h
 .Fn mbt_be_value_parse "const unsigned char *buf" "size_t sz" "struct mbt_be_value **out"
 .Fn mbt_be_value_encode "struct mbt_be_value *v" "unsigned char **out" "size_t *len"
+.Ft "struct mbt_be_value *"
+.Fn mbt_be_ref "struct mbt_be_value *v"
+.Ft "struct mbt_be_value *"
+.Fn mbt_be_unref "struct mbt_be_value *v"
+.Fn mbt_be_unrefp "struct mbt_be_value **v"
 .Fn mbt_be_value_free "struct mbt_be_value *v"
 .Fn mbt_be_value_freep "struct mbt_be_value **v"
 .Fn mbt_be_dict_new "struct mbt_be_value **out"
@@ -31,6 +40,7 @@
 .Fn mbt_be_list_new "struct mbt_be_value **out"
 .Fn mbt_be_list_append "struct mbt_be_value *list" "struct mbt_be_value *val"
 .Fn mbt_be_string_new "struct mbt_be_value **out" "const void *buf" "size_t len"
+.Fn mbt_be_integer_new "struct mbt_be_value **out" "int64_t val"
 .Fn mbt_be_find "struct mbt_be_value *be" "const char *key"
 .Fn mbt_be_walk "struct mbt_be_value *be" "int (*cb)(struct mbt_be_value *, void *)" "void *arg"
 .Fn mbt_be_pp "struct mbt_be_value *be" "void *arg"
@@ -56,14 +66,35 @@ encodes a tree of
 structures back into a dynamically allocated buffer of bencoded bytes.
 The caller is responsible for freeing the returned buffer.
 .Pp
-The following functions handle memory management:
-.Fn mbt_be_value_free
-destroys a single
 .Vt mbt_be_value
-node and its children.
+objects are reference counted.
+.Fn mbt_be_ref
+increments the reference count and returns the same pointer.
+.Fn mbt_be_unref
+decrements the reference count; when it reaches zero the object and all
+its children are freed.
+It always returns
+.Dv NULL ,
+which is useful for clearing a pointer in one expression.
+.Fn mbt_be_unrefp
+is a
+.Fn cleanup
+wrapper suitable for use with
+.Dv _cleanup_be_ :
+.Bd -literal
+_cleanup_be_ struct mbt_be_value *msg = NULL;
+if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
+/* msg is freed automatically on any return path */
+.Ed
+.Pp
+.Fn mbt_be_value_free
+and
 .Fn mbt_be_value_freep
-is a convenience wrapper for freeing a pointer to a
-.Vt mbt_be_value.
+are retained for compatibility and are equivalent to
+.Fn mbt_be_unref
+and
+.Fn mbt_be_unrefp
+respectively.
 .Sh CONSTRUCTION
 To create bencoded data, use the following factory functions:
 .Bl -tag -width 12
@@ -77,6 +108,10 @@ Creates a new empty list.
 .Bl -tag -width 12
 .It .Fn mbt_be_string_new
 Creates a new string value from an existing buffer of bytes.
+.El
+.Bl -tag -width 12
+.It .Fn mbt_be_integer_new
+Creates a new integer value.
 .El
 .Pp
 Once structures are created, they can be populated:
@@ -115,19 +150,42 @@ pretty-prints the bencoded structure (e.g., to a file or stdout via an argument)
 .Fn mbt_be_streq
 (inline) checks if a bencoded string node contains the exact bytes of a
 provided C string.
-.Sh RETURN VALUES
-Most functions return 0 on success or a negative error code on failure.
-Construction and parsing functions that allocate memory return
-.Fa NULL
-on failure.
-.Sh EXAMPLES
-Constructing a simple dictionary:
+.Sh OWNERSHIP
+.Fn mbt_be_dict_append
+transfers ownership of
+.Fa value
+to the dictionary.
+The caller must set their reference to
+.Dv NULL
+after a successful append to avoid a double-free when the parent is
+released:
 .Bd -literal
-struct mbt_be_value *dict;
-mbt_be_dict_new(&dict);
-
-mbt_be_dict_append_number(dict, "length", 1024);
-mbt_be_dict_append_string(dict, "name", "my_torrent", 9);
-
-// 'dict' now contains a bencoded dictionary: i1024e#name#my_torrent
+_cleanup_be_ struct mbt_be_value *a = NULL;
+if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
+/* populate a ... */
+if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
+a = NULL; /* transferred */
+.Ed
+.Sh RETURN VALUES
+Construction functions return 0 on success or
+.Er -ENOMEM
+on allocation failure.
+Parsing functions return the number of bytes consumed on success, or a
+negative error code on failure.
+.Sh EXAMPLES
+Constructing a simple dictionary with automatic cleanup:
+.Bd -literal
+_cleanup_be_ struct mbt_be_value *dict = NULL;
+if (mbt_be_dict_new(&dict) < 0)
+    return -ENOMEM;
+if (mbt_be_dict_append_number(dict, "length", 1024) < 0)
+    return -ENOMEM;
+if (mbt_be_dict_append_string(dict, "name", "my_torrent", 10) < 0)
+    return -ENOMEM;
+unsigned char *buf;
+size_t len;
+mbt_be_value_encode(dict, &buf, &len);
+/* use buf ... */
+free(buf);
+/* dict freed automatically on return */
 .Ed
