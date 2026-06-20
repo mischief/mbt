@@ -264,7 +264,7 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 		size_t n = MIN(tmp->string.iov_len, sizeof(p->client_version) - 1);
 		const unsigned char *src = tmp->string.iov_base;
 		for (size_t i = 0; i < n; i++)
-			p->client_version[i] = isprint(src[i]) ? (char)src[i] : '?';
+			p->client_version[i] = (src[i] >= 0x20 && src[i] != 0x7f) ? (char)src[i] : '?';
 		p->client_version[n] = '\0';
 	}
 
