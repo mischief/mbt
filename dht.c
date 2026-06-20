@@ -456,12 +456,12 @@ dht_send_find_node(struct mbt_dht *d, const struct sockaddr_storage *addr, const
 	make_txn(d, txn);
 
 	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(msg, "t", txn, TXN_LEN);
-	mbt_be_dict_append_string(msg, "y", "q", 1);
-	mbt_be_dict_append_string(msg, "q", "find_node", 9);
+	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "q", "find_node", 9) < 0) return -ENOMEM;
 	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(a, "id", d->id, 20);
-	mbt_be_dict_append_string(a, "target", target, 20);
+	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(a, "target", target, 20) < 0) return -ENOMEM;
 	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
 	a = NULL;
 
@@ -480,12 +480,12 @@ dht_send_get_peers(struct mbt_dht *d, const struct sockaddr_storage *addr, const
 	make_txn(d, txn);
 
 	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(msg, "t", txn, TXN_LEN);
-	mbt_be_dict_append_string(msg, "y", "q", 1);
-	mbt_be_dict_append_string(msg, "q", "get_peers", 9);
+	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "q", "get_peers", 9) < 0) return -ENOMEM;
 	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(a, "id", d->id, 20);
-	mbt_be_dict_append_string(a, "info_hash", infohash, 20);
+	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(a, "info_hash", infohash, 20) < 0) return -ENOMEM;
 	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
 	a = NULL;
 
@@ -506,15 +506,15 @@ dht_send_announce(struct mbt_dht *d, const struct sockaddr_storage *addr,
 	make_txn(d, txn);
 
 	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(msg, "t", txn, TXN_LEN);
-	mbt_be_dict_append_string(msg, "y", "q", 1);
-	mbt_be_dict_append_string(msg, "q", "announce_peer", 13);
+	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "q", "announce_peer", 13) < 0) return -ENOMEM;
 	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(a, "id", d->id, 20);
-	mbt_be_dict_append_string(a, "info_hash", infohash, 20);
-	mbt_be_dict_append_number(a, "port", port);
-	mbt_be_dict_append_string(a, "token", token, token_len);
-	mbt_be_dict_append_number(a, "implied_port", 0);
+	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(a, "info_hash", infohash, 20) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(a, "port", port) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(a, "token", token, token_len) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(a, "implied_port", 0) < 0) return -ENOMEM;
 	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
 	a = NULL;
 
@@ -533,11 +533,11 @@ dht_send_ping(struct mbt_dht *d, const struct sockaddr_storage *addr)
 	make_txn(d, txn);
 
 	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(msg, "t", txn, TXN_LEN);
-	mbt_be_dict_append_string(msg, "y", "q", 1);
-	mbt_be_dict_append_string(msg, "q", "ping", 4);
+	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(msg, "q", "ping", 4) < 0) return -ENOMEM;
 	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	mbt_be_dict_append_string(a, "id", d->id, 20);
+	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
 	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
 	a = NULL;
 
@@ -803,10 +803,10 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Respond to ping */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
-			mbt_be_dict_append_string(resp, "y", "r", 1);
+			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
-			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
 			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
 			rb = NULL;
 
@@ -839,14 +839,14 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			}
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
-			mbt_be_dict_append_string(resp, "y", "r", 1);
+			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
-			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
 			if (n4 > 0)
-				mbt_be_dict_append_string(rb, "nodes", compact, n4 * 26);
+				if (mbt_be_dict_append_string(rb, "nodes", compact, n4 * 26) < 0) goto out;
 			if (n6 > 0)
-				mbt_be_dict_append_string(rb, "nodes6", compact6, n6 * 38);
+				if (mbt_be_dict_append_string(rb, "nodes6", compact6, n6 * 38) < 0) goto out;
 			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
 			rb = NULL;
 			unsigned char *enc; size_t enc_len;
@@ -863,11 +863,11 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			dht_make_token(d, &from, token);
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
-			mbt_be_dict_append_string(resp, "y", "r", 1);
+			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
-			mbt_be_dict_append_string(rb, "id", d->id, 20);
-			mbt_be_dict_append_string(rb, "token", token, TOKEN_LEN);
+			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
+			if (mbt_be_dict_append_string(rb, "token", token, TOKEN_LEN) < 0) goto out;
 			/* Check stored peers */
 			int found_stored = 0;
 			for (int i = 0; i < d->stored_count; i++) {
@@ -922,9 +922,9 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 					}
 				}
 				if (cn4 > 0)
-					mbt_be_dict_append_string(rb, "nodes", compact_nodes, cn4 * 26);
+					if (mbt_be_dict_append_string(rb, "nodes", compact_nodes, cn4 * 26) < 0) goto out;
 				if (cn6 > 0)
-					mbt_be_dict_append_string(rb, "nodes6", compact_nodes6, cn6 * 38);
+					if (mbt_be_dict_append_string(rb, "nodes6", compact_nodes6, cn6 * 38) < 0) goto out;
 			}
 			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
 			rb = NULL;
@@ -942,27 +942,21 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 				goto out;
 			if (!tok_v || tok_v->type != BE_STRING ||
 			    !dht_verify_token(d, &from, tok_v->string.iov_base, tok_v->string.iov_len)) {
-				struct mbt_be_value *err = NULL, *el = NULL, *ec = NULL, *em = NULL;
+				_cleanup_be_ struct mbt_be_value *err = NULL, *el = NULL, *ec = NULL, *em = NULL;
 				if (mbt_be_dict_new(&err) < 0) goto out;
-				mbt_be_dict_append_string(err, "t", t->string.iov_base, t->string.iov_len);
-				mbt_be_dict_append_string(err, "y", "e", 1);
-				if (mbt_be_list_new(&el) < 0) { mbt_be_value_free(err); goto out; }
-				if (mbt_be_integer_new(&ec, 203) < 0 ||
-				    mbt_be_string_new(&em, (const uint8_t *)"bad token", 9) < 0) {
-					mbt_be_value_free(ec);
-					mbt_be_value_free(em);
-					mbt_be_value_free(el);
-					mbt_be_value_free(err);
-					goto out;
-				}
-				mbt_be_list_append(el, ec);
-				mbt_be_list_append(el, em);
-				mbt_be_dict_append(err, "e", el);
+				if (mbt_be_dict_append_string(err, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+				if (mbt_be_dict_append_string(err, "y", "e", 1) < 0) goto out;
+				if (mbt_be_list_new(&el) < 0) goto out;
+				if (mbt_be_integer_new(&ec, 203) < 0) goto out;
+				if (mbt_be_string_new(&em, (const uint8_t *)"bad token", 9) < 0) goto out;
+				mbt_be_list_append(el, ec); ec = NULL;
+				mbt_be_list_append(el, em); em = NULL;
+				if (mbt_be_dict_append(err, "e", el) < 0) goto out;
+				el = NULL;
 				unsigned char *enc; size_t enc_len;
-				mbt_be_value_encode(err, &enc, &enc_len);
+				if (mbt_be_value_encode(err, &enc, &enc_len) < 0) goto out;
 				dht_send(d, &from, enc, enc_len);
 				free(enc);
-				mbt_be_value_free(err);
 				goto out;
 			}
 			uint16_t from_port = (from.ss_family == AF_INET6) ?
@@ -992,10 +986,10 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Respond */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
-			mbt_be_dict_append_string(resp, "y", "r", 1);
+			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
-			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
 			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
 			rb = NULL;
 			unsigned char *enc; size_t enc_len;
@@ -1038,15 +1032,15 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			}
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
-			mbt_be_dict_append_string(resp, "y", "r", 1);
+			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
-			mbt_be_dict_append_string(rb, "id", d->id, 20);
-			mbt_be_dict_append_number(rb, "interval", 3600);
+			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
+			if (mbt_be_dict_append_number(rb, "interval", 3600) < 0) goto out;
 			if (clen > 0)
-				mbt_be_dict_append_string(rb, "nodes", compact, clen);
-			mbt_be_dict_append_number(rb, "num", d->stored_count);
-			mbt_be_dict_append_string(rb, "samples", samples, nsamp * 20);
+				if (mbt_be_dict_append_string(rb, "nodes", compact, clen) < 0) goto out;
+			if (mbt_be_dict_append_number(rb, "num", d->stored_count) < 0) goto out;
+			if (mbt_be_dict_append_string(rb, "samples", samples, nsamp * 20) < 0) goto out;
 			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
 			rb = NULL;
 			unsigned char *enc; size_t enc_len;
@@ -1061,12 +1055,12 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			struct dht_item *it = dht_item_find(d, tgt->string.iov_base);
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
-			mbt_be_dict_append_string(resp, "y", "r", 1);
+			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
-			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
 			uint8_t tok[4]; make_txn(d, tok);
-			mbt_be_dict_append_string(rb, "token", tok, 4);
+			if (mbt_be_dict_append_string(rb, "token", tok, 4) < 0) goto out;
 			struct dht_node closest[K];
 			int nc2 = routing_closest(d, tgt->string.iov_base, closest, K);
 			uint8_t cn[K * NODE_COMPACT_LEN]; int cl = 0;
@@ -1078,13 +1072,14 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 				memcpy(cn + cl + 24, &s4->sin_port, 2);
 				cl += 26;
 			}
-			if (cl > 0) mbt_be_dict_append_string(rb, "nodes", cn, cl);
+			if (cl > 0)
+				if (mbt_be_dict_append_string(rb, "nodes", cn, cl) < 0) goto out;
 			if (it) {
-				mbt_be_dict_append_string(rb, "v", it->v, it->vlen);
+				if (mbt_be_dict_append_string(rb, "v", it->v, it->vlen) < 0) goto out;
 				if (it->mutable) {
-					mbt_be_dict_append_string(rb, "k", it->k, MBT_DHT_PUBKEY_LEN);
-					mbt_be_dict_append_string(rb, "sig", it->sig, MBT_DHT_SIG_LEN);
-					mbt_be_dict_append_number(rb, "seq", it->seq);
+					if (mbt_be_dict_append_string(rb, "k", it->k, MBT_DHT_PUBKEY_LEN) < 0) goto out;
+					if (mbt_be_dict_append_string(rb, "sig", it->sig, MBT_DHT_SIG_LEN) < 0) goto out;
+					if (mbt_be_dict_append_number(rb, "seq", it->seq) < 0) goto out;
 				}
 			}
 			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
@@ -1124,10 +1119,10 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Respond */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
-			mbt_be_dict_append_string(resp, "y", "r", 1);
+			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
-			mbt_be_dict_append_string(rb, "id", d->id, 20);
+			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
 			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
 			rb = NULL;
 			unsigned char *enc; size_t enc_len;
@@ -1139,7 +1134,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	/* Ignore errors ('e') */
 
 out:
-	mbt_be_value_free(msg);
+	mbt_be_unref(msg);
 }
 
 /* --- Refresh timer --- */
