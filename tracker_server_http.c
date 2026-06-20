@@ -121,8 +121,8 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	mbt_tracker_store_add_peer(th->store, t, &peer_addr, is_seeder);
 
 	/* Build bencoded response */
-	struct mbt_be_value *resp = NULL;
-	mbt_be_dict_new(&resp);
+	_cleanup_be_ struct mbt_be_value *resp = NULL;
+	if (mbt_be_dict_new(&resp) < 0) { close(cfd); return; }
 	mbt_be_dict_append_number(resp, "interval", 120);
 
 	if (compact) {
@@ -132,8 +132,7 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	}
 
 	unsigned char *enc; size_t enc_len;
-	mbt_be_value_encode(resp, &enc, &enc_len);
-	mbt_be_value_free(resp);
+	if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) { close(cfd); return; }
 
 	/* Send HTTP response */
 	char hdr[128];

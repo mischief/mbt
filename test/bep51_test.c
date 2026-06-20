@@ -93,19 +93,19 @@ send_announce(int sock, uint16_t port, const uint8_t *ih, const uint8_t *txn,
 	uint8_t fakeid[20];
 	memset(fakeid, 0xBB, 20);
 
-	struct mbt_be_value *msg = NULL, *a = NULL;
-	mbt_be_dict_new(&msg);
+	_cleanup_be_ struct mbt_be_value *msg = NULL, *a = NULL;
+	if (mbt_be_dict_new(&msg) < 0) return;
 	mbt_be_dict_append_string(msg, "t", txn, 2);
 	mbt_be_dict_append_string(msg, "y", "q", 1);
 	mbt_be_dict_append_string(msg, "q", "announce_peer", 13);
-	mbt_be_dict_new(&a);
+	if (mbt_be_dict_new(&a) < 0) return;
 	mbt_be_dict_append_string(a, "id", fakeid, 20);
 	mbt_be_dict_append_string(a, "info_hash", ih, 20);
 	mbt_be_dict_append_number(a, "port", 6881);
 	mbt_be_dict_append_string(a, "token", token, token_len);
-	mbt_be_dict_append(msg, "a", a);
+	if (mbt_be_dict_append(msg, "a", a) < 0) return;
+	a = NULL;
 	send_msg(sock, port, msg);
-	mbt_be_value_free(msg);
 }
 
 /* Send sample_infohashes query */
@@ -116,17 +116,17 @@ send_sample(int sock, uint16_t port, const uint8_t *txn)
 	memset(fakeid, 0xCC, 20);
 	memset(target, 0, 20);
 
-	struct mbt_be_value *msg = NULL, *a = NULL;
-	mbt_be_dict_new(&msg);
+	_cleanup_be_ struct mbt_be_value *msg = NULL, *a = NULL;
+	if (mbt_be_dict_new(&msg) < 0) return;
 	mbt_be_dict_append_string(msg, "t", txn, 2);
 	mbt_be_dict_append_string(msg, "y", "q", 1);
 	mbt_be_dict_append_string(msg, "q", "sample_infohashes", 17);
-	mbt_be_dict_new(&a);
+	if (mbt_be_dict_new(&a) < 0) return;
 	mbt_be_dict_append_string(a, "id", fakeid, 20);
 	mbt_be_dict_append_string(a, "target", target, 20);
-	mbt_be_dict_append(msg, "a", a);
+	if (mbt_be_dict_append(msg, "a", a) < 0) return;
+	a = NULL;
 	send_msg(sock, port, msg);
-	mbt_be_value_free(msg);
 }
 
 int main(void)
@@ -187,7 +187,7 @@ int main(void)
 	for (int attempt = 0; attempt < 10; attempt++) {
 		ssize_t n = recvfrom(sock, buf, sizeof(buf), MSG_DONTWAIT, NULL, NULL);
 		if (n <= 0) break;
-		struct mbt_be_value *resp = NULL;
+		_cleanup_be_ struct mbt_be_value *resp = NULL;
 		int pv = mbt_be_value_parse(buf, n, &resp);
 		if (pv <= 0 || !resp) continue;
 		struct mbt_be_value *r = mbt_be_find(resp, "r");
@@ -201,11 +201,9 @@ int main(void)
 				assert(nsamp > 0);
 				assert(num && num->integer == 5);
 				found = 1;
-				mbt_be_value_free(resp);
 				break;
 			}
 		}
-		mbt_be_value_free(resp);
 	}
 	close(sock);
 	assert(found && "did not receive sample_infohashes response");

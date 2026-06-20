@@ -21,6 +21,7 @@ TAILQ_HEAD(mbt_be_value_head, mbt_be_value);
 struct mbt_be_value
 {
 	int type;
+	int n_ref;
 	struct mbt_be_value *up;
 	char *key;
 	TAILQ_ENTRY(mbt_be_value) next;
@@ -39,6 +40,12 @@ MBT_API int mbt_be_pp(struct mbt_be_value *be, void *arg);
 
 MBT_API void mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *arg), void *arg);
 MBT_API struct mbt_be_value *mbt_be_find(struct mbt_be_value *be, const char *key);
+
+MBT_API struct mbt_be_value *mbt_be_ref(struct mbt_be_value *v);
+MBT_API struct mbt_be_value *mbt_be_unref(struct mbt_be_value *v);
+MBT_API void mbt_be_unrefp(struct mbt_be_value **v);
+
+#define _cleanup_be_ __attribute__((cleanup(mbt_be_unrefp)))
 
 MBT_API int mbt_be_dict_new(struct mbt_be_value **out);
 MBT_API int mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value);

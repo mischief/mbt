@@ -35,8 +35,9 @@ be_count_depth(struct mbt_be_value *be)
 	return depth;
 }
 
-void
-mbt_be_value_free(struct mbt_be_value *v)
+/* Core free logic: walk tree and free all nodes unconditionally */
+static void
+be_value_free_impl(struct mbt_be_value *v)
 {
 	struct mbt_be_value *ov, *head;
 
@@ -71,11 +72,43 @@ mbt_be_value_free(struct mbt_be_value *v)
 	}
 }
 
+struct mbt_be_value *
+mbt_be_ref(struct mbt_be_value *v)
+{
+	if(v)
+		v->n_ref++;
+	return v;
+}
+
+struct mbt_be_value *
+mbt_be_unref(struct mbt_be_value *v)
+{
+	if(!v)
+		return NULL;
+	if(--v->n_ref <= 0)
+		be_value_free_impl(v);
+	return NULL;
+}
+
+void
+mbt_be_unrefp(struct mbt_be_value **v)
+{
+	if(*v){
+		mbt_be_unref(*v);
+		*v = NULL;
+	}
+}
+
+void
+mbt_be_value_free(struct mbt_be_value *v)
+{
+	mbt_be_unref(v);
+}
+
 void
 mbt_be_value_freep(struct mbt_be_value **v)
 {
-	if(*v)
-		mbt_be_value_free(*v);
+	mbt_be_unrefp(v);
 }
 
 static int
@@ -88,6 +121,7 @@ be_alloc(int type, struct mbt_be_value *up, struct mbt_be_value **out)
 		return -ENOMEM;
 
 	v->type = type;
+	v->n_ref = 1;
 	v->up = up;
 
 	TAILQ_INIT(&v->listhead);
@@ -483,7 +517,7 @@ mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len)
 	int rv = be_alloc(BE_STRING, NULL, out);
 	if (rv < 0) return rv;
 	(*out)->string.iov_base = malloc(len);
-	if (!(*out)->string.iov_base) { free(*out); *out = NULL; return -ENOMEM; }
+	if (!(*out)->string.iov_base) { mbt_be_value_free(*out); *out = NULL; return -ENOMEM; }
 	memcpy((*out)->string.iov_base, buf, len);
 	(*out)->string.iov_len = len;
 	return 0;
@@ -628,4 +662,3 @@ mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len)
 
 	return 0;
 }
-
