@@ -543,6 +543,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (!s->timers.dht_refresh) s->timers.dht_refresh = 900;
 	if (!s->timers.lsd_interval) s->timers.lsd_interval = 300;
 	if (!s->timers.tracker_interval) s->timers.tracker_interval = 1800;
+	if (!s->timers.connect_timeout) s->timers.connect_timeout = 10;
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->max_pieces_per_peer = cfg->max_pieces_per_peer ? cfg->max_pieces_per_peer : 4;
 	s->reqq = cfg->reqq;
@@ -1295,7 +1296,7 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	mbt_log_debug(MBT_LOG_SESSION, "pending connect registered for %s:%hu", addr, port);
 
 	/* 10s connect timeout */
-	mbt_ev_timer_new(s->ev, &pc->timeout, 20 * 1000000ULL, pending_connect_timeout, pc);
+	mbt_ev_timer_new(s->ev, &pc->timeout, (uint64_t)s->timers.connect_timeout * 1000000ULL, pending_connect_timeout, pc);
 
 	STAILQ_INSERT_TAIL(&s->pending, pc, next);
 	return 0;

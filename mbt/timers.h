@@ -13,6 +13,7 @@ struct mbt_timers {
 	int dht_refresh;         /* default 900 (15 min) */
 	int lsd_interval;        /* default 300 (5 min) */
 	int tracker_interval;    /* default 1800 (30 min) */
+	int connect_timeout;     /* default 10 */
 };
 
 #endif
