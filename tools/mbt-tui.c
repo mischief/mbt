@@ -228,7 +228,8 @@ draw_detail(void)
 			if (ps.snubbed) flags[fi++] = 'S';
 			flags[fi] = 0;
 			char endpoint[64];
-			snprintf(endpoint, sizeof(endpoint), "%s:%hu", ps.addr, ps.port);
+			uint16_t disp_port = ps.port ? ps.port : ps.conn_port;
+			snprintf(endpoint, sizeof(endpoint), "%s:%hu", ps.addr, disp_port);
 			char down[16], up[16];
 			if (ps.downloaded >= 1024*1024)
 				snprintf(down, sizeof(down), "%.1fM", ps.downloaded / (1024.0*1024));

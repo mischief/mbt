@@ -949,12 +949,12 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			mbt_ev_timer_new(t->ev, &t->ratelimit_timer, d, torrent_ratelimit_retry, t);
 		return;
 	}
-	int limit = 64; /* default pipeline — keeps memory bounded */
+	int limit = 64; /* default pipeline depth */
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0)
 		limit = peer_limit;
-	if (limit > 4096)
-		limit = 4096;
+	if (limit > 250)
+		limit = 250;
 
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
@@ -1620,6 +1620,7 @@ mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *ou
 		if (i == idx) {
 			out->addr = mbt_peer_addr(tp->peer);
 			out->port = mbt_peer_port(tp->peer);
+			out->conn_port = mbt_peer_conn_port(tp->peer);
 			out->choked = mbt_peer_choked(tp->peer);
 			out->interested = mbt_peer_interested(tp->peer);
 			out->snubbed = tp->snubbed;

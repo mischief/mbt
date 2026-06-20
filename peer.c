@@ -924,6 +924,12 @@ mbt_peer_port(struct mbt_peer *p)
 	return p->listen_port;
 }
 
+uint16_t
+mbt_peer_conn_port(struct mbt_peer *p)
+{
+	return p->conn_port;
+}
+
 const char *
 mbt_peer_version(struct mbt_peer *p)
 {
