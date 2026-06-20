@@ -953,8 +953,8 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0)
 		limit = peer_limit;
-	if (limit > 250)
-		limit = 250;
+	if (limit > 4096)
+		limit = 4096;
 
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
