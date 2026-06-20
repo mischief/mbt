@@ -181,21 +181,22 @@ static int
 peer_send_extension_handshake(struct mbt_peer *p)
 {
 	_cleanup_be_ struct mbt_be_value *be = NULL;
-	struct mbt_be_value *m = NULL;
 	unsigned char *encoded;
 	unsigned char packed[64];
 	size_t sz;
 	int rv;
 
-	mbt_be_dict_new(&be);
-	mbt_be_dict_new(&m);
-	mbt_be_dict_append(be, "m", m);
-	mbt_be_dict_append_number(m, "ut_metadata", 3);
-	mbt_be_dict_append_number(m, "ut_pex", 4);
+	_cleanup_be_ struct mbt_be_value *m = NULL;
+	if (mbt_be_dict_new(&be) < 0) return -ENOMEM;
+	if (mbt_be_dict_new(&m) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(m, "ut_metadata", 3) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(m, "ut_pex", 4) < 0) return -ENOMEM;
+	if (mbt_be_dict_append(be, "m", m) < 0) return -ENOMEM;
+	m = NULL;
 	if (p->our_metadata_size > 0)
-		mbt_be_dict_append_number(be, "metadata_size", (int64_t)p->our_metadata_size);
+		if (mbt_be_dict_append_number(be, "metadata_size", (int64_t)p->our_metadata_size) < 0) return -ENOMEM;
 	if (p->our_reqq > 0)
-		mbt_be_dict_append_number(be, "reqq", p->our_reqq);
+		if (mbt_be_dict_append_number(be, "reqq", p->our_reqq) < 0) return -ENOMEM;
 
 	rv = mbt_be_value_encode(be, &encoded, &sz);
 	if (rv < 0)
@@ -1001,9 +1002,9 @@ mbt_peer_send_metadata_request(struct mbt_peer *p, int piece)
 	if (!p->ut_metadata_id)
 		return -ENOTSUP;
 
-	mbt_be_dict_new(&v);
-	mbt_be_dict_append_number(v, "msg_type", 0);
-	mbt_be_dict_append_number(v, "piece", piece);
+	if (mbt_be_dict_new(&v) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(v, "msg_type", 0) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(v, "piece", piece) < 0) return -ENOMEM;
 
 	rv = mbt_be_value_encode(v, &encoded, &sz);
 	if (rv < 0)
@@ -1029,10 +1030,10 @@ mbt_peer_send_metadata_data(struct mbt_peer *p, int piece, size_t total_size,
 	if (!p->ut_metadata_id)
 		return -ENOTSUP;
 
-	mbt_be_dict_new(&v);
-	mbt_be_dict_append_number(v, "msg_type", 1);
-	mbt_be_dict_append_number(v, "piece", piece);
-	mbt_be_dict_append_number(v, "total_size", (int64_t)total_size);
+	if (mbt_be_dict_new(&v) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(v, "msg_type", 1) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(v, "piece", piece) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(v, "total_size", (int64_t)total_size) < 0) return -ENOMEM;
 
 	rv = mbt_be_value_encode(v, &encoded, &sz);
 	if (rv < 0)

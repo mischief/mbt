@@ -143,7 +143,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 	if (rv <= 0) { mbt_metainfo_free(mi); return -EINVAL; }
 
 	struct mbt_be_value *info = mbt_be_find(be, "info");
-	if (!info) { mbt_be_value_free(be); mbt_metainfo_free(mi); return -EINVAL; }
+	if (!info) { mbt_be_unref(be); mbt_metainfo_free(mi); return -EINVAL; }
 
 	/* Name */
 	struct mbt_be_value *v = mbt_be_find(info, "name");
@@ -249,7 +249,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 		}
 	}
 
-	mbt_be_value_free(be);
+	mbt_be_unref(be);
 	*out = mi;
 	return 0;
 }
@@ -449,7 +449,7 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 
 	/* Trackers */
 	if (mi->tracker_count > 0)
-		mbt_be_dict_append_string(root, "announce", mi->trackers[0], strlen(mi->trackers[0]));
+		if (mbt_be_dict_append_string(root, "announce", mi->trackers[0], strlen(mi->trackers[0])) < 0) return -ENOMEM;
 	if (mi->tracker_count > 1) {
 		_cleanup_be_ struct mbt_be_value *al = NULL, *tier = NULL;
 		if (mbt_be_list_new(&al) < 0) return -ENOMEM;
@@ -467,19 +467,19 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 	}
 
 	if (mi->comment)
-		mbt_be_dict_append_string(root, "comment", mi->comment, strlen(mi->comment));
+		if (mbt_be_dict_append_string(root, "comment", mi->comment, strlen(mi->comment)) < 0) return -ENOMEM;
 
 	/* Info dict */
 	if (mbt_be_dict_new(&info) < 0) return -ENOMEM;
 	if (mi->file_count == 1) {
-		mbt_be_dict_append_number(info, "length", mi->total_length);
+		if (mbt_be_dict_append_number(info, "length", mi->total_length) < 0) return -ENOMEM;
 	} else {
 		_cleanup_be_ struct mbt_be_value *flist = NULL;
 		if (mbt_be_list_new(&flist) < 0) return -ENOMEM;
 		for (int i = 0; i < mi->file_count; i++) {
 			_cleanup_be_ struct mbt_be_value *fd = NULL, *plist = NULL;
 			if (mbt_be_dict_new(&fd) < 0) return -ENOMEM;
-			mbt_be_dict_append_number(fd, "length", mi->files[i].length);
+			if (mbt_be_dict_append_number(fd, "length", mi->files[i].length) < 0) return -ENOMEM;
 			if (mbt_be_list_new(&plist) < 0) return -ENOMEM;
 			char *p = strdup(mi->files[i].path);
 			if (!p) return -ENOMEM;
@@ -500,12 +500,12 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 		flist = NULL;
 	}
 
-	mbt_be_dict_append_string(info, "name", mi->name, strlen(mi->name));
-	mbt_be_dict_append_number(info, "piece length", mi->piece_length);
-	mbt_be_dict_append_string(info, "pieces", mi->pieces, mi->piece_count * 20);
+	if (mbt_be_dict_append_string(info, "name", mi->name, strlen(mi->name)) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(info, "piece length", mi->piece_length) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_string(info, "pieces", mi->pieces, mi->piece_count * 20) < 0) return -ENOMEM;
 
 	if (mi->is_private)
-		mbt_be_dict_append_number(info, "private", 1);
+		if (mbt_be_dict_append_number(info, "private", 1) < 0) return -ENOMEM;
 
 	/* Encode info dict separately to compute infohash (before append sets key) */
 	if (!mi->raw_info) {
