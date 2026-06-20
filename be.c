@@ -35,7 +35,7 @@ be_count_depth(struct mbt_be_value *be)
 	return depth;
 }
 
-/* Core free logic: walk tree and free all nodes unconditionally */
+/* Core free logic: walk tree, respecting refcounts on children */
 static void
 be_value_free_impl(struct mbt_be_value *v)
 {
@@ -54,6 +54,11 @@ be_value_free_impl(struct mbt_be_value *v)
 			head = TAILQ_FIRST(&v->listhead);
 			if(head){
 				TAILQ_REMOVE(&v->listhead, head, next);
+				if(--head->n_ref > 0){
+					/* still referenced elsewhere; detach and skip */
+					head->up = NULL;
+					continue;
+				}
 				v = head;
 				continue;
 			}
@@ -224,6 +229,7 @@ be_insert(struct mbt_be_value *v, struct mbt_be_value *val)
 		TAILQ_INSERT_TAIL(&v->listhead, val, next);
 	}
 	val->up = v;
+	mbt_be_ref(val); /* parent claims a ref */
 }
 
 static int
@@ -247,6 +253,7 @@ be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct mbt_b
 		}
 
 		be_insert(v, inner);
+		mbt_be_unref(inner); /* drop creator ref; parent holds its own */
 		p += rv;
 		chr += rv;
 	}
@@ -308,6 +315,7 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 		mbt_be_unref(key);
 
 		be_insert(v, inner);
+		mbt_be_unref(inner); /* drop creator ref; parent holds its own */
 		p += rv;
 		chr += rv;
 	}
@@ -477,12 +485,8 @@ mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num)
 	v->integer = num;
 
 	rv = mbt_be_dict_append(dict, key, v);
-	if(rv < 0){
-		free(v);
-		return rv;
-	}
-
-	return 0;
+	mbt_be_unref(v); /* drop creator ref; parent holds its own */
+	return rv;
 }
 
 int
@@ -492,12 +496,12 @@ mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf,
 	int rv = be_alloc(BE_STRING, dict, &v);
 	if (rv < 0) return rv;
 	v->string.iov_base = malloc(len);
-	if (!v->string.iov_base) { free(v); return -ENOMEM; }
+	if (!v->string.iov_base) { mbt_be_unref(v); return -ENOMEM; }
 	memcpy(v->string.iov_base, buf, len);
 	v->string.iov_len = len;
 	rv = mbt_be_dict_append(dict, key, v);
-	if (rv < 0) { free(v->string.iov_base); free(v); return rv; }
-	return 0;
+	mbt_be_unref(v); /* drop creator ref; parent holds its own */
+	return rv;
 }
 
 int

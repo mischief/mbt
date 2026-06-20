@@ -78,9 +78,12 @@ is a
 wrapper suitable for use with
 .Dv _cleanup_be_ :
 .Bd -literal
-_cleanup_be_ struct mbt_be_value *msg = NULL;
+_cleanup_be_ struct mbt_be_value *msg = NULL, *m = NULL;
 if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-/* msg is freed automatically on any return path */
+if (mbt_be_dict_new(&m) < 0) return -ENOMEM;
+if (mbt_be_dict_append_number(m, "ut_pex", 4) < 0) return -ENOMEM;
+if (mbt_be_dict_append(msg, "m", m) < 0) return -ENOMEM;
+/* both msg and m are freed automatically; no = NULL needed after append */
 .Ed
 .Sh CONSTRUCTION
 To create bencoded data, use the following factory functions:
@@ -106,7 +109,15 @@ Once structures are created, they can be populated:
 .It .Fn mbt_be_dict_append
 Appends a previously created
 .Vt mbt_be_value
-to a dictionary using the provided key.
+to a dictionary under the given key.
+The dictionary increments the reference count of
+.Fa value ,
+so the caller retains its own reference and need not null out the pointer.
+When the caller holds a
+.Dv _cleanup_be_
+variable, no
+.Dv = NULL
+is required after the append.
 .El
 .Bl -tag -width 12
 .It .Fn mbt_be_dict_append_number
@@ -118,7 +129,10 @@ Appends raw bytes as a string to a dictionary with the given key.
 .El
 .Bl -tag -width 12
 .It .Fn mbt_be_list_append
-Adds a value to the end of the specified list.
+Adds a value to the end of a list.
+The list increments the reference count of
+.Fa val ;
+the caller retains its own reference.
 .El
 .Sh TRAVERSAL AND INSPECTION
 .Fn mbt_be_find
