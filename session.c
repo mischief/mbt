@@ -46,6 +46,7 @@ struct session_torrent {
 	time_t last_dht_lookup;
 	time_t last_dht_announce;
 	int completed_announced; /* sent event=completed to tracker */
+	int emergency_reannounce; /* fired one early reannounce due to dry peerdb */
 	STAILQ_ENTRY(session_torrent) next;
 };
 
@@ -220,10 +221,13 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 			mbt_session_add_peer(s, st->ih, pe->addr, pe->port, pe->source);
 		}
 
-		/* Peerdb exhausted and no active peers — re-announce soon */
+		/* Peerdb exhausted and no active peers — fire one early re-announce */
 		if (need_peers && mbt_torrent_peer_count(st->torrent) == 0 &&
-		    !mbt_torrent_complete(st->torrent) && st->reannounce_timer)
+		    !mbt_torrent_complete(st->torrent) && st->reannounce_timer &&
+		    !st->emergency_reannounce) {
+			st->emergency_reannounce = 1;
 			mbt_ev_timer_mod(st->reannounce_timer, 5 * 1000000ULL);
+		}
 
 		/* Announce event=completed once when torrent finishes */
 		if (mbt_torrent_complete(st->torrent) && !st->completed_announced &&
@@ -925,6 +929,8 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 
 	/* Schedule re-announce */
 	struct session_torrent *st = session_find(s, ih);
+	if (st)
+		st->emergency_reannounce = 0; /* fresh peers — allow one more emergency if needed */
 	if (st && interval > 0) {
 		/* Use configured interval if shorter than server's */
 		if (s->timers.tracker_interval > 0 && s->timers.tracker_interval < interval)
