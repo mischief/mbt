@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <errno.h>
 #include "mbt/peer_source.h"
@@ -261,7 +262,9 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 	tmp = mbt_be_find(be, "v");
 	if (tmp && tmp->type == BE_STRING && tmp->string.iov_len > 0) {
 		size_t n = MIN(tmp->string.iov_len, sizeof(p->client_version) - 1);
-		memcpy(p->client_version, tmp->string.iov_base, n);
+		const unsigned char *src = tmp->string.iov_base;
+		for (size_t i = 0; i < n; i++)
+			p->client_version[i] = isprint(src[i]) ? (char)src[i] : '?';
 		p->client_version[n] = '\0';
 	}
 
