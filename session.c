@@ -101,6 +101,7 @@ struct mbt_session {
 	struct mbt_ev_timer *pcp_retry_timer;
 	const char *pcp_gateway;
 	int enable_pcp;
+	char external_addr[INET6_ADDRSTRLEN]; /* our external IP from PCP, empty if unknown */
 	/* Listen socket */
 	struct mbt_listener listener;
 
@@ -138,6 +139,7 @@ session_pcp_on_map(const char *addr, uint16_t port, uint32_t lifetime, void *arg
 	struct mbt_session *s = arg;
 	(void)lifetime;
 	mbt_log_info(MBT_LOG_SESSION, "PCP: external %s:%hu", addr, port);
+	snprintf(s->external_addr, sizeof(s->external_addr), "%s", addr);
 	/* Success — cancel retry timer */
 	if (s->pcp_retry_timer) {
 		mbt_ev_timer_free(s->pcp_retry_timer);
@@ -1242,6 +1244,10 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 			pending++;
 	}
 	if (mbt_torrent_peer_count(st->torrent) + pending >= s->max_peers)
+		return 0;
+
+	/* Skip self-connect (our own external address via PCP) */
+	if (s->external_addr[0] && strcmp(addr, s->external_addr) == 0 && port == s->listen_port)
 		return 0;
 
 	/* Skip if already connected or connecting to this address */
