@@ -967,9 +967,9 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 					idx = i;
 			}
 		}
-		/* Cap pieces assigned to this peer */
+		/* Don't pick a new piece if already at cap; finish requesting existing ones */
 		int max_pp = t->max_pieces_per_peer ? t->max_pieces_per_peer : 4;
-		if (owns_active >= max_pp)
+		if (idx < 0 && owns_active >= max_pp)
 			break;
 		/* If no existing piece, pick a new one */
 		if (idx < 0)
