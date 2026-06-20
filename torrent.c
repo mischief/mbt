@@ -977,8 +977,9 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		if (idx < 0)
 			idx = t->picker(t, tp->peer, t->picker_ctx);
 		if (idx < 0) {
-			mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: picker returned -1 (bf=%p have=%u/%u)",
-			              (void*)mbt_peer_bitfield(tp->peer), t->have_count, t->piece_count);
+			if (mbt_peer_bitfield(tp->peer))
+				mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: picker returned -1 (have=%u/%u)",
+				              t->have_count, t->piece_count);
 			/* Check if we should enter endgame */
 			if (!t->endgame && t->piece_count > 0) {
 				uint32_t remaining = t->piece_count - t->have_count;
