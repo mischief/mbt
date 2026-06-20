@@ -258,6 +258,24 @@ static void session_generate_peer_id(uint8_t *id);
 /* --- Pending connect handler --- */
 
 static void
+pending_connect_mark_failed(struct pending_connect *pc)
+{
+	struct mbt_session *s = pc->session;
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (st->torrent != pc->torrent)
+			continue;
+		struct mbt_peer_entry *pe = mbt_peerdb_find(
+			mbt_torrent_peerdb(st->torrent), pc->addr, pc->port);
+		if (pe) {
+			pe->state = MBT_PEERDB_FAILED;
+			pe->failures++;
+		}
+		break;
+	}
+}
+
+static void
 pending_connect_timeout(struct mbt_ev_timer *timer, void *v)
 {
 	struct pending_connect *pc = v;
@@ -270,6 +288,7 @@ pending_connect_timeout(struct mbt_ev_timer *timer, void *v)
 	mbt_ev_timer_free(pc->timeout);
 	pc->timeout = NULL;
 	close(pc->fd);
+	pending_connect_mark_failed(pc);
 	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
 	free(pc);
 }
@@ -328,6 +347,7 @@ fail:
 		mbt_ev_io_free(pc->io);
 	if (pc->timeout)
 		mbt_ev_timer_free(pc->timeout);
+	pending_connect_mark_failed(pc);
 	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
 	free(pc);
 }
