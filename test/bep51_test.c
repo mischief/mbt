@@ -39,9 +39,56 @@ send_msg(int sock, uint16_t port, struct mbt_be_value *msg)
 	free(enc);
 }
 
+/* Send get_peers, run the event loop once to let DHT respond, return token (caller frees) */
+static uint8_t *
+get_token(int sock, uint16_t port, const uint8_t *ih, size_t *token_len_out)
+{
+	uint8_t fakeid[20];
+	memset(fakeid, 0xBB, 20);
+	uint8_t txn[2] = { 'g', '0' };
+
+	struct mbt_be_value *msg = NULL, *a = NULL;
+	mbt_be_dict_new(&msg);
+	mbt_be_dict_append_string(msg, "t", txn, 2);
+	mbt_be_dict_append_string(msg, "y", "q", 1);
+	mbt_be_dict_append_string(msg, "q", "get_peers", 9);
+	mbt_be_dict_new(&a);
+	mbt_be_dict_append_string(a, "id", fakeid, 20);
+	mbt_be_dict_append_string(a, "info_hash", ih, 20);
+	mbt_be_dict_append(msg, "a", a);
+	send_msg(sock, port, msg);
+	mbt_be_value_free(msg);
+
+	/* Run event loop so DHT processes the query and sends the response */
+	struct mbt_ev_timer *t;
+	mbt_ev_timer_new(ev, &t, 100000, tick_cb, NULL);
+	mbt_ev_run(ev);
+	mbt_ev_timer_free(t);
+	ticks = 0;
+
+	uint8_t buf[4096];
+	ssize_t n = recvfrom(sock, buf, sizeof(buf), MSG_DONTWAIT, NULL, NULL);
+	if (n <= 0) return NULL;
+	struct mbt_be_value *resp = NULL;
+	if (mbt_be_value_parse(buf, n, &resp) <= 0) return NULL;
+	struct mbt_be_value *r = mbt_be_find(resp, "r");
+	struct mbt_be_value *tok = r ? mbt_be_find(r, "token") : NULL;
+	uint8_t *token = NULL;
+	if (tok && tok->type == BE_STRING) {
+		token = malloc(tok->string.iov_len);
+		if (token) {
+			memcpy(token, tok->string.iov_base, tok->string.iov_len);
+			*token_len_out = tok->string.iov_len;
+		}
+	}
+	mbt_be_value_free(resp);
+	return token;
+}
+
 /* Send announce_peer for a given infohash */
 static void
-send_announce(int sock, uint16_t port, const uint8_t *ih, const uint8_t *txn)
+send_announce(int sock, uint16_t port, const uint8_t *ih, const uint8_t *txn,
+              const uint8_t *token, size_t token_len)
 {
 	uint8_t fakeid[20];
 	memset(fakeid, 0xBB, 20);
@@ -55,6 +102,7 @@ send_announce(int sock, uint16_t port, const uint8_t *ih, const uint8_t *txn)
 	mbt_be_dict_append_string(a, "id", fakeid, 20);
 	mbt_be_dict_append_string(a, "info_hash", ih, 20);
 	mbt_be_dict_append_number(a, "port", 6881);
+	mbt_be_dict_append_string(a, "token", token, token_len);
 	mbt_be_dict_append(msg, "a", a);
 	send_msg(sock, port, msg);
 	mbt_be_value_free(msg);
@@ -97,13 +145,20 @@ int main(void)
 	struct sockaddr_in bind_addr = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
 	bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr));
 
+	/* Get a token via get_peers (token is IP-based, one suffices for all announces) */
+	uint8_t dummy_ih[20] = {0};
+	size_t token_len = 0;
+	uint8_t *token = get_token(sock, port, dummy_ih, &token_len);
+	assert(token && token_len > 0);
+
 	/* Store 5 infohashes via announce_peer */
 	uint8_t hashes[5][20];
 	for (int i = 0; i < 5; i++) {
 		memset(hashes[i], i + 1, 20);
 		uint8_t txn[2] = { 'a', (uint8_t)i };
-		send_announce(sock, port, hashes[i], txn);
+		send_announce(sock, port, hashes[i], txn, token, token_len);
 	}
+	free(token);
 
 	/* Run event loop to process announces */
 	struct mbt_ev_timer *t;

@@ -135,6 +135,13 @@ struct mbt_dht {
 	/* Refresh timer */
 	struct mbt_ev_timer *refresh_timer;
 
+	/* Token secrets: rotate every 5 min, accept tokens from either */
+#define TOKEN_SECRET_LEN 8
+#define TOKEN_ROTATE_US  (5 * 60 * 1000000ULL)
+	uint8_t token_secret[TOKEN_SECRET_LEN];
+	uint8_t token_secret_prev[TOKEN_SECRET_LEN];
+	struct mbt_ev_timer *token_timer;
+
 	/* Query rate limit (messages/sec as bytes, 1 msg = 1 token) */
 	struct mbt_ratelimit *send_limit;
 
@@ -224,6 +231,52 @@ make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 {
 	uint32_t t = ++d->txn_counter;
 	memcpy(txn, &t, TXN_LEN);
+}
+
+/* Compute token = first TOKEN_LEN bytes of SHA1(secret || IP bytes) */
+static void
+make_token_with_secret(const uint8_t *secret, const struct sockaddr_storage *sa,
+                       uint8_t out[TOKEN_LEN])
+{
+	SHA1_CTX ctx;
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, secret, TOKEN_SECRET_LEN);
+	if (sa->ss_family == AF_INET6) {
+		SHA1Update(&ctx, (const uint8_t *)&((const struct sockaddr_in6 *)sa)->sin6_addr, 16);
+	} else {
+		SHA1Update(&ctx, (const uint8_t *)&((const struct sockaddr_in *)sa)->sin_addr, 4);
+	}
+	uint8_t digest[20];
+	SHA1Final(digest, &ctx);
+	memcpy(out, digest, TOKEN_LEN);
+}
+
+static void
+dht_make_token(struct mbt_dht *d, const struct sockaddr_storage *sa, uint8_t out[TOKEN_LEN])
+{
+	make_token_with_secret(d->token_secret, sa, out);
+}
+
+/* Returns 1 if token matches current or previous secret */
+static int
+dht_verify_token(struct mbt_dht *d, const struct sockaddr_storage *sa,
+                 const uint8_t *token, size_t token_len)
+{
+	if (token_len != TOKEN_LEN) return 0;
+	uint8_t expected[TOKEN_LEN];
+	make_token_with_secret(d->token_secret, sa, expected);
+	if (memcmp(expected, token, TOKEN_LEN) == 0) return 1;
+	make_token_with_secret(d->token_secret_prev, sa, expected);
+	return memcmp(expected, token, TOKEN_LEN) == 0;
+}
+
+static void
+dht_token_rotate_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_dht *d = v;
+	memcpy(d->token_secret_prev, d->token_secret, TOKEN_SECRET_LEN);
+	random_bytes(d->token_secret, TOKEN_SECRET_LEN);
+	mbt_ev_timer_mod(timer, TOKEN_ROTATE_US);
 }
 
 /* --- Routing table (split-bucket) --- */
@@ -806,14 +859,15 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
 			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
 				goto out;
-			uint8_t token[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+			uint8_t token[TOKEN_LEN];
+			dht_make_token(d, &from, token);
 			struct mbt_be_value *resp = NULL, *rb = NULL;
 			mbt_be_dict_new(&resp);
 			mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len);
 			mbt_be_dict_append_string(resp, "y", "r", 1);
 			mbt_be_dict_new(&rb);
 			mbt_be_dict_append_string(rb, "id", d->id, 20);
-			mbt_be_dict_append_string(rb, "token", token, 4);
+			mbt_be_dict_append_string(rb, "token", token, TOKEN_LEN);
 			/* Check stored peers */
 			int found_stored = 0;
 			for (int i = 0; i < d->stored_count; i++) {
@@ -880,8 +934,34 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Store the announcing peer */
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
 			struct mbt_be_value *port_v = mbt_be_find(a, "port");
+			struct mbt_be_value *tok_v = mbt_be_find(a, "token");
 			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
 				goto out;
+			if (!tok_v || tok_v->type != BE_STRING ||
+			    !dht_verify_token(d, &from, tok_v->string.iov_base, tok_v->string.iov_len)) {
+				struct mbt_be_value *err = NULL, *el = NULL, *ec = NULL, *em = NULL;
+				if (mbt_be_dict_new(&err) < 0) goto out;
+				mbt_be_dict_append_string(err, "t", t->string.iov_base, t->string.iov_len);
+				mbt_be_dict_append_string(err, "y", "e", 1);
+				if (mbt_be_list_new(&el) < 0) { mbt_be_value_free(err); goto out; }
+				if (mbt_be_integer_new(&ec, 203) < 0 ||
+				    mbt_be_string_new(&em, (const uint8_t *)"bad token", 9) < 0) {
+					mbt_be_value_free(ec);
+					mbt_be_value_free(em);
+					mbt_be_value_free(el);
+					mbt_be_value_free(err);
+					goto out;
+				}
+				mbt_be_list_append(el, ec);
+				mbt_be_list_append(el, em);
+				mbt_be_dict_append(err, "e", el);
+				unsigned char *enc; size_t enc_len;
+				mbt_be_value_encode(err, &enc, &enc_len);
+				dht_send(d, &from, enc, enc_len);
+				free(enc);
+				mbt_be_value_free(err);
+				goto out;
+			}
 			uint16_t from_port = (from.ss_family == AF_INET6) ?
 				ntohs(((struct sockaddr_in6 *)&from)->sin6_port) :
 				ntohs(((struct sockaddr_in *)&from)->sin_port);
@@ -1140,6 +1220,11 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	/* Refresh timer — first fire at 5s to populate routing table quickly */
 	mbt_ev_timer_new(ev, &d->refresh_timer, 5 * 1000000ULL, dht_refresh_cb, d);
 
+	/* Token secrets */
+	random_bytes(d->token_secret, TOKEN_SECRET_LEN);
+	random_bytes(d->token_secret_prev, TOKEN_SECRET_LEN);
+	mbt_ev_timer_new(ev, &d->token_timer, TOKEN_ROTATE_US, dht_token_rotate_cb, d);
+
 	/* Rate limit: 20 queries/sec, burst of 40 */
 	mbt_ratelimit_new(&d->send_limit, 20, 40);
 
@@ -1159,6 +1244,7 @@ mbt_dht_free(struct mbt_dht *d)
 		if (d->lookups[i].timer)
 			mbt_ev_timer_free(d->lookups[i].timer);
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
+	if (d->token_timer) mbt_ev_timer_free(d->token_timer);
 	for (int i = 0; i < DHT_MAX_ITEMS; i++)
 		free(d->items[i].v);
 	/* Free routing table */
