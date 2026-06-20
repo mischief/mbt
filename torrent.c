@@ -213,11 +213,13 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		SLIST_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
-			if (tp->outstanding > 0 &&
+			if ((tp->outstanding > 0 || mbt_peer_choked(tp->peer)) &&
+			    tp->last_recv > 0 &&
 			    now_t - tp->last_recv >= t->timers.snub_timeout) {
 				tp->snubbed = 1;
-				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: snubbed (no data for %ds)",
-				              mbt_peer_addr(tp->peer), mbt_peer_port(tp->peer),
+				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: snubbed (%s, no data for %ds)",
+				              mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer),
+				              mbt_peer_choked(tp->peer) ? "choked" : "no response",
 				              t->timers.snub_timeout);
 			}
 		}
