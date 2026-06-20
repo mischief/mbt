@@ -208,14 +208,22 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		/* Refill peers from peerdb if below cap */
+		int need_peers = 0;
 		while (mbt_torrent_peer_count(st->torrent) +
 		       mbt_peerdb_count(mbt_torrent_peerdb(st->torrent), MBT_PEERDB_CONNECTING) < s->max_peers) {
 			struct mbt_peer_entry *pe = mbt_peerdb_select(mbt_torrent_peerdb(st->torrent));
-			if (!pe)
+			if (!pe) {
+				need_peers = 1;
 				break;
+			}
 			pe->state = MBT_PEERDB_CONNECTING;
 			mbt_session_add_peer(s, st->ih, pe->addr, pe->port, pe->source);
 		}
+
+		/* Peerdb exhausted and no active peers — re-announce soon */
+		if (need_peers && mbt_torrent_peer_count(st->torrent) == 0 &&
+		    !mbt_torrent_complete(st->torrent) && st->reannounce_timer)
+			mbt_ev_timer_mod(st->reannounce_timer, 5 * 1000000ULL);
 
 		/* Announce event=completed once when torrent finishes */
 		if (mbt_torrent_complete(st->torrent) && !st->completed_announced &&
