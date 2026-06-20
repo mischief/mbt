@@ -962,16 +962,14 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		int owns_active = 0;
 		for (uint32_t i = 0; i < t->piece_count; i++) {
 			if (t->pieces[i].owner == tp && t->pieces[i].state == MBT_PIECE_ACTIVE) {
-				if (t->pieces[i].requested < t->pieces[i].length) {
-					idx = i;
-					break;
-				}
 				owns_active++;
+				if (t->pieces[i].requested < t->pieces[i].length && idx < 0)
+					idx = i;
 			}
 		}
-		/* If peer has max active pieces all fully-requested, wait */
+		/* Cap pieces assigned to this peer */
 		int max_pp = t->max_pieces_per_peer ? t->max_pieces_per_peer : 4;
-		if (idx < 0 && owns_active >= max_pp)
+		if (owns_active >= max_pp)
 			break;
 		/* If no existing piece, pick a new one */
 		if (idx < 0)
