@@ -83,14 +83,15 @@ mbt_peerdb_select(struct mbt_peerdb *db)
 		if (e->state == MBT_PEERDB_BANNED)
 			continue;
 
-		/* Don't retry too quickly (backoff: 30s after failure) */
-		if (e->state == MBT_PEERDB_FAILED && e->last_attempt > 0 &&
-		    now - e->last_attempt < 30 * 1000000ULL)
-			continue;
-
-		/* Don't retry too many failures */
-		if (e->failures >= 3)
-			continue;
+		/* Exponential backoff: 30s, 2m, 10m, 30m, 1h, 1h, ... */
+		if (e->state == MBT_PEERDB_FAILED && e->last_attempt > 0) {
+			static const uint64_t backoff[] = {
+				30, 120, 600, 1800, 3600,
+			};
+			int idx = e->failures < 5 ? e->failures : 4;
+			if (now - e->last_attempt < backoff[idx] * 1000000ULL)
+				continue;
+		}
 
 		/* Prefer most recently seen */
 		if (!best || e->last_seen > best->last_seen)
