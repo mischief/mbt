@@ -273,10 +273,10 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 
 	unsigned char *enc; size_t enc_len;
 	if (mbt_be_value_encode(msg, &enc, &enc_len) < 0) {
-		mbt_be_value_free(msg);
+		mbt_be_unref(msg);
 		goto done;
 	}
-	mbt_be_value_free(msg);
+	mbt_be_unref(msg);
 
 	/* Send to all peers that support ut_pex (ext id 4 = our local id) */
 	unsigned char *pex_msg = malloc(2 + enc_len);
@@ -1168,7 +1168,7 @@ mbt_torrent_peerdb(struct mbt_torrent *t)
 int
 mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 {
-	__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *be = NULL;
+	_cleanup_be_ struct mbt_be_value *be = NULL;
 	struct mbt_be_value *tmp;
 	int rv;
 

@@ -180,7 +180,7 @@ peer_recv_handshake(struct mbt_peer *p)
 static int
 peer_send_extension_handshake(struct mbt_peer *p)
 {
-	__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *be = NULL;
+	_cleanup_be_ struct mbt_be_value *be = NULL;
 	struct mbt_be_value *m = NULL;
 	unsigned char *encoded;
 	unsigned char packed[64];
@@ -213,7 +213,7 @@ static int
 peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 {
 	unsigned char buf[1024];
-	__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *be = NULL;
+	_cleanup_be_ struct mbt_be_value *be = NULL;
 	struct mbt_be_value *tmp;
 	ssize_t rd;
 	int rv;
@@ -377,7 +377,7 @@ peer_rx_message(struct mbt_peer *p)
 			if (!mbuf) return -ENOMEM;
 			sz = mbt_conn_read(p->conn, mbuf, p->msglen);
 
-			__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *be = NULL;
+			_cleanup_be_ struct mbt_be_value *be = NULL;
 			rv = mbt_be_value_parse(mbuf, sz, &be);
 			if (rv > 0) {
 				struct mbt_be_value *mt = mbt_be_find(be, "msg_type");
@@ -403,7 +403,7 @@ peer_rx_message(struct mbt_peer *p)
 			if (!pbuf) return -ENOMEM;
 			sz = mbt_conn_read(p->conn, pbuf, p->msglen);
 
-			__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *be = NULL;
+			_cleanup_be_ struct mbt_be_value *be = NULL;
 			rv = mbt_be_value_parse(pbuf, sz, &be);
 			if (rv > 0) {
 				struct mbt_be_value *added = mbt_be_find(be, "added");
@@ -992,7 +992,7 @@ mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 int
 mbt_peer_send_metadata_request(struct mbt_peer *p, int piece)
 {
-	__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *v = NULL;
+	_cleanup_be_ struct mbt_be_value *v = NULL;
 	unsigned char *encoded;
 	unsigned char packed[64];
 	size_t sz;
@@ -1021,7 +1021,7 @@ int
 mbt_peer_send_metadata_data(struct mbt_peer *p, int piece, size_t total_size,
                             const void *data, size_t len)
 {
-	__attribute__((cleanup(mbt_be_value_freep))) struct mbt_be_value *v = NULL;
+	_cleanup_be_ struct mbt_be_value *v = NULL;
 	unsigned char *encoded;
 	size_t sz;
 	int rv;

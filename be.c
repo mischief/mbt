@@ -99,17 +99,6 @@ mbt_be_unrefp(struct mbt_be_value **v)
 	}
 }
 
-void
-mbt_be_value_free(struct mbt_be_value *v)
-{
-	mbt_be_unref(v);
-}
-
-void
-mbt_be_value_freep(struct mbt_be_value **v)
-{
-	mbt_be_unrefp(v);
-}
 
 static int
 be_alloc(int type, struct mbt_be_value *up, struct mbt_be_value **out)
@@ -165,13 +154,13 @@ be_value_parse_string(const unsigned char *buf, size_t sz, struct mbt_be_value *
 
 	insz = strtoul((const char *)p, NULL, 10);
 	if(insz > sz){
-		mbt_be_value_free(v);
+		mbt_be_unref(v);
 		return -ERANGE;
 	}
 
 	v->string.iov_base = malloc(insz+1);
 	if(!v->string.iov_base){
-		mbt_be_value_free(v);
+		mbt_be_unref(v);
 		return -ENOMEM;
 	}
 
@@ -253,7 +242,7 @@ be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct mbt_b
 	while(*p && *p != 'e'){
 		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
 		if(rv < 0){
-			mbt_be_value_free(v);
+			mbt_be_unref(v);
 			return rv;
 		}
 
@@ -293,7 +282,7 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 		case '8': case '9':
 			rv = be_value_parse_string(p, sz - chr, &key);
 			if(rv < 0){
-				mbt_be_value_free(v);
+				mbt_be_unref(v);
 				return rv;
 			}
 
@@ -302,21 +291,21 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 
 			break;
 		default:
-			mbt_be_value_free(v);
+			mbt_be_unref(v);
 			return -EINVAL;
 		}
 
 		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
 		if(rv < 0){
-			mbt_be_value_free(key);
-			mbt_be_value_free(v);
+			mbt_be_unref(key);
+			mbt_be_unref(v);
 			return rv;
 		}
 
 		/* kidnap key */
 		inner->key = key->string.iov_base;
 		key->string.iov_base = NULL;
-		mbt_be_value_free(key);
+		mbt_be_unref(key);
 
 		be_insert(v, inner);
 		p += rv;
@@ -517,7 +506,7 @@ mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len)
 	int rv = be_alloc(BE_STRING, NULL, out);
 	if (rv < 0) return rv;
 	(*out)->string.iov_base = malloc(len);
-	if (!(*out)->string.iov_base) { mbt_be_value_free(*out); *out = NULL; return -ENOMEM; }
+	if (!(*out)->string.iov_base) { mbt_be_unref(*out); *out = NULL; return -ENOMEM; }
 	memcpy((*out)->string.iov_base, buf, len);
 	(*out)->string.iov_len = len;
 	return 0;

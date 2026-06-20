@@ -32,8 +32,6 @@ struct mbt_be_value
 	};
 };
 
-MBT_API void mbt_be_value_free(struct mbt_be_value *v);
-MBT_API void mbt_be_value_freep(struct mbt_be_value **v);
 MBT_API int mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out);
 
 MBT_API int mbt_be_pp(struct mbt_be_value *be, void *arg);

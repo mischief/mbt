@@ -8,8 +8,6 @@
 .Nm mbt_be_ref ,
 .Nm mbt_be_unref ,
 .Nm mbt_be_unrefp ,
-.Nm mbt_be_value_free ,
-.Nm mbt_be_value_freep ,
 .Nm mbt_be_dict_new ,
 .Nm mbt_be_dict_append ,
 .Nm mbt_be_dict_append_number ,
@@ -31,8 +29,6 @@
 .Ft "struct mbt_be_value *"
 .Fn mbt_be_unref "struct mbt_be_value *v"
 .Fn mbt_be_unrefp "struct mbt_be_value **v"
-.Fn mbt_be_value_free "struct mbt_be_value *v"
-.Fn mbt_be_value_freep "struct mbt_be_value **v"
 .Fn mbt_be_dict_new "struct mbt_be_value **out"
 .Fn mbt_be_dict_append "struct mbt_be_value *dict" "char *key" "struct mbt_be_value *value"
 .Fn mbt_be_dict_append_number "struct mbt_be_value *dict" "char *key" "int64_t num"
@@ -86,15 +82,6 @@ _cleanup_be_ struct mbt_be_value *msg = NULL;
 if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
 /* msg is freed automatically on any return path */
 .Ed
-.Pp
-.Fn mbt_be_value_free
-and
-.Fn mbt_be_value_freep
-are retained for compatibility and are equivalent to
-.Fn mbt_be_unref
-and
-.Fn mbt_be_unrefp
-respectively.
 .Sh CONSTRUCTION
 To create bencoded data, use the following factory functions:
 .Bl -tag -width 12
