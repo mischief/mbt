@@ -198,7 +198,7 @@ draw_detail(void)
 
 	if (detail_view == 0) {
 		/* Overview */
-		const char *state_str[] = {"init", "downloading", "STALLED", "seeding"};
+		const char *state_str[] = {"init", "verifying", "downloading", "STALLED", "seeding"};
 		enum mbt_torrent_state st = mbt_torrent_state(t);
 		mvwprintw(win_detail, 1, 1, "Progress: %u/%u pieces (%.1f%%)  %.1f/%.1f MB  [%s]%s",
 		          have, total, pct,

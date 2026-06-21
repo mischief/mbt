@@ -114,7 +114,8 @@ struct mbt_torrent {
 	struct mbt_timers timers;
 
 	/* Endgame mode */
-	int endgame;  /* 1 when all pieces are requested at least once */
+	int endgame;
+	int verifying; /* 1 while initial SHA1 verify is running */
 	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
 	int max_pieces_per_peer;
 
@@ -1315,6 +1316,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	}
 
 	if (t->storage_ops && t->storage_ops->read_piece && t->have_count == 0) {
+		t->verifying = 1;
 		uint8_t *buf = malloc(t->piece_length);
 		if (buf) {
 			for (uint32_t i = 0; i < t->piece_count; i++) {
@@ -1339,6 +1341,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 				}
 			}
 			free(buf);
+			t->verifying = 0;
 			if (t->have_count > 0) {
 				mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
 				             t->have_count, t->piece_count);
@@ -1461,6 +1464,8 @@ mbt_torrent_state(struct mbt_torrent *t)
 {
 	if (!t->pieces)
 		return MBT_TORRENT_INIT;
+	if (t->verifying)
+		return MBT_TORRENT_VERIFYING;
 	if (t->have_count == t->piece_count)
 		return MBT_TORRENT_SEEDING;
 

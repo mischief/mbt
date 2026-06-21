@@ -76,6 +76,7 @@ MBT_API int mbt_torrent_has_metadata(struct mbt_torrent *t);
 
 enum mbt_torrent_state {
 	MBT_TORRENT_INIT,        /* no metadata yet */
+	MBT_TORRENT_VERIFYING,   /* SHA1-verifying existing pieces on disk */
 	MBT_TORRENT_DOWNLOADING, /* actively receiving pieces */
 	MBT_TORRENT_STALLED,     /* incomplete but no progress possible */
 	MBT_TORRENT_SEEDING,     /* complete, serving to others */
