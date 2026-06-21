@@ -190,12 +190,13 @@
 
 ## Phase 11: Seeding & transfer improvements
 
-- [ ] Fix PEX peers not triggering outbound connects from peerdb
+- [x] Fix PEX peers not triggering outbound connects from peerdb
 - [ ] Seed-mode unchoking: unchoke all interested peers (not tit-for-tat)
 - [ ] Upload speed tracking per peer (rate, not just cumulative)
 - [ ] mbt-tui: DOWN/UP columns in peer list
 - [ ] Persisted bitfield for resume without full re-hash
 - [ ] Incremental SHA-1 verification (hash blocks in-order, avoid full piece buffer)
+- [ ] Async verify: batch pieces across event loop iterations, on_verify_progress callback per piece (unblocks UI during startup; also enables torrent move operation without stalling the loop)
 - [ ] Async disk I/O for upload under heavy load (stretch goal)
 
 ## Phase 12: Documentation
