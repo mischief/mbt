@@ -1,7 +1,7 @@
 #!/bin/sh
 # check-docs.sh — verify all exported symbols are documented in man pages
-# Also validates MBT_API annotation coverage.
-# Returns 0 always (informational). Change to exit 1 to gate on coverage.
+# Also validates MBT_API annotation coverage and lints man pages with mandoc.
+# Exits non-zero if any symbols are undocumented or mandoc reports errors.
 set -e
 
 TMPD=$(mktemp -d)
@@ -48,11 +48,9 @@ if [ "$UNDOCUMENTED" -gt 0 ]; then
     comm -23 "$TMPD/exported.txt" "$TMPD/documented.txt" | sed 's/^/  /'
 fi
 
-exit 0
-
-# Lint man pages for common errors
-if [ -d "$MANDIR" ] && ls "$MANDIR"/*.3 >/dev/null 2>&1; then
-    LINT_ERRORS=0
+# Lint man pages with mandoc if available
+LINT_ERRORS=0
+if command -v mandoc >/dev/null 2>&1 && [ -d "$MANDIR" ] && ls "$MANDIR"/*.3 >/dev/null 2>&1; then
     for f in "$MANDIR"/*.3; do
         errs=$(mandoc -Tlint "$f" 2>&1 | grep "ERROR" | wc -l)
         if [ "$errs" -gt 0 ]; then
@@ -65,10 +63,7 @@ if [ -d "$MANDIR" ] && ls "$MANDIR"/*.3 >/dev/null 2>&1; then
     if [ "$LINT_ERRORS" -gt 0 ]; then
         echo ""
         echo "total mandoc errors: $LINT_ERRORS"
-        exit 1
     fi
 fi
 
-if [ "$UNDOCUMENTED" -gt 0 ]; then
-    exit 1
-fi
+[ "$UNDOCUMENTED" -eq 0 ] && [ "$LINT_ERRORS" -eq 0 ]

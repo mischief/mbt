@@ -158,6 +158,25 @@ returns the BEP 10 client version string
 key from the extension handshake, or NULL if not available.
 .Fn mbt_peer_set_our_listen_port
 sets the listen port advertised to this peer in the BEP 10 handshake.
+.Ss Extension and internal helpers
+.Fn mbt_peer_source_str
+returns a human-readable string for the given
+.Fa source
+enum value (e.g., "tracker", "dht", "lsd").
+.Pp
+.Fn mbt_peer_ut_pex_id
+returns the extension message ID for PEX (ut_pex) as negotiated
+with this peer, or 0 if unsupported.
+.Pp
+.Fn mbt_peer_set_our_metadata_size
+sets the metadata size advertised in the extension handshake.
+.Fn mbt_peer_set_our_reqq
+sets the maximum outstanding requests advertised to the remote peer.
+.Fn mbt_peer_set_piece_count
+updates the peer's piece count after metadata is received,
+applying any deferred HAVE_ALL bitfield.
+These three are called internally by the session layer when the
+relevant state becomes available.
 .Sh RETURN VALUES
 Functions returning
 .Ft int
@@ -168,23 +187,3 @@ return 0 on success or a negative errno value on failure.
 .Xr mbt_conn 3
 .Sh AUTHORS
 .An Nick Owens Aq Mt mischief@offblast.org
-.Pp
-.Fn mbt_peer_source_str
-returns a human-readable string for the given
-.Fa source
-enum value (e.g., "tracker", "dht", "lsd").
-.Pp
-.Fn mbt_peer_set_our_metadata_size
-sets the metadata size advertised in the extension handshake.
-Called internally when metadata becomes available.
-.Pp
-.Fn mbt_peer_set_our_reqq
-sets the maximum outstanding requests advertised to the remote peer.
-.Pp
-.Fn mbt_peer_set_piece_count
-updates the peer's piece count after metadata is received,
-applying any deferred HAVE_ALL bitfield.
-.Pp
-.Fn mbt_peer_ut_pex_id
-returns the extension message ID for PEX (ut_pex) as negotiated
-with this peer, or 0 if unsupported.
