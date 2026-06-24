@@ -1,0 +1,19 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: openbsd
+    steps:
+      - name: checkout
+        run: git clone --branch ${{ github.ref_name }} --depth 1 ${{ github.server_url }}/${{ github.repository }} src
+
+      - name: setup
+        run: meson setup build src
+
+      - name: compile
+        run: meson compile -C build
+
+      - name: test
+        run: meson test -C build
