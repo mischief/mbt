@@ -12,6 +12,7 @@
 #include <ncurses.h>
 
 #include "mbt/event.h"
+#include "mbt/infohash.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/peer.h"
@@ -67,6 +68,7 @@ static struct mbt_session *session;
 static WINDOW *win_list, *win_detail, *win_cmd;
 static int selected;
 static int detail_view; /* 0=overview, 1=peers, 2=pieces */
+static int detail_scroll;
 static int debug_mode;
 
 /* Log ring buffer */
@@ -198,12 +200,13 @@ draw_detail(void)
 		/* Overview */
 		const char *state_str[] = {"init", "downloading", "STALLED", "seeding"};
 		enum mbt_torrent_state st = mbt_torrent_state(t);
-		mvwprintw(win_detail, 1, 1, "Progress: %u/%u pieces (%.1f%%)  %.1f/%.1f MB  [%s]",
+		mvwprintw(win_detail, 1, 1, "Progress: %u/%u pieces (%.1f%%)  %.1f/%.1f MB  [%s]%s",
 		          have, total, pct,
 		          have_bytes / (1024.0*1024.0), total_bytes / (1024.0*1024.0),
-		          state_str[st]);
-		mvwprintw(win_detail, 2, 1, "Peers: %d  Rate: %.0f KB/s  Piece size: %u KB",
-		          peers, dl_rate_kbps, plen / 1024);
+		          state_str[st],
+		          mbt_torrent_is_private(t) ? "  [private]" : "");
+		mvwprintw(win_detail, 2, 1, "Peers: %d  Rate: %.0f KB/s  Piece size: %u KB  Listen: %u",
+		          peers, dl_rate_kbps, plen / 1024, mbt_session_listen_port(session));
 		/* Progress bar */
 		int barw = getmaxx(win_detail) - 4;
 		int filled = total ? (barw * have / total) : 0;
@@ -211,14 +214,36 @@ draw_detail(void)
 		for (int i = 0; i < barw; i++)
 			waddch(win_detail, i < filled ? '#' : '.');
 		waddch(win_detail, ']');
+		/* Infohash */
+		struct mbt_infohash *ih = mbt_torrent_infohash(t);
+		char ihbuf[128] = "(none)";
+		if (ih) mbt_infohash_string(ih, ihbuf, sizeof(ihbuf));
+		mvwprintw(win_detail, 4, 1, "Hash: %s", ihbuf);
+		/* File count */
+		int nfiles = mbt_torrent_file_count(t);
+		mvwprintw(win_detail, 5, 1, "Files: %d", nfiles > 0 ? nfiles : 1);
+		/* Trackers */
+		int ntrackers = mbt_session_torrent_tracker_count(session, t);
+		if (ntrackers == 0) {
+			mvwprintw(win_detail, 6, 1, "Trackers: (none)");
+		} else {
+			mvwprintw(win_detail, 6, 1, "Trackers:");
+			int maxrow = getmaxy(win_detail) - 1;
+			for (int i = 0; i < ntrackers && 7 + i < maxrow; i++) {
+				const char *url = mbt_session_torrent_tracker(session, t, i);
+				mvwprintw(win_detail, 7 + i, 3, "%s", url ? url : "");
+			}
+		}
 
 	} else if (detail_view == 1) {
 		/* Peers */
 		int np = mbt_torrent_peer_count(t);
-		mvwprintw(win_detail, 1, 1, "%-22s %5s %4s %7s %7s %4s %3s %-5s %-19s %s",
+		mvwprintw(win_detail, 1, 1, "%-47s %5s %4s %7s %7s %4s %3s %-5s %-19s %s",
 		          "ENDPOINT", "DONE", "REQ", "DOWN", "UP", "FAIL", "PEN", "FLAGS", "CLIENT", "SRC");
 		int maxrow = getmaxy(win_detail) - 2;
-		for (int i = 0; i < np && i + 2 <= maxrow; i++) {
+		int max_scroll = np - (maxrow - 1);
+		if (detail_scroll > max_scroll) detail_scroll = max_scroll > 0 ? max_scroll : 0;
+		for (int i = detail_scroll; i < np && (i - detail_scroll) + 2 <= maxrow; i++) {
 			struct mbt_peer_stats ps;
 			if (mbt_torrent_peer_stats(t, i, &ps) < 0) break;
 			char flags[8] = "";
@@ -228,7 +253,10 @@ draw_detail(void)
 			if (ps.snubbed) flags[fi++] = 'S';
 			flags[fi] = 0;
 			char endpoint[64];
-			snprintf(endpoint, sizeof(endpoint), "%s:%hu", ps.addr, ps.conn_port);
+			if (strchr(ps.addr, ':'))
+				snprintf(endpoint, sizeof(endpoint), "[%s]:%hu", ps.addr, ps.conn_port);
+			else
+				snprintf(endpoint, sizeof(endpoint), "%s:%hu", ps.addr, ps.conn_port);
 			char down[16], up[16];
 			if (ps.downloaded >= 1024*1024)
 				snprintf(down, sizeof(down), "%.1fM", ps.downloaded / (1024.0*1024));
@@ -242,7 +270,7 @@ draw_detail(void)
 				snprintf(up, sizeof(up), "%.1fK", ps.uploaded / 1024.0);
 			else
 				snprintf(up, sizeof(up), "%luB", (unsigned long)ps.uploaded);
-			mvwprintw(win_detail, i + 2, 1, "%-22s %4d%% %4d %7s %7s %4d %3d %-5s %-19.19s %s",
+			mvwprintw(win_detail, (i - detail_scroll) + 2, 1, "%-47s %4d%% %4d %7s %7s %4d %3d %-5s %-19.19s %s",
 			          endpoint, ps.done_pct, ps.outstanding,
 			          down, up, ps.hash_failures, ps.score, flags,
 			          ps.client_version ? ps.client_version : "",
@@ -266,7 +294,9 @@ draw_detail(void)
 		mvwprintw(win_detail, 0, 2, " Log [%s] (D to toggle debug) ",
 		          debug_mode ? "DEBUG" : "INFO");
 		int maxrow = getmaxy(win_detail) - 2;
-		int start = log_head - maxrow;
+		int max_scroll = log_count - maxrow;
+		if (detail_scroll > max_scroll) detail_scroll = max_scroll > 0 ? max_scroll : 0;
+		int start = log_head - maxrow - detail_scroll;
 		if (start < 0) start += LOG_LINES;
 		for (int row = 1; row <= maxrow; row++) {
 			int idx = (start + row - 1) % LOG_LINES;
@@ -285,7 +315,7 @@ draw_cmd(void)
 	if (mode == 1) {
 		mvwprintw(win_cmd, 0, 0, "> %s", cmdbuf);
 	} else {
-		mvwprintw(win_cmd, 0, 0, " [a]dd  [q]uit  [j/k] select  [h/l] view  [D] debug");
+		mvwprintw(win_cmd, 0, 0, " [a]dd  [q]uit  [j/k] select  [J/K] scroll  [h/l] view  [D] debug");
 	}
 	wrefresh(win_cmd);
 }
@@ -355,10 +385,22 @@ on_input(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
 			mbt_log_set_debug(debug_mode ? MBT_LOG_ALL : 0);
 			break;
 		case 'a': case ':': mode = 1; break;
-		case 'j': case KEY_DOWN: selected++; break;
-		case 'k': case KEY_UP: if (selected > 0) selected--; break;
-		case 'h': case KEY_LEFT: if (detail_view > 0) detail_view--; break;
-		case 'l': case KEY_RIGHT: if (detail_view < 3) detail_view++; break;
+		case 'j': case KEY_DOWN: {
+			int n = mbt_session_torrent_count(session);
+			if (selected < n - 1) { selected++; detail_scroll = 0; }
+			break;
+		}
+		case 'k': case KEY_UP:
+			if (selected > 0) { selected--; detail_scroll = 0; }
+			break;
+		case 'h': case KEY_LEFT:
+			if (detail_view > 0) { detail_view--; detail_scroll = 0; }
+			break;
+		case 'l': case KEY_RIGHT:
+			if (detail_view < 3) { detail_view++; detail_scroll = 0; }
+			break;
+		case 'J': case KEY_NPAGE: detail_scroll++; break;
+		case 'K': case KEY_PPAGE: if (detail_scroll > 0) detail_scroll--; break;
 		}
 	}
 	draw_all();
