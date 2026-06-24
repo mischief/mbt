@@ -1208,6 +1208,25 @@ mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after)
 	return NULL;
 }
 
+int
+mbt_session_torrent_tracker_count(struct mbt_session *s, struct mbt_torrent *t)
+{
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next)
+		if (st->torrent == t) return st->tracker_count;
+	return 0;
+}
+
+const char *
+mbt_session_torrent_tracker(struct mbt_session *s, struct mbt_torrent *t, int idx)
+{
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next)
+		if (st->torrent == t)
+			return (idx < st->tracker_count) ? st->trackers[idx] : NULL;
+	return NULL;
+}
+
 /* --- Peer connection --- */
 
 int
