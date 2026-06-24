@@ -17,6 +17,8 @@
 .Nm mbt_session_torrent_count ,
 .Nm mbt_session_torrent_first ,
 .Nm mbt_session_torrent_next ,
+.Nm mbt_session_torrent_tracker_count ,
+.Nm mbt_session_torrent_tracker ,
 .Nm mbt_session_enable_dht ,
 .Nm mbt_session_disable_dht ,
 .Nm mbt_session_dht_bootstrap ,
@@ -61,6 +63,10 @@
 .Fn mbt_session_torrent_first "struct mbt_session *s"
 .Ft "struct mbt_torrent *"
 .Fn mbt_session_torrent_next "struct mbt_session *s" "struct mbt_torrent *after"
+.Ft int
+.Fn mbt_session_torrent_tracker_count "struct mbt_session *s" "struct mbt_torrent *t"
+.Ft "const char *"
+.Fn mbt_session_torrent_tracker "struct mbt_session *s" "struct mbt_torrent *t" "int idx"
 .Ft int
 .Fn mbt_session_enable_dht "struct mbt_session *s"
 .Ft void
@@ -139,6 +145,14 @@ iterate them.
 looks up a torrent by infohash.
 .Fn mbt_session_remove_torrent
 removes and frees a torrent.
+.Fn mbt_session_torrent_tracker_count
+returns the number of tracker URLs associated with a torrent.
+.Fn mbt_session_torrent_tracker
+returns the tracker URL at
+.Fa idx ,
+or NULL if
+.Fa idx
+is out of range.
 .Ss Peer discovery
 .Fn mbt_session_enable_dht
 starts the DHT node (BEP 5) on the session's listen port.

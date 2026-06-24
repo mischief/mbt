@@ -29,8 +29,11 @@
 .Nm mbt_peer_reqq ,
 .Nm mbt_peer_addr ,
 .Nm mbt_peer_port ,
+.Nm mbt_peer_conn_port ,
 .Nm mbt_peer_id ,
-.Nm mbt_peer_source
+.Nm mbt_peer_source ,
+.Nm mbt_peer_version ,
+.Nm mbt_peer_set_our_listen_port
 .Nd BitTorrent peer wire protocol state machine
 .Sh SYNOPSIS
 .In mbt/peer.h
@@ -86,10 +89,16 @@
 .Fn mbt_peer_addr "struct mbt_peer *p"
 .Ft uint16_t
 .Fn mbt_peer_port "struct mbt_peer *p"
+.Ft uint16_t
+.Fn mbt_peer_conn_port "struct mbt_peer *p"
 .Ft "const uint8_t *"
 .Fn mbt_peer_id "struct mbt_peer *p"
 .Ft "enum mbt_peer_source"
 .Fn mbt_peer_source "struct mbt_peer *p"
+.Ft "const char *"
+.Fn mbt_peer_version "struct mbt_peer *p"
+.Ft void
+.Fn mbt_peer_set_our_listen_port "struct mbt_peer *p" "uint16_t port"
 .Sh DESCRIPTION
 A peer represents the local end of a BitTorrent wire protocol connection.
 It drives the state machine from handshake through active data exchange,
@@ -134,6 +143,21 @@ sends the full bitfield on activation (for seeding peers).
 .Pp
 .Fn mbt_peer_send_piece
 responds to an incoming request by sending piece data; it handles reassembly and flow control internally so callers do not need buffering logic.
+.Ss Accessors
+.Fn mbt_peer_addr
+returns the remote IP address string.
+.Fn mbt_peer_port
+returns the remote listen port as advertised in the handshake.
+.Fn mbt_peer_conn_port
+returns the ephemeral TCP source port of the connection, which differs from
+.Fn mbt_peer_port
+for inbound peers.
+.Fn mbt_peer_version
+returns the BEP 10 client version string
+.Pq the Dq v
+key from the extension handshake, or NULL if not available.
+.Fn mbt_peer_set_our_listen_port
+sets the listen port advertised to this peer in the BEP 10 handshake.
 .Sh RETURN VALUES
 Functions returning
 .Ft int

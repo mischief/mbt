@@ -20,6 +20,7 @@
 .Nm mbt_torrent_piece_count ,
 .Nm mbt_torrent_piece_length ,
 .Nm mbt_torrent_have_count ,
+.Nm mbt_torrent_bytes_downloaded ,
 .Nm mbt_torrent_peer_count ,
 .Nm mbt_torrent_peer_at ,
 .Nm mbt_torrent_has_piece ,
@@ -70,6 +71,8 @@
 .Fn mbt_torrent_piece_length "struct mbt_torrent *t"
 .Ft uint32_t
 .Fn mbt_torrent_have_count "struct mbt_torrent *t"
+.Ft uint64_t
+.Fn mbt_torrent_bytes_downloaded "struct mbt_torrent *t"
 .Ft int
 .Fn mbt_torrent_peer_count "struct mbt_torrent *t"
 .Ft "struct mbt_peer *"
@@ -138,6 +141,8 @@ All pieces present and verified.
 returns a fraction between 0 and 1 of the download completed.
 .Fn mbt_torrent_complete
 returns true if the torrent has all pieces.
+.Fn mbt_torrent_bytes_downloaded
+returns the total number of bytes received from peers since the torrent was added.
 .Pp
 .Fn mbt_torrent_piece_map
 fills an output array with per-piece state:
