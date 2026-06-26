@@ -768,7 +768,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			parse_compact_nodes6(d, nodes6->string.buf, nodes6->string.len, lk);
 
 		/* Parse peers (values is a list of compact peer strings) */
-		if (values && values->type == BE_LIST && lk) {
+		if (values && values->type == BE_LIST && lk && lk->peers_cb) {
 			struct mbt_be_value *val;
 			TAILQ_FOREACH(val, &values->listhead, next) {
 				if (val->type == BE_STRING && val->string.len >= 6)
