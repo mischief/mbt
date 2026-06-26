@@ -4,8 +4,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdint.h>
+#include <sys/types.h>
 
 #include "mbt/event.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 static int io_fired;
 static int timer_fired;

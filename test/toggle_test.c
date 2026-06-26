@@ -7,7 +7,6 @@
 
 #include "mbt/event.h"
 #include "mbt/session.h"
-#include "mbt/dht.h"
 
 int main(void)
 {

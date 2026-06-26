@@ -9,7 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/tracker_server.h"
@@ -19,9 +20,9 @@
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "mbt/log.h"
-#include "mbt/infohash.h"
 
-#include "mbt/sha1_compat.h"
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 4
@@ -114,25 +115,23 @@ int main(void)
 
 	struct mbt_session_config cfg1 = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1,
+		.default_storage = mbt_storage_memory_storage(mem1),
 		.listen_port = 0,
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len, NULL); assert(rv == 0);
 
 	/* Leecher: connects via tracker */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
 	struct mbt_session_config cfg2 = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2,
+		.default_storage = mbt_storage_memory_storage(mem2),
 		.listen_port = 0,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s2, torrent_buf, torrent_len); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s2, torrent_buf, torrent_len, NULL); assert(rv == 0);
 
 	/* Set completion callback on leecher */
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);

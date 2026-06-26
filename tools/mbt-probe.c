@@ -10,8 +10,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdint.h>
 
-#include "mbt/infohash.h"
 #include "mbt/hex.h"
 
 #define HANDSHAKE_SIZE 68

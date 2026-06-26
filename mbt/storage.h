@@ -17,9 +17,17 @@ struct mbt_storage_ops {
 	void (*close)(void *ctx);
 };
 
+/* Bundled ops + ctx — pass this around instead of the two separately */
+struct mbt_storage {
+	const struct mbt_storage_ops *ops;
+	void *ctx;
+};
+
 /* --- File storage (single + multi-file torrents) --- */
 
-MBT_API const struct mbt_storage_ops *mbt_storage_file_ops(void);
+/* Construct/destroy a file storage instance for a given data directory */
+MBT_API struct mbt_storage mbt_storage_file_new(const char *data_dir);
+MBT_API void mbt_storage_file_free(struct mbt_storage *s);
 
 MBT_API int mbt_storage_file_open(void *ctx, struct mbt_torrent *t);
 MBT_API int mbt_storage_file_write_piece(void *ctx, uint32_t index, const void *data, size_t len);
@@ -27,16 +35,12 @@ MBT_API int mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, si
 MBT_API int mbt_storage_file_have_piece(void *ctx, uint32_t index);
 MBT_API void mbt_storage_file_close(void *ctx);
 
-/* ctx for file storage: (const char *) path to output file */
-
 /* --- Memory storage (testing, small torrents) --- */
 
-MBT_API const struct mbt_storage_ops *mbt_storage_memory_ops(void);
-
-/* Create/destroy memory storage context */
 struct mbt_storage_memory;
 MBT_API struct mbt_storage_memory *mbt_storage_memory_new(void);
 MBT_API void mbt_storage_memory_destroy(struct mbt_storage_memory *m);
+MBT_API struct mbt_storage mbt_storage_memory_storage(struct mbt_storage_memory *m);
 
 /* File-level access for test setup and verification */
 MBT_API int mbt_storage_memory_put_file(struct mbt_storage_memory *m, uint64_t offset,

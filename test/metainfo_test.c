@@ -7,10 +7,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <fcntl.h>
+#include <stdint.h>
 
 #include "mbt/metainfo.h"
-#include "mbt/infohash.h"
 
 static void
 test_create_single_file(void)

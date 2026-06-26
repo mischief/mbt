@@ -2,21 +2,20 @@
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
-
-#include "mbt/sha1_compat.h"
+#include <stdint.h>
+#include <sys/types.h>
+#include <time.h>
 
 #include "mbt/event.h"
 #include "mbt/conn.h"
 #include "mbt/infohash.h"
 #include "mbt/hex.h"
-#include "mbt/be.h"
 #include "mbt/torrent.h"
 #include "mbt/peer.h"
 #include "mbt/session.h"
@@ -30,10 +29,21 @@
 #include "internal.h"
 #include "mbt/magnet.h"
 #include "mbt/tracker.h"
+#include "mbt/state.h"
+#include "mbt/peer_source.h"
+#include "mbt/picker.h"
+#include "mbt/storage.h"
+#include "mbt/timers.h"
+
+static int session_state_restore_cb(const struct mbt_state_entry *e, void *arg);
 
 /* --- Torrent list entry --- */
 
 #include "mbt/peerdb.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 struct session_torrent {
 	struct mbt_session *session;
@@ -73,8 +83,10 @@ STAILQ_HEAD(pending_connect_list, pending_connect);
 struct mbt_session {
 	struct mbt_ev *ev;
 
-	const struct mbt_storage_ops *storage_ops;
-	void *storage_ctx;
+	struct mbt_storage default_storage;
+	const char *default_data_dir;
+	const struct mbt_state_ops *state_ops;
+	void *state_ctx;
 	mbt_picker_fn picker;
 	void *picker_ctx;
 
@@ -537,8 +549,10 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 		return -ENOMEM;
 
 	s->ev = cfg->ev;
-	s->storage_ops = cfg->storage_ops;
-	s->storage_ctx = cfg->storage_ctx;
+	s->default_storage = cfg->default_storage;
+	s->default_data_dir = cfg->default_data_dir;
+	s->state_ops = cfg->state_ops;
+	s->state_ctx = cfg->state_ctx;
 	s->picker = cfg->picker;
 	s->picker_ctx = cfg->picker_ctx;
 	s->listen_port = cfg->listen_port;
@@ -590,6 +604,12 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 		s->enable_pcp = 1;
 		s->pcp_gateway = cfg->pcp_gateway;
 		session_pcp_start(s);
+	}
+
+	/* Restore persisted torrents */
+	if (s->state_ops && s->state_ops->enumerate) {
+		s->state_ops->enumerate(s->state_ctx,
+		    session_state_restore_cb, s);
 	}
 
 	*out = s;
@@ -645,6 +665,8 @@ mbt_session_free(struct mbt_session *s)
 
 	mbt_ratelimit_free(s->upload_limit);
 	mbt_ratelimit_free(s->download_limit);
+	if (s->state_ops && s->state_ops->close)
+		s->state_ops->close(s->state_ctx);
 	free(s);
 }
 
@@ -666,8 +688,8 @@ return -ENOSYS; /* no built-in backend */
 
 	struct mbt_session_config cfg = {
 		.ev = ev,
-		.storage_ops = mbt_storage_file_ops(),
-		.storage_ctx = (void *)path,
+		.default_storage = mbt_storage_file_new(path),
+		.default_data_dir = path,
 		.picker = mbt_picker_sequential,
 		.listen_port = 6881,
 	};
@@ -734,7 +756,7 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		if (s->cb.on_lsd_announce) {
 			if (s->cb.on_lsd_announce(s, ih, info->remote, info->port, s->cb.arg)) {
 				if (!st) {
-					mbt_session_add_infohash(s, ih);
+					mbt_session_add_infohash(s, ih, NULL);
 					st = session_find(s, ih);
 				}
 				if (st)
@@ -1000,8 +1022,51 @@ session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v)
 
 /* --- Torrent management --- */
 
+static int
+session_state_restore_cb(const struct mbt_state_entry *e, void *arg)
+{
+	struct mbt_session *s = arg;
+	if (!e->metadata || e->metadata_len == 0)
+		return 0;
+	struct mbt_add_torrent_cfg cfg = {
+		.data_dir = e->data_dir,
+		.storage  = e->data_dir ? mbt_storage_file_new(e->data_dir) : s->default_storage,
+	};
+	int rv = mbt_session_add_torrent_buf(s, e->metadata, e->metadata_len, &cfg);
+	if (rv < 0)
+		mbt_log_warn(MBT_LOG_SESSION, "state restore: failed to add torrent: %s", strerror(-rv));
+	return 0; /* continue enumeration even on error */
+}
+
+static void
+session_on_complete(struct mbt_torrent *t, void *arg)
+{
+	struct mbt_session *s = arg;
+	if (s->state_ops && s->state_ops->save)
+		s->state_ops->save(s->state_ctx, t);
+	if (s->cb.on_torrent_complete)
+		s->cb.on_torrent_complete(s, t, s->cb.arg);
+}
+
+static void
+session_on_piece_complete(struct mbt_torrent *t, uint32_t piece, void *arg)
+{
+	(void)piece;
+	struct mbt_session *s = arg;
+	if (s->state_ops && s->state_ops->save)
+		s->state_ops->save(s->state_ctx, t);
+}
+
+static void
+session_on_error(struct mbt_torrent *t, int err, void *arg)
+{
+	struct mbt_session *s = arg;
+	if (s->cb.on_torrent_error)
+		s->cb.on_torrent_error(s, t, err, s->cb.arg);
+}
+
 int
-mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
+mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih, struct mbt_add_torrent_cfg *acfg)
 {
 	/* Already have it? */
 	if (session_find(s, ih))
@@ -1011,24 +1076,32 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 	if (!st)
 		return -ENOMEM;
 
-	struct mbt_torrent_config cfg = {
+	struct mbt_storage stor = (acfg && acfg->storage.ops) ? acfg->storage : s->default_storage;
+	const char *ddir = (acfg && acfg->data_dir) ? acfg->data_dir : s->default_data_dir;
+	struct mbt_torrent_config tcfg = {
 		.ev = s->ev,
 		.ih = ih,
 		.peer_id = s->peer_id,
-		.storage_ops = s->storage_ops,
-		.storage_ctx = s->storage_ctx,
+		.storage = stor,
+		.data_dir = ddir,
 		.picker = s->picker,
 		.picker_ctx = s->picker_ctx,
 		.timers = s->timers,
 	};
 
-	int rv = mbt_torrent_new(&st->torrent, &cfg);
+	int rv = mbt_torrent_new(&st->torrent, &tcfg);
 	if (rv < 0) {
 		free(st);
 		return rv;
 	}
 	mbt_torrent_set_session(st->torrent, s);
 
+	struct mbt_torrent_callbacks tcb = {
+		.on_complete       = session_on_complete,
+		.on_piece_complete = session_on_piece_complete,
+		.on_error          = session_on_error,
+	};
+	mbt_torrent_set_callbacks(st->torrent, &tcb, s);
 
 	st->session = s;
 	st->ih = mbt_infohash_ref(ih);
@@ -1048,7 +1121,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih)
 }
 
 int
-mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len)
+mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len, struct mbt_add_torrent_cfg *cfg)
 {
 	int rv;
 	struct mbt_metainfo *mi = NULL;
@@ -1062,13 +1135,15 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len)
 	ih = mbt_metainfo_infohash(mi);
 	if (!ih) { mbt_metainfo_free(mi); return -EINVAL; }
 
-	rv = mbt_session_add_infohash(s, ih);
+	rv = mbt_session_add_infohash(s, ih, cfg);
 	if (rv < 0) { mbt_metainfo_free(mi); return rv; }
 
 	t = mbt_session_find_torrent(s, ih);
 	if (t) {
 		const void *raw = mbt_metainfo_raw_info(mi, &raw_len);
 		mbt_torrent_set_metadata(t, raw, raw_len);
+		if (s->state_ops && s->state_ops->save)
+			s->state_ops->save(s->state_ctx, t);
 	}
 
 	/* Extract tracker URLs */
@@ -1094,7 +1169,7 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len)
 }
 
 int
-mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
+mbt_session_add_torrent_file(struct mbt_session *s, const char *path, struct mbt_add_torrent_cfg *cfg)
 {
 	FILE *fp = fopen(path, "rb");
 	if (!fp) return -errno;
@@ -1107,13 +1182,13 @@ mbt_session_add_torrent_file(struct mbt_session *s, const char *path)
 
 	if (len == 0) { free(buf); return -EIO; }
 
-	int rv = mbt_session_add_torrent_buf(s, buf, len);
+	int rv = mbt_session_add_torrent_buf(s, buf, len, cfg);
 	free(buf);
 	return rv;
 }
 
 int
-mbt_session_add_magnet(struct mbt_session *s, const char *uri)
+mbt_session_add_magnet(struct mbt_session *s, const char *uri, struct mbt_add_torrent_cfg *cfg)
 {
 	struct mbt_magnet m;
 	struct mbt_infohash *ih = NULL;
@@ -1129,7 +1204,7 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri)
 		return rv;
 	}
 
-	rv = mbt_session_add_infohash(s, ih);
+	rv = mbt_session_add_infohash(s, ih, cfg);
 	if (rv < 0) {
 		mbt_infohash_unref(ih);
 		mbt_magnet_free(&m);
@@ -1256,7 +1331,7 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	/* Find or create torrent */
 	st = session_find(s, ih);
 	if (!st) {
-		rv = mbt_session_add_infohash(s, ih);
+		rv = mbt_session_add_infohash(s, ih, NULL);
 		if (rv < 0)
 			return rv;
 		st = session_find(s, ih);

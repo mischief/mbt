@@ -9,10 +9,13 @@
 #include <signal.h>
 #include <unistd.h>
 #include <err.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/pcp.h"
 #include "mbt/log.h"
+
+struct mbt_ev_timer;
 
 static struct mbt_ev *ev;
 static int got_mapping;

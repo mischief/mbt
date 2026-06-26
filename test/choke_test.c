@@ -9,8 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
@@ -18,6 +18,9 @@
 #include "mbt/storage.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 4
@@ -64,18 +67,16 @@ int main(void)
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(mem1, 0, test_data, TOTAL_LEN);
 	struct mbt_session_config cfg1 = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(mem1), .listen_port = 0,
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s1, encoded, enc_len); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL); assert(rv == 0);
 
 	/* Leecher — uses x.pe to connect to seeder */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
 	struct mbt_session_config cfg2 = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(mem2), .listen_port = 0,
 		.timers = { .request_timeout = 2 }, /* fast timeout to trigger reassignment */
 	};
 	struct mbt_session *s2;
@@ -95,7 +96,7 @@ int main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, mbt_session_listen_port(s1));
-	rv = mbt_session_add_magnet(s2, magnet); assert(rv == 0);
+	rv = mbt_session_add_magnet(s2, magnet, NULL); assert(rv == 0);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

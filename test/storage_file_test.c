@@ -7,11 +7,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <sys/stat.h>
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/storage.h"
-#include "mbt/torrent.h"
 #include "mbt/be.h"
 #include "mbt/event.h"
 #include "mbt/session.h"
@@ -71,34 +70,39 @@ int main(void)
 
 	struct mbt_session_config cfg = {
 		.ev = ev,
-		.storage_ops = mbt_storage_file_ops(),
-		.storage_ctx = (void *)tmpdir,
+		.default_storage = mbt_storage_file_new(tmpdir),
 		.listen_port = 0,
 	};
 	struct mbt_session *session;
 	rv = mbt_session_new(&session, &cfg);
 	assert(rv == 0);
 
-	rv = mbt_session_add_torrent_file(session, tpath);
+	rv = mbt_session_add_torrent_file(session, tpath, NULL);
 	assert(rv == 0);
 
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
 	assert(t);
 
-	/* Write pieces through ops */
-	const struct mbt_storage_ops *ops = mbt_storage_file_ops();
+	/* Write pieces through ops (must open first to populate file table) */
+	struct mbt_storage stor = mbt_storage_file_new(tmpdir);
+	const struct mbt_storage_ops *ops = stor.ops;
+	void *sctx = stor.ctx;
+	rv = ops->open(sctx, t);
+	assert(rv == 0);
 	for (int i = 0; i < NUM_PIECES; i++) {
-		rv = ops->write_piece(tmpdir, i, data + i * PIECE_LEN, PIECE_LEN);
+		rv = ops->write_piece(sctx, i, data + i * PIECE_LEN, PIECE_LEN);
 		assert(rv == 0);
 	}
 
 	/* Read back and verify */
 	uint8_t buf[PIECE_LEN];
 	for (int i = 0; i < NUM_PIECES; i++) {
-		rv = ops->read_piece(tmpdir, i, buf, PIECE_LEN);
+		rv = ops->read_piece(sctx, i, buf, PIECE_LEN);
 		assert(rv == 0);
 		assert(memcmp(buf, data + i * PIECE_LEN, PIECE_LEN) == 0);
 	}
+	ops->close(sctx);
+	mbt_storage_file_free(&stor);
 
 	fprintf(stderr, "storage_file_test: PASS\n");
 

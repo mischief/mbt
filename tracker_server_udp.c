@@ -10,14 +10,17 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <errno.h>
-#include <time.h>
+#include <stdint.h>
+#include <sys/types.h>
 
 #include "mbt/tracker_server.h"
-#include "mbt/event.h"
 #include "mbt/log.h"
 #include "net.h"
+
+struct mbt_ev;
+struct mbt_ev_io;
+struct mbt_tracker_store;
 
 /* BEP 15 protocol constants */
 #define ACTION_CONNECT  0
@@ -40,6 +43,7 @@ struct mbt_tracker_server {
 
 /* Forward declarations from tracker_store.c */
 struct ts_torrent;
+
 struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
 struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
 void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t, const struct sockaddr_storage *addr, int is_seeder);

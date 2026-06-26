@@ -9,10 +9,15 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 
-#include "mbt/mbt.h"
 #include "mbt/dht.h"
 #include "mbt/be.h"
+#include "mbt/event.h"
+
+struct mbt_ev_timer;
 
 static struct mbt_ev *ev;
 static int ticks;

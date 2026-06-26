@@ -4,9 +4,11 @@
 
 #include <stdint.h>
 #include <sys/socket.h>
+#include <stddef.h>
 
 struct mbt_ev;
 struct mbt_ev_io;
+
 typedef void (*mbt_ev_io_cb)(struct mbt_ev_io *, int fd, uint32_t events, void *);
 
 /*

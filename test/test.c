@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: ISC
-#include <sys/param.h>
 #include <stdio.h>
 #include <string.h>
-#include <errno.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <sys/queue.h>
+#include <sys/uio.h>
 
 #include "mbt/be.h"
 

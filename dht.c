@@ -14,10 +14,11 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
-#include <fcntl.h>
 #include <sys/queue.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 
 #define DHT_PEER_ID_LEN 20
 #define DHT_PEER_ID_STRLEN (DHT_PEER_ID_LEN * 2)
@@ -31,6 +32,9 @@
 #include "mbt/ratelimit.h"
 #include "mbt/resolve.h"
 #include "net.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 /* --- Constants --- */
 #define K 8              /* nodes per bucket */

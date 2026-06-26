@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "mbt/magnet.h"
+#include "mbt/infohash.h"
 
 static void
 test_basic(void)

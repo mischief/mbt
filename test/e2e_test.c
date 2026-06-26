@@ -10,15 +10,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <unistd.h>
-#include <time.h>
+#include <sha1.h>
+#include <stdint.h>
 
-#include "mbt/sha1_compat.h"
-
-#include "mbt/mbt.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
-#include "mbt/infohash.h"
+#include "mbt/event.h"
+#include "mbt/log.h"
+#include "mbt/session.h"
+#include "mbt/storage.h"
+#include "mbt/torrent.h"
+
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 8
@@ -121,8 +124,7 @@ main(void)
 	assert(rv == 0);
 	struct mbt_session_config cfg1 = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1,
+		.default_storage = mbt_storage_memory_storage(mem1),
 		.listen_port = 0,
 	};
 	struct mbt_session *s1;
@@ -130,7 +132,7 @@ main(void)
 	assert(rv == 0);
 	mbt_session_enable_dht_local(s1);
 
-	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len);
+	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len, NULL);
 	assert(rv == 0);
 
 	/* Pre-fill seeder storage with test data (piece by piece) */
@@ -142,8 +144,7 @@ main(void)
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
 	struct mbt_session_config cfg2 = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2,
+		.default_storage = mbt_storage_memory_storage(mem2),
 		.listen_port = 0,
 	};
 	struct mbt_session *s2;
@@ -155,7 +156,7 @@ main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", infohash_hex, mbt_session_listen_port(s1));
-	rv = mbt_session_add_magnet(s2, magnet);
+	rv = mbt_session_add_magnet(s2, magnet, NULL);
 	assert(rv == 0);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);

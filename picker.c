@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: ISC
 #include <limits.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #include "mbt/picker.h"
 #include "internal.h"
 #include "mbt/torrent.h"
 #include "mbt/bitmap.h"
 #include "mbt/peer.h"
+
+struct mbt_torrent;
 
 int
 mbt_picker_sequential(struct mbt_torrent *t, void *peer, void *ctx)

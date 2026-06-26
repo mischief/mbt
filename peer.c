@@ -2,14 +2,15 @@
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <string.h>
 #include <errno.h>
-#include "mbt/peer_source.h"
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 
+#include "mbt/peer_source.h"
 #include "mbt/log.h"
 #include "mbt/event.h"
 #include "mbt/conn.h"
@@ -20,6 +21,9 @@
 #include "mbt/be.h"
 #include "internal.h"
 #include "version.h"
+
+struct mbt_bitmap;
+struct mbt_ev_timer;
 
 /* Protocol constants */
 enum {

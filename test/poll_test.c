@@ -6,8 +6,13 @@
 #include <unistd.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <stdint.h>
+#include <sys/types.h>
 
 #include "mbt/event.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 static int read_count;
 static int timer_count;

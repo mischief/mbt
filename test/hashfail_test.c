@@ -11,16 +11,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/storage.h"
-#include "mbt/picker.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 8
@@ -89,27 +91,24 @@ int main(void)
 	struct mbt_storage_memory *memA = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(memA, 0, good_data, TOTAL_LEN);
 	struct mbt_session_config cfgA = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memA, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memA), .listen_port = 0,
 	};
 	struct mbt_session *sA;
 	mbt_session_new(&sA, &cfgA);
-	mbt_session_add_torrent_buf(sA, encoded, enc_len);
+	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL);
 
 	/* Seeder B: corrupt data */
 	struct mbt_session_config cfgB = {
-		.ev = ev, .storage_ops = &corrupt_ops,
-		.storage_ctx = NULL, .listen_port = 0,
+		.ev = ev, .default_storage = { &corrupt_ops, NULL }, .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
-	mbt_session_add_torrent_buf(sB, encoded, enc_len);
+	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL);
 
 	/* Leecher: short request timeout to cycle faster */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memL), .listen_port = 0,
 		.timers = { .request_timeout = 5 },
 	};
 	struct mbt_session *sL;
@@ -129,7 +128,7 @@ int main(void)
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
 	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB));
-	mbt_session_add_magnet(sL, magnet);
+	mbt_session_add_magnet(sL, magnet, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

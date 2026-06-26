@@ -3,19 +3,20 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
-#include "net.h"
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
 #include <systemd/sd-event.h>
+#include <stdint.h>
+#include <sys/epoll.h>
+#include <sys/types.h>
 
-#include "mbt/event.h"
+#include "net.h"
 #include "mbt/conn.h"
 #include "sdbuf.h"
-
 /* Access the underlying sd_event* from our ev_sd backend */
 #include "ev_sd_internal.h"
+
+struct mbt_ev;
+struct sdbuf;
 
 struct conn_sd {
 	struct mbt_conn base;

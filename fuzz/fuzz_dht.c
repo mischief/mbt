@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: ISC
 // Fuzz target: DHT message parsing (bencode dict with DHT semantics)
-#include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
-
 #include <mbt/be.h>
+#include <sys/types.h>
 
 #ifndef __AFL_FUZZ_TESTCASE_LEN
   ssize_t fuzz_len;

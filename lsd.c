@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: ISC
-#include <sys/types.h>
 #include <sys/queue.h>
 #include <arpa/inet.h>
-#include "net.h"
-#include "mbt/log.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
@@ -14,7 +11,10 @@
 #include <assert.h>
 #include <limits.h>
 #include <errno.h>
+#include <stdint.h>
 
+#include "net.h"
+#include "mbt/log.h"
 #include "mbt/infohash.h"
 #include "mbt/lsd.h"
 

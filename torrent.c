@@ -6,15 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <arpa/inet.h>
 #include <time.h>
-
-#include "mbt/sha1_compat.h"
+#include <netinet/in.h>
+#include <sha1.h>
+#include <stdint.h>
+#include <sys/uio.h>
 
 #include "mbt/log.h"
-
 #include "mbt/event.h"
-#include "mbt/conn.h"
 #include "mbt/infohash.h"
 #include "mbt/peer.h"
 #include "mbt/torrent.h"
@@ -26,6 +25,15 @@
 #include "mbt/hex.h"
 #include "internal.h"
 #include "mbt/picker.h"
+#include "mbt/peer_source.h"
+#include "mbt/storage.h"
+#include "mbt/timers.h"
+
+struct mbt_bitmap;
+struct mbt_conn;
+struct mbt_ev_timer;
+struct mbt_peer;
+struct mbt_session;
 
 enum {
 	BLOCK_SIZE = 16384,
@@ -70,8 +78,8 @@ struct mbt_torrent {
 	struct mbt_session *session; /* owning session (NULL if standalone) */
 	uint8_t peer_id[20];
 
-	const struct mbt_storage_ops *storage_ops;
-	void *storage_ctx;
+	struct mbt_storage storage;
+	char *data_dir;
 	mbt_picker_fn picker;
 	void *picker_ctx;
 
@@ -606,8 +614,8 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			/* Reset failure count on success */
 			tp->hash_failures = 0;
 
-			if (t->storage_ops && t->storage_ops->write_piece)
-				t->storage_ops->write_piece(t->storage_ctx, piece, pi->data, pi->length);
+			if (t->storage.ops && t->storage.ops->write_piece)
+				t->storage.ops->write_piece(t->storage.ctx, piece, pi->data, pi->length);
 
 			/* Free piece buffer */
 			free(pi->data);
@@ -784,7 +792,7 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	if (mbt_bitmap_isset(t->have, piece) <= 0)
 		return;
 
-	if (!t->storage_ops || !t->storage_ops->read_piece)
+	if (!t->storage.ops || !t->storage.ops->read_piece)
 		return;
 
 	/* Read full piece from storage, then send the requested block */
@@ -800,7 +808,7 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	if (!buf)
 		return;
 
-	int rv = t->storage_ops->read_piece(t->storage_ctx, piece, buf, plen);
+	int rv = t->storage.ops->read_piece(t->storage.ctx, piece, buf, plen);
 	if (rv < 0) {
 		free(buf);
 		return;
@@ -1087,8 +1095,9 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->ev = cfg->ev;
 	t->ih = mbt_infohash_ref(cfg->ih);
 	memcpy(t->peer_id, cfg->peer_id, 20);
-	t->storage_ops = cfg->storage_ops;
-	t->storage_ctx = cfg->storage_ctx;
+	t->storage = cfg->storage;
+	if (cfg->data_dir)
+		t->data_dir = strdup(cfg->data_dir);
 	t->picker = cfg->picker ? cfg->picker : mbt_picker_rarest;
 	t->picker_ctx = cfg->picker_ctx;
 	t->timers = cfg->timers;
@@ -1144,9 +1153,12 @@ mbt_torrent_free(struct mbt_torrent *t)
 			free(t->files[i].path);
 		free(t->files);
 	}
+	free(t->data_dir);
 	mbt_infohash_unref(t->ih);
 	mbt_ratelimit_free(t->upload_limit);
 	mbt_ratelimit_free(t->download_limit);
+	if (t->storage.ops && t->storage.ops->close)
+		t->storage.ops->close(t->storage.ctx);
 	free(t);
 }
 
@@ -1307,15 +1319,15 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	mbt_bitmap_new_bits(&t->have, t->piece_count);
 
 	/* Open storage for this torrent */
-	if (t->storage_ops && t->storage_ops->open) {
-		int srv = t->storage_ops->open(t->storage_ctx, t);
+	if (t->storage.ops && t->storage.ops->open) {
+		int srv = t->storage.ops->open(t->storage.ctx, t);
 		if (srv < 0) {
 			mbt_log_warn(MBT_LOG_STORAGE, "storage open failed: %s", strerror(-srv));
 			return srv;
 		}
 	}
 
-	if (t->storage_ops && t->storage_ops->read_piece && t->have_count == 0) {
+	if (t->storage.ops && t->storage.ops->read_piece && t->have_count == 0) {
 		t->verifying = 1;
 		uint8_t *buf = malloc(t->piece_length);
 		if (buf) {
@@ -1325,7 +1337,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 					uint32_t rem = t->total_length % t->piece_length;
 					if (rem) plen = rem;
 				}
-				int rv2 = t->storage_ops->read_piece(t->storage_ctx, i, buf, plen);
+				int rv2 = t->storage.ops->read_piece(t->storage.ctx, i, buf, plen);
 				if (rv2 < 0)
 					continue;
 
@@ -1443,6 +1455,19 @@ const char *
 mbt_torrent_name(struct mbt_torrent *t)
 {
 	return t->name;
+}
+
+const char *
+mbt_torrent_data_dir(struct mbt_torrent *t)
+{
+	return t->data_dir;
+}
+
+const void *
+mbt_torrent_metadata(struct mbt_torrent *t, size_t *len_out)
+{
+	if (len_out) *len_out = t->metadata_len;
+	return t->metadata;
 }
 
 float

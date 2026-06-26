@@ -9,8 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
@@ -18,6 +18,9 @@
 #include "mbt/storage.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 6
@@ -64,40 +67,36 @@ int main(void)
 	struct mbt_storage_memory *memA = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(memA, 0, test_data, PIECE_LEN * 2);
 	struct mbt_session_config cfgA = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memA, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memA), .listen_port = 0,
 	};
 	struct mbt_session *sA;
 	rv = mbt_session_new(&sA, &cfgA); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(sA, encoded, enc_len); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL); assert(rv == 0);
 
 	/* Seeder B: pieces 2,3 */
 	struct mbt_storage_memory *memB = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(memB, PIECE_LEN * 2, test_data + PIECE_LEN * 2, PIECE_LEN * 2);
 	struct mbt_session_config cfgB = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memB, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memB), .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	rv = mbt_session_new(&sB, &cfgB); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(sB, encoded, enc_len); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL); assert(rv == 0);
 
 	/* Seeder C: pieces 4,5 */
 	struct mbt_storage_memory *memC = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(memC, PIECE_LEN * 4, test_data + PIECE_LEN * 4, PIECE_LEN * 2);
 	struct mbt_session_config cfgC = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memC, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memC), .listen_port = 0,
 	};
 	struct mbt_session *sC;
 	rv = mbt_session_new(&sC, &cfgC); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(sC, encoded, enc_len); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(sC, encoded, enc_len, NULL); assert(rv == 0);
 
 	/* Leecher: connects to all three via x.pe */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memL), .listen_port = 0,
 	};
 	struct mbt_session *sL;
 	rv = mbt_session_new(&sL, &cfgL); assert(rv == 0);
@@ -117,7 +116,7 @@ int main(void)
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
 	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB), mbt_session_listen_port(sC));
-	rv = mbt_session_add_magnet(sL, magnet); assert(rv == 0);
+	rv = mbt_session_add_magnet(sL, magnet, NULL); assert(rv == 0);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

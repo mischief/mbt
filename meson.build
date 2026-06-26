@@ -44,6 +44,8 @@ if event_backend == 'auto'
     event_backend = 'sd-event'
   elif host_machine.system() == 'openbsd'
     event_backend = 'libevent1'
+  elif host_machine.system() == 'sunos'
+    event_backend = 'poll'
   else
     event_backend = 'libevent'
   endif
@@ -64,6 +66,9 @@ elif event_backend == 'libevent1'
   deps += libevent_dep
   ev_src = ['ev_libevent.c', 'conn_libevent.c']
   add_project_arguments('-DHAVE_LIBEVENT', '-DHAVE_LIBEVENT1', language: 'c')
+elif event_backend == 'poll'
+  ev_src = ['conn_poll.c']
+  add_project_arguments('-DHAVE_POLL_BACKEND', language: 'c')
 endif
 
 # DNS resolver backend
@@ -107,6 +112,7 @@ bt_src = [
   'session.c',
   'storage_file.c',
   'storage_memory.c',
+  'state.c',
   'bitmap.c',
   'torrent.c',
   'tracker_http.c',

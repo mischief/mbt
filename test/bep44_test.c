@@ -3,10 +3,13 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include <sha1.h>
+#include <stdint.h>
 
-#include "mbt/mbt.h"
 #include "mbt/dht.h"
-#include "mbt/sha1_compat.h"
+#include "mbt/event.h"
+
+struct mbt_ev_timer;
 
 static int got_item;
 static uint8_t got_value[64];

@@ -12,10 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <err.h>
-#include <fcntl.h>
 
 #include "mbt/metainfo.h"
-#include "mbt/infohash.h"
 
 /* --- show --- */
 

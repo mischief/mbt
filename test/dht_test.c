@@ -6,12 +6,13 @@
  */
 #include <assert.h>
 #include <stdio.h>
-#include <string.h>
-#include <unistd.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/dht.h"
 #include "mbt/infohash.h"
+
+struct mbt_ev_timer;
 
 #define TEST_HASH "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 

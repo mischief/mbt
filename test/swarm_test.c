@@ -15,18 +15,21 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <getopt.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
+#include <unistd.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/storage.h"
-#include "mbt/picker.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "mbt/tracker_server.h"
 #include "mbt/log.h"
+
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 
@@ -147,13 +150,12 @@ int main(int argc, char *argv[])
 		smem[i] = mbt_storage_memory_new();
 		mbt_storage_memory_put_file(smem[i], 0, data, total_len);
 		struct mbt_session_config cfg = {
-			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-			.storage_ctx = smem[i], .listen_port = 0,
+			.ev = ev, .default_storage = mbt_storage_memory_storage(smem[i]), .listen_port = 0,
 			.max_peers = num_leechers + num_seeders,
 			.timers = { .tracker_interval = 2 },
 		};
 		mbt_session_new(&seeders[i], &cfg);
-		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len);
+		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len, NULL);
 	}
 
 	/* Build peer list string for magnet (only used when no tracker) */
@@ -172,8 +174,7 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < num_leechers; i++) {
 		lmem[i] = mbt_storage_memory_new();
 		struct mbt_session_config cfg = {
-			.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-			.storage_ctx = lmem[i], .listen_port = 0,
+			.ev = ev, .default_storage = mbt_storage_memory_storage(lmem[i]), .listen_port = 0,
 			.timers = { .tracker_interval = 2 },
 		};
 		mbt_session_new(&leechers[i], &cfg);
@@ -185,7 +186,7 @@ int main(int argc, char *argv[])
 			         hex, tracker_port);
 		else
 			snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s%s", hex, peers);
-		mbt_session_add_magnet(leechers[i], magnet);
+		mbt_session_add_magnet(leechers[i], magnet, NULL);
 
 		struct mbt_torrent *t = mbt_session_torrent_first(leechers[i]);
 		struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

@@ -4,11 +4,9 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <assert.h>
-#include <unistd.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
@@ -57,8 +55,7 @@ main(void)
 
 	struct mbt_session_config cfg = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem,
+		.default_storage = mbt_storage_memory_storage(mem),
 		.listen_port = 0,
 	};
 	struct mbt_session *session;
@@ -66,7 +63,7 @@ main(void)
 	assert(rv == 0);
 
 	/* 4. Add torrent from buffer */
-	rv = mbt_session_add_torrent_buf(session, encoded, enc_len);
+	rv = mbt_session_add_torrent_buf(session, encoded, enc_len, NULL);
 	assert(rv == 0);
 	free(encoded);
 

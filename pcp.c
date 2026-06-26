@@ -13,20 +13,24 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdint.h>
 
 #ifndef __linux__
 #include <sys/sysctl.h>
 #include <net/route.h>
+
 #define ROUNDUP(a) \
 	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 #endif
 #include <stdio.h>
-#include <net/if.h>
 
 #include "mbt/pcp.h"
 #include "mbt/event.h"
 #include "mbt/log.h"
 #include "internal.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 #define PCP_PORT 5351
 #define PCP_VERSION 2

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: ISC
 #include <stdio.h>
+#include <stdarg.h>
+#include <stdint.h>
 
 #include "mbt/log.h"
 

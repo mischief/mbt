@@ -8,12 +8,14 @@
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/infohash.h"
 #include "mbt/lsd.h"
-#include "mbt/infohash.h"
-#include "mbt/infohash.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 static struct mbt_ev *ev;
 static char test_hash[41];

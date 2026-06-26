@@ -6,19 +6,18 @@
 #include <unistd.h>
 #include <time.h>
 #include <err.h>
-
 #include <curl/curl.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
-#include "mbt/infohash.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/tracker.h"
 #include "mbt/log.h"
-#include "mbt/be.h"
-#include "mbt/hex.h"
+#include "mbt/picker.h"
+#include "mbt/storage.h"
 
-#include "mbt/sha1_compat.h"
+struct mbt_torrent;
 
 static struct mbt_session *session;
 static int seed_mode;
@@ -245,8 +244,7 @@ main(int argc, char *argv[])
 	if (rv < 0)
 		errx(1, "event: %s", strerror(-rv));
 
-	cfg.storage_ops = mbt_storage_file_ops();
-	cfg.storage_ctx = (void *)download_dir;
+	cfg.default_storage = mbt_storage_file_new(download_dir);
 	cfg.picker = picker;
 	cfg.listen_port = listen_port;
 	cfg.http = curl_http_fn;
@@ -266,11 +264,11 @@ main(int argc, char *argv[])
 
 	/* Add torrent or magnet */
 	if (strncmp(argv[0], "magnet:", 7) == 0) {
-		rv = mbt_session_add_magnet(session, argv[0]);
+		rv = mbt_session_add_magnet(session, argv[0], NULL);
 		if (rv < 0)
 			errx(1, "add_magnet: %s", strerror(-rv));
 	} else {
-		rv = mbt_session_add_torrent_file(session, argv[0]);
+		rv = mbt_session_add_torrent_file(session, argv[0], NULL);
 		if (rv < 0)
 			errx(1, "add_torrent: %s", strerror(-rv));
 	}

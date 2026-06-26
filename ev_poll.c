@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: ISC
 // ev_poll.c — pollable event loop backend (caller drives with poll(2))
 #include <stdlib.h>
-#include <string.h>
 #include <errno.h>
 #include <poll.h>
 #include <time.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 struct poll_io {
 	struct mbt_ev *ev;

@@ -2,14 +2,16 @@
 /*
  * resolve_blocking.c — synchronous DNS (fallback, blocks event loop)
  */
-#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <netdb.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <sys/socket.h>
 
 #include "mbt/resolve.h"
-#include "mbt/event.h"
+
+struct mbt_ev;
 
 struct mbt_resolve {
 	int dummy;

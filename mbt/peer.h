@@ -5,8 +5,10 @@
 #include "export.h"
 #include "peer_source.h"
 
-#include <sys/queue.h>
+#include <netinet/in.h>
+#include <stdint.h>
 #include <string.h>
+#include <sys/queue.h>
 
 #define MBT_PEER_ID_LEN 20
 #define MBT_PEER_ID_STRLEN (MBT_PEER_ID_LEN * 2)
@@ -15,8 +17,6 @@ static inline int mbt_peer_id_eq(const uint8_t *a, const uint8_t *b)
 {
 	return memcmp(a, b, MBT_PEER_ID_LEN) == 0;
 }
-#include <netinet/in.h>
-#include <stdint.h>
 
 struct mbt_peer;
 struct mbt_conn;

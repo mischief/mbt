@@ -38,8 +38,8 @@ struct mbt_torrent_config {
 	struct mbt_ev *ev;
 	struct mbt_infohash *ih;
 	const uint8_t *peer_id;            /* 20 bytes */
-	const struct mbt_storage_ops *storage_ops;
-	void *storage_ctx;
+	struct mbt_storage storage;        /* ops + ctx; zero = no storage */
+	const char *data_dir;              /* stored for mbt_torrent_data_dir(); may be NULL */
 	mbt_picker_fn picker;
 	void *picker_ctx;
 	struct mbt_timers timers;
@@ -69,6 +69,8 @@ MBT_API struct mbt_peerdb *mbt_torrent_peerdb(struct mbt_torrent *t);
 /* Query */
 MBT_API struct mbt_infohash *mbt_torrent_infohash(struct mbt_torrent *t);
 MBT_API const char *mbt_torrent_name(struct mbt_torrent *t);
+MBT_API const char *mbt_torrent_data_dir(struct mbt_torrent *t);
+MBT_API const void *mbt_torrent_metadata(struct mbt_torrent *t, size_t *len_out);
 MBT_API float mbt_torrent_progress(struct mbt_torrent *t);
 MBT_API int mbt_torrent_complete(struct mbt_torrent *t);
 MBT_API int mbt_torrent_is_private(struct mbt_torrent *t);

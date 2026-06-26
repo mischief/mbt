@@ -5,9 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdint.h>
 
-#include "mbt/mbt.h"
 #include "mbt/dht.h"
+#include "mbt/event.h"
+#include "mbt/log.h"
 
 static void usage(const char *prog)
 {

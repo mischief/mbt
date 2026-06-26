@@ -5,12 +5,14 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include <errno.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
 
 #include "mbt/event.h"
 #include "mbt/resolve.h"
+
+struct mbt_ev_timer;
 
 static struct mbt_ev *ev;
 static int ok_count;

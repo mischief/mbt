@@ -11,16 +11,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/storage.h"
-#include "mbt/picker.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 10
@@ -65,30 +67,27 @@ int main(void)
 	struct mbt_storage_memory *mem1 = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(mem1, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfg1 = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(mem1), .listen_port = 0,
 	};
 	struct mbt_session *s1;
 	mbt_session_new(&s1, &cfg1);
-	mbt_session_add_torrent_buf(s1, encoded, enc_len);
+	mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL);
 
 	/* Seeder 2 */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(mem2, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfg2 = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(mem2), .listen_port = 0,
 	};
 	struct mbt_session *s2;
 	mbt_session_new(&s2, &cfg2);
-	mbt_session_add_torrent_buf(s2, encoded, enc_len);
+	mbt_session_add_torrent_buf(s2, encoded, enc_len, NULL);
 
 	/* Leecher: downloads all 10 pieces, endgame triggers immediately
 	 * since NUM_PIECES (10) == ENDGAME_THRESHOLD (10) */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memL), .listen_port = 0,
 	};
 	struct mbt_session *sL;
 	mbt_session_new(&sL, &cfgL);
@@ -107,7 +106,7 @@ int main(void)
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
 	         hex, mbt_session_listen_port(s1), mbt_session_listen_port(s2));
-	mbt_session_add_magnet(sL, magnet);
+	mbt_session_add_magnet(sL, magnet, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

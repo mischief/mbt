@@ -3,6 +3,10 @@
 #include <stdint.h>
 */
 
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
+
 enum {
 	SDBUF_EVENT_ERROR = 1,
 };

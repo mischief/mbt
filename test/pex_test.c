@@ -14,8 +14,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <sha1.h>
+#include <stdint.h>
 
-#include "mbt/sha1_compat.h"
 #include "mbt/event.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
@@ -23,6 +24,8 @@
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "mbt/log.h"
+
+struct mbt_ev_timer;
 
 #define PIECE_LEN  16384
 #define NUM_PIECES 128
@@ -83,8 +86,7 @@ int main(int argc, char *argv[])
 	mbt_storage_memory_put_file(smem, 0, data, TOTAL_LEN);
 	struct mbt_session_config scfg = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = smem,
+		.default_storage = mbt_storage_memory_storage(smem),
 		.listen_port = 0,
 		.max_peers = 10,
 		.timers = { .pex_interval = 1, .maintain_interval = 1 },
@@ -92,15 +94,14 @@ int main(int argc, char *argv[])
 	};
 	struct mbt_session *seeder;
 	mbt_session_new(&seeder, &scfg);
-	mbt_session_add_torrent_buf(seeder, encoded, enc_len);
+	mbt_session_add_torrent_buf(seeder, encoded, enc_len, NULL);
 	uint16_t seeder_port = mbt_session_listen_port(seeder);
 
 	/* Leecher B: connects only to seeder */
 	struct mbt_storage_memory *bmem = mbt_storage_memory_new();
 	struct mbt_session_config bcfg = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = bmem,
+		.default_storage = mbt_storage_memory_storage(bmem),
 		.listen_port = 0,
 		.max_peers = 10,
 		.timers = { .pex_interval = 1, .maintain_interval = 1 },
@@ -110,15 +111,14 @@ int main(int argc, char *argv[])
 	char magnet_b[256];
 	snprintf(magnet_b, sizeof(magnet_b),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, seeder_port);
-	mbt_session_add_magnet(leecher_b, magnet_b);
+	mbt_session_add_magnet(leecher_b, magnet_b, NULL);
 	struct mbt_torrent *tb = mbt_session_torrent_first(leecher_b);
 
 	/* Leecher C: connects only to seeder */
 	struct mbt_storage_memory *cmem = mbt_storage_memory_new();
 	struct mbt_session_config ccfg = {
 		.ev = ev,
-		.storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = cmem,
+		.default_storage = mbt_storage_memory_storage(cmem),
 		.listen_port = 0,
 		.max_peers = 10,
 		.timers = { .pex_interval = 1, .maintain_interval = 1 },
@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
 	char magnet_c[256];
 	snprintf(magnet_c, sizeof(magnet_c),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, seeder_port);
-	mbt_session_add_magnet(leecher_c, magnet_c);
+	mbt_session_add_magnet(leecher_c, magnet_c, NULL);
 	struct mbt_torrent *tc = mbt_session_torrent_first(leecher_c);
 
 	/* Run for 5s: rate-limited seeder at 256KB/s means leechers are still

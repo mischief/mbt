@@ -8,8 +8,10 @@
 #include <string.h>
 #include <signal.h>
 #include <locale.h>
-#include <getopt.h>
 #include <ncurses.h>
+#include <curl/curl.h>
+#include <stdint.h>
+#include <unistd.h>
 
 #include "mbt/event.h"
 #include "mbt/infohash.h"
@@ -20,7 +22,8 @@
 #include "mbt/storage.h"
 #include "mbt/log.h"
 
-#include <curl/curl.h>
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 /* --- HTTP tracker via curl (async-shaped, blocks internally) --- */
 struct curl_buf { char *data; size_t len; };
@@ -344,14 +347,14 @@ handle_command(void)
 		mbt_ev_stop(ev);
 	} else {
 		/* Try as .torrent file, magnet, or infohash */
-		int rv = mbt_session_add_torrent_file(session, cmdbuf);
+		int rv = mbt_session_add_torrent_file(session, cmdbuf, NULL);
 		if (rv < 0)
-			rv = mbt_session_add_magnet(session, cmdbuf);
+			rv = mbt_session_add_magnet(session, cmdbuf, NULL);
 		if (rv < 0 && cmdlen == 40) {
 			/* Try as raw SHA1 infohash hex */
 			char mag[256];
 			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", cmdbuf);
-			mbt_session_add_magnet(session, mag);
+			mbt_session_add_magnet(session, mag, NULL);
 		}
 	}
 	cmdbuf[0] = 0;
@@ -495,8 +498,7 @@ main(int argc, char *argv[])
 
 	struct mbt_session_config cfg = {
 		.ev = ev,
-		.storage_ops = mbt_storage_file_ops(),
-		.storage_ctx = (void *)".",
+		.default_storage = mbt_storage_file_new("."),
 		.listen_port = 0,
 		.mbt_lsd_announce = 1,
 		.http = curl_http_fn,
@@ -507,13 +509,13 @@ main(int argc, char *argv[])
 
 	/* Add any args as torrents (.torrent, magnet, or raw infohash) */
 	for (int i = 0; i < argc; i++) {
-		int rv = mbt_session_add_torrent_file(session, argv[i]);
+		int rv = mbt_session_add_torrent_file(session, argv[i], NULL);
 		if (rv < 0)
-			rv = mbt_session_add_magnet(session, argv[i]);
+			rv = mbt_session_add_magnet(session, argv[i], NULL);
 		if (rv < 0 && strlen(argv[i]) == 40) {
 			char mag[256];
 			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", argv[i]);
-			mbt_session_add_magnet(session, mag);
+			mbt_session_add_magnet(session, mag, NULL);
 		}
 	}
 

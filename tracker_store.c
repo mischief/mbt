@@ -8,9 +8,10 @@
 #include <time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
-#include "mbt/log.h"
+#include <sha1.h>
+#include <stdint.h>
 
+#include "mbt/log.h"
 #include "mbt/tracker_server.h"
 
 #define MAX_PEERS_PER_TORRENT 200
@@ -86,8 +87,6 @@ mbt_tracker_store_stats(struct mbt_tracker_store *s, struct mbt_tracker_stats *o
 }
 
 /* --- Connection ID (BEP 15 spoofing protection) --- */
-
-#include "mbt/sha1_compat.h"
 
 uint64_t
 mbt_tracker_store_make_connection_id(struct mbt_tracker_store *s,

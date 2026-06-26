@@ -5,13 +5,15 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdint.h>
 
-#include "mbt/mbt.h"
 #include "mbt/dht.h"
+#include "mbt/event.h"
+
+struct mbt_ev_timer;
 
 static struct mbt_ev *ev;
 static int stop_count;

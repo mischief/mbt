@@ -11,17 +11,21 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <sys/types.h>
 
 #include "mbt/tracker_server.h"
-#include "mbt/event.h"
 #include "mbt/be.h"
 #include "mbt/log.h"
 #include "net.h"
 
 /* Forward declarations from tracker_store.c */
 struct ts_torrent;
+struct mbt_ev;
+struct mbt_ev_io;
+struct mbt_tracker_store;
+
 struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
 struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
 void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,

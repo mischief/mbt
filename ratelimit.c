@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
+#include <stdint.h>
 
 #include "mbt/ratelimit.h"
 

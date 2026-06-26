@@ -7,7 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <endian.h>
+#include "mbt/endian.h"
+#include <stdint.h>
+#include <sys/types.h>
 
 #include "mbt/event.h"
 #include "mbt/infohash.h"
@@ -15,6 +17,9 @@
 #include "mbt/resolve.h"
 #include "internal.h"
 #include "mbt/log.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 /* BEP 15 constants */
 #define UDP_TRACKER_MAGIC 0x41727101980ULL

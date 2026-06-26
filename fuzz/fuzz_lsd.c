@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: ISC
 // Fuzz target: LSD frame parsing
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#include <mbt/infohash.h>
 #include <mbt/lsd.h>
+#include <sys/types.h>
 
 #ifndef __AFL_FUZZ_TESTCASE_LEN
   ssize_t fuzz_len;

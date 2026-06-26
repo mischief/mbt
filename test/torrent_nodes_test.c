@@ -2,7 +2,6 @@
 // Test: .torrent nodes= field (parse + encode round-trip)
 #include <assert.h>
 #include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
 
 #include "mbt/metainfo.h"

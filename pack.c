@@ -2,8 +2,8 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
-#include <endian.h>
 #include <stdint.h>
+#include "mbt/endian.h"
 
 #include "mbt/pack.h"
 

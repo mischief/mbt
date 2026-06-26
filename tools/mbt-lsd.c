@@ -4,16 +4,18 @@
  * and automatically start downloading any discovered torrents.
  */
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <err.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/infohash.h"
 #include "mbt/session.h"
 #include "mbt/storage.h"
 #include "mbt/log.h"
+
+struct mbt_session;
 
 static int
 on_lsd(struct mbt_session *s, struct mbt_infohash *ih,
@@ -60,8 +62,7 @@ main(int argc, char *argv[])
 	if (rv < 0)
 		errx(1, "mbt_ev_new: %s", strerror(-rv));
 
-	cfg.storage_ops = mbt_storage_file_ops();
-	cfg.storage_ctx = (void *)outdir;
+	cfg.default_storage = mbt_storage_file_new(outdir);
 
 	struct mbt_session *session;
 	rv = mbt_session_new(&session, &cfg);

@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <err.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/tracker_server.h"

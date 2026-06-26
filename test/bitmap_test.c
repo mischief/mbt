@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: ISC
 #include <stdint.h>
 #include <stddef.h>
-#include <string.h>
 #include <assert.h>
-#include <sys/types.h>
 
 #include "mbt/bitmap.h"
 

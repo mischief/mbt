@@ -10,8 +10,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 
 #include "mbt/metainfo.h"
 #include "mbt/infohash.h"

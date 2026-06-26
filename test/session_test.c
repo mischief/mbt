@@ -48,7 +48,7 @@ main(int argc, char *argv[])
 	if (rv < 0)
 		errx(1, "mbt_infohash_new: %s", strerror(-rv));
 
-	rv = mbt_session_add_infohash(s, ih);
+	rv = mbt_session_add_infohash(s, ih, NULL);
 	if (rv < 0)
 		errx(1, "add_infohash: %s", strerror(-rv));
 

@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: ISC
 #include <stdlib.h>
 #include <errno.h>
-
 #include <systemd/sd-event.h>
+#include <stdint.h>
+#include <sys/epoll.h>
+#include <time.h>
 
 #include "mbt/event.h"
-
 #include "ev_sd_internal.h"
+
+struct mbt_ev_io;
+struct mbt_ev_timer;
 
 struct ev_sd_io {
 	struct mbt_ev *ev;

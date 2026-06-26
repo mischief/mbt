@@ -6,19 +6,21 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-#include "mbt/sha1_compat.h"
+#include <sha1.h>
+#include <stdint.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/storage.h"
-#include "mbt/picker.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "mbt/tracker_server.h"
 #include "mbt/dht.h"
 #include "mbt/infohash.h"
+
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 4
@@ -80,25 +82,23 @@ test_peer_to_peer_v6(void)
 	struct mbt_storage_memory *memS = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(memS, 0, data, TOTAL_LEN);
 	struct mbt_session_config cfgS = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memS, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memS), .listen_port = 0,
 	};
 	struct mbt_session *sS;
 	mbt_session_new(&sS, &cfgS);
-	mbt_session_add_torrent_buf(sS, encoded, enc_len);
+	mbt_session_add_torrent_buf(sS, encoded, enc_len, NULL);
 
 	/* Leecher connects via IPv6 */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memL), .listen_port = 0,
 	};
 	struct mbt_session *sL;
 	mbt_session_new(&sL, &cfgL);
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s&x.pe=[::1]:%hu", hex, mbt_session_listen_port(sS));
-	mbt_session_add_magnet(sL, magnet);
+	mbt_session_add_magnet(sL, magnet, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };
@@ -164,19 +164,17 @@ test_tracker_v6(void)
 	mbt_be_value_encode(root, &enc2, &enc2_len);
 
 	struct mbt_session_config cfgS = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memS, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memS), .listen_port = 0,
 		.timers = { .tracker_interval = 5 },
 	};
 	struct mbt_session *sS;
 	mbt_session_new(&sS, &cfgS);
-	mbt_session_add_torrent_buf(sS, enc2, enc2_len);
+	mbt_session_add_torrent_buf(sS, enc2, enc2_len, NULL);
 
 	/* Leecher via tracker */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = memL, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(memL), .listen_port = 0,
 		.timers = { .tracker_interval = 5 },
 	};
 	struct mbt_session *sL;
@@ -185,7 +183,7 @@ test_tracker_v6(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&tr=udp://[::1]:%hu/announce", hex, tracker_port);
-	mbt_session_add_magnet(sL, magnet);
+	mbt_session_add_magnet(sL, magnet, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

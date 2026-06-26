@@ -16,16 +16,27 @@ struct mbt_session;
 struct mbt_ev;
 struct mbt_torrent;
 struct mbt_infohash;
+struct mbt_state_ops;
 
 #include "timers.h"
 
 /* Session configuration — caller's policy choices */
+struct mbt_add_torrent_cfg {
+	struct mbt_storage storage; /* zero = use session default_storage */
+	const char *data_dir;       /* passed to mbt_torrent_data_dir(); NULL = unknown */
+};
+
 struct mbt_session_config {
 	struct mbt_ev *ev;
 
-	/* defaults inherited by all torrents (can override per-torrent) */
-	const struct mbt_storage_ops *storage_ops;
-	void *storage_ctx;
+	/* default storage inherited by all torrents; override per-torrent via mbt_add_torrent_cfg */
+	struct mbt_storage default_storage;
+	const char *default_data_dir; /* passed to mbt_torrent_data_dir() for all torrents */
+
+	/* optional persistence layer */
+	const struct mbt_state_ops *state_ops;
+	void *state_ctx;
+
 	mbt_picker_fn picker;
 	void *picker_ctx;
 
@@ -59,11 +70,15 @@ MBT_API int mbt_session_default(struct mbt_session **out, const char *path);
 MBT_API int mbt_session_run(struct mbt_session *s);
 MBT_API void mbt_session_stop(struct mbt_session *s);
 
-/* Add torrents */
-MBT_API int mbt_session_add_torrent_file(struct mbt_session *s, const char *path);
-MBT_API int mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len);
-MBT_API int mbt_session_add_magnet(struct mbt_session *s, const char *uri);
-MBT_API int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih);
+/* Add torrents — cfg may be NULL for defaults */
+MBT_API int mbt_session_add_torrent_file(struct mbt_session *s, const char *path,
+                                          struct mbt_add_torrent_cfg *cfg);
+MBT_API int mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
+                                         struct mbt_add_torrent_cfg *cfg);
+MBT_API int mbt_session_add_magnet(struct mbt_session *s, const char *uri,
+                                    struct mbt_add_torrent_cfg *cfg);
+MBT_API int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
+                                      struct mbt_add_torrent_cfg *cfg);
 
 /* Remove/query */
 MBT_API int mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih);

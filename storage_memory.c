@@ -8,9 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
 
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
+
+struct mbt_torrent;
 
 struct mbt_storage_memory {
 	uint8_t *data;
@@ -159,4 +162,10 @@ const struct mbt_storage_ops *
 mbt_storage_memory_ops(void)
 {
 	return &memory_ops;
+}
+
+struct mbt_storage
+mbt_storage_memory_storage(struct mbt_storage_memory *m)
+{
+	return (struct mbt_storage){ .ops = &memory_ops, .ctx = m };
 }

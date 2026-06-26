@@ -3,10 +3,10 @@
  * test/peerdb_test.c — exercise mbt_peerdb
  */
 #include <assert.h>
-#include <string.h>
 #include <stdio.h>
 
 #include "mbt/peerdb.h"
+#include "mbt/peer_source.h"
 
 int main(void)
 {

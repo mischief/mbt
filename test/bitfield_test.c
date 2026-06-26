@@ -13,19 +13,19 @@
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <sha1.h>
+#include <stdint.h>
 
-#include "mbt/sha1_compat.h"
 #include "mbt/event.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
-#include "mbt/peer.h"
 #include "mbt/storage.h"
-#include "mbt/metainfo.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
-#include "mbt/bitmap.h"
-#include "mbt/log.h"
 #include "mbt/infohash.h"
+
+struct mbt_ev_timer;
+struct mbt_torrent;
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 8
@@ -100,12 +100,11 @@ int main(void)
 	mbt_storage_memory_put_file(mem2, 0, data, 6 * PIECE_LEN);
 
 	struct mbt_session_config cfg2 = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem2, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(mem2), .listen_port = 0,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s2, enc, enc_len); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s2, enc, enc_len, NULL); assert(rv == 0);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
 	assert(t2);
@@ -116,8 +115,7 @@ int main(void)
 	mbt_storage_memory_put_file(mem1, 0, data, 4 * PIECE_LEN);
 
 	struct mbt_session_config cfg1 = {
-		.ev = ev, .storage_ops = mbt_storage_memory_ops(),
-		.storage_ctx = mem1, .listen_port = 0,
+		.ev = ev, .default_storage = mbt_storage_memory_storage(mem1), .listen_port = 0,
 		.max_pieces_per_peer = 4,
 	};
 	struct mbt_session *s1;
@@ -130,7 +128,7 @@ int main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", ih_hex, mbt_session_listen_port(s2));
-	rv = mbt_session_add_magnet(s1, magnet); assert(rv == 0);
+	rv = mbt_session_add_magnet(s1, magnet, NULL); assert(rv == 0);
 
 	struct mbt_torrent *t1 = mbt_session_torrent_first(s1);
 	assert(t1);

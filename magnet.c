@@ -3,8 +3,10 @@
 #include <string.h>
 #include <errno.h>
 #include <ctype.h>
+#include <stdint.h>
 
 #include "mbt/magnet.h"
+#include "mbt/infohash.h"
 
 /* Percent-decode in-place. Returns decoded length. */
 static size_t
