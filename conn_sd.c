@@ -43,7 +43,7 @@ conn_sd_io(sd_event_source *s, int fd, uint32_t revents, void *v)
 	}
 
 	if (revents & EPOLLIN)
-		return sdbuf_io(c->buf, fd, revents);
+		return sdbuf_io(c->buf, fd, MBT_EV_READ);
 
 	return 0;
 }

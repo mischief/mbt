@@ -52,6 +52,13 @@ struct event_base;
 MBT_API int mbt_ev_libevent_new_from(struct mbt_ev **out, struct event_base *base);
 #endif
 
+/* Pollable backend: caller drives the event loop with poll(2) or equivalent */
+struct pollfd;
+MBT_API int mbt_ev_new_pollable(struct mbt_ev **out);
+MBT_API int mbt_ev_pollfd(struct mbt_ev *ev, struct pollfd *fds, int max);
+MBT_API int mbt_ev_timeout_ms(struct mbt_ev *ev);
+MBT_API void mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds);
+
 /* Create event loop using the compiled-in backend */
 static inline int
 mbt_ev_new_default(struct mbt_ev **out)
@@ -60,18 +67,13 @@ mbt_ev_new_default(struct mbt_ev **out)
 	return mbt_ev_sd_new(out);
 #elif defined(HAVE_LIBEVENT)
 	return mbt_ev_libevent_new(out);
+#elif defined(HAVE_POLL_BACKEND)
+	return mbt_ev_new_pollable(out);
 #else
 	(void)out;
 	return -1; /* no built-in backend; caller must provide their own */
 #endif
 }
-
-/* Pollable backend: caller drives the event loop with poll(2) or equivalent */
-struct pollfd;
-MBT_API int mbt_ev_new_pollable(struct mbt_ev **out);
-MBT_API int mbt_ev_pollfd(struct mbt_ev *ev, struct pollfd *fds, int max);
-MBT_API int mbt_ev_timeout_ms(struct mbt_ev *ev);
-MBT_API void mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds);
 
 /* Inline convenience wrappers */
 static inline int

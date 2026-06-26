@@ -62,11 +62,7 @@ main(int argc, char *argv[])
 	if (rv < 0)
 		errx(1, "invalid infohash: %s", argv[0]);
 
-#ifdef HAVE_SD_EVENT
-	rv = mbt_ev_sd_new(&ev);
-#elif defined(HAVE_LIBEVENT)
-	rv = mbt_ev_libevent_new(&ev);
-#endif
+	rv = mbt_ev_new_default(&ev);
 	if (rv < 0) errx(1, "event: %s", strerror(-rv));
 
 	struct mbt_dht *dht;

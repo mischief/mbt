@@ -61,11 +61,7 @@ int main(void)
 
 	/* Create session with file storage */
 	struct mbt_ev *ev;
-#ifdef HAVE_SD_EVENT
-	rv = mbt_ev_sd_new(&ev);
-#elif defined(HAVE_LIBEVENT)
-	rv = mbt_ev_libevent_new(&ev);
-#endif
+	rv = mbt_ev_new_default(&ev);
 	assert(rv == 0);
 
 	struct mbt_session_config cfg = {

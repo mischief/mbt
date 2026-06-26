@@ -7,11 +7,7 @@
 #include <errno.h>
 
 #include <sdbuf.h>
-
-/* sdbuf_io revents flags (matches epoll values) */
-#ifndef EPOLLIN
-#define EPOLLIN 0x001
-#endif
+#include "mbt/event.h"
 
 struct buf
 {
@@ -158,7 +154,7 @@ sdbuf_handle_read(struct sdbuf *b, int fd)
 int
 sdbuf_io(struct sdbuf *b, int fd, uint32_t revents)
 {
-	if(revents & EPOLLIN){
+	if(revents & MBT_EV_READ){
 		return sdbuf_handle_read(b, fd);
 	}
 

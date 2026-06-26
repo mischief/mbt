@@ -103,11 +103,7 @@ main(void)
 	mbt_log_set(mbt_log_stderr, NULL);
 	mbt_log_set_debug(MBT_LOG_ALL);
 
-#ifdef HAVE_SD_EVENT
-	rv = mbt_ev_sd_new(&ev);
-#elif defined(HAVE_LIBEVENT)
-	rv = mbt_ev_libevent_new(&ev);
-#endif
+	rv = mbt_ev_new_default(&ev);
 	assert(rv == 0);
 
 	/* Build .torrent */

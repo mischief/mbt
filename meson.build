@@ -54,7 +54,7 @@ endif
 if event_backend == 'sd-event'
   libsystemd_dep = dependency('libsystemd')
   deps += libsystemd_dep
-  ev_src = ['ev_sd.c', 'conn_sd.c', 'sdbuf.c']
+  ev_src = ['ev_sd.c', 'conn_sd.c']
   add_project_arguments('-DHAVE_SD_EVENT', language: 'c')
 elif event_backend == 'libevent'
   libevent_dep = dependency('libevent')
@@ -123,6 +123,7 @@ bt_src = [
   'pcp.c',
   'net.c',
   'dht.c',
+  'sdbuf.c',
 ] + ev_src + resolve_src
 
 mbt_inc = include_directories('.')

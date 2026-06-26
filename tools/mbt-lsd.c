@@ -52,13 +52,7 @@ main(int argc, char *argv[])
 
 	struct mbt_session_config cfg = {0};
 
-#ifdef HAVE_SD_EVENT
-	rv = mbt_ev_sd_new(&cfg.ev);
-#elif defined(HAVE_LIBEVENT)
-	rv = mbt_ev_libevent_new(&cfg.ev);
-#else
-#error "No event backend configured"
-#endif
+	rv = mbt_ev_new_default(&cfg.ev);
 	if (rv < 0)
 		errx(1, "mbt_ev_new: %s", strerror(-rv));
 

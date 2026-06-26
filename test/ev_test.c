@@ -99,5 +99,16 @@ main(void)
 	test_backend(ev, "libevent");
 #endif
 
+#ifdef HAVE_POLL_BACKEND
+	rv = mbt_ev_new_pollable(&ev);
+	assert(rv == 0);
+	test_backend(ev, "poll");
+#endif
+
+#if !defined(HAVE_SD_EVENT) && !defined(HAVE_LIBEVENT) && !defined(HAVE_POLL_BACKEND)
+	(void)ev;
+	(void)rv;
+#endif
+
 	return 0;
 }

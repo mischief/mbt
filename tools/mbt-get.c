@@ -236,11 +236,7 @@ main(int argc, char *argv[])
 		mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_TORRENT | MBT_LOG_PEER | MBT_LOG_DHT);
 
 	struct mbt_session_config cfg = {0};
-#ifdef HAVE_SD_EVENT
-	rv = mbt_ev_sd_new(&cfg.ev);
-#elif defined(HAVE_LIBEVENT)
-	rv = mbt_ev_libevent_new(&cfg.ev);
-#endif
+	rv = mbt_ev_new_default(&cfg.ev);
 	if (rv < 0)
 		errx(1, "event: %s", strerror(-rv));
 
