@@ -53,11 +53,14 @@ struct piece_info {
 	enum mbt_piece_state state;
 	struct torrent_peer *owner; /* peer downloading this piece, NULL if pending */
 	uint64_t last_activity; /* monotonic time of last block received (usec) */
+	SLIST_ENTRY(piece_info) owner_entry; /* linkage in owner->active_pieces */
 };
 
 /* Per-peer entry in the torrent's peer list */
 struct torrent_peer {
 	SLIST_ENTRY(torrent_peer) entry;
+	SLIST_HEAD(, piece_info) active_pieces; /* pieces currently assigned to this peer */
+	int active_count;      /* length of active_pieces */
 	struct mbt_peer *peer;
 	int outstanding;       /* in-flight requests */
 	int reqq_window;       /* dynamic pipeline target, grows on delivery */
@@ -146,6 +149,24 @@ static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
 
 static void
+piece_assign(struct piece_info *pi, struct torrent_peer *tp)
+{
+	pi->owner = tp;
+	SLIST_INSERT_HEAD(&tp->active_pieces, pi, owner_entry);
+	tp->active_count++;
+}
+
+static void
+piece_release(struct piece_info *pi)
+{
+	struct torrent_peer *tp = pi->owner;
+	if (!tp) return;
+	SLIST_REMOVE(&tp->active_pieces, pi, piece_info, owner_entry);
+	tp->active_count--;
+	pi->owner = NULL;
+}
+
+static void
 torrent_deferred_peer_free(struct mbt_ev_timer *timer, void *v)
 {
 	struct torrent_peer *tp = v;
@@ -198,7 +219,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		 * Only hash mismatches should lead to banning. */
 
 		pi->state = MBT_PIECE_PENDING;
-		pi->owner = NULL;
+		piece_release(pi);
 		pi->received = 0;
 			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 		pi->requested = 0;
@@ -242,7 +263,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 						mbt_peer_send_cancel(tp->peer, i, off, clen);
 					}
 					pi->requested = pi->received;
-					pi->owner = NULL;
+					piece_release(pi);
 				}
 				tp->outstanding = 0;
 				tp->reqq_window = PIPELINE_INIT;
@@ -465,7 +486,7 @@ on_choke(struct mbt_peer *p, int choked, void *arg)
 			struct piece_info *pi = &t->pieces[i];
 			if (pi->owner == tp && pi->state == MBT_PIECE_ACTIVE) {
 				pi->state = MBT_PIECE_PENDING;
-				pi->owner = NULL;
+				piece_release(pi);
 				pi->requested = 0;
 				pi->received = 0;
 				if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
@@ -602,7 +623,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 			pi->requested = 0;
 			pi->state = MBT_PIECE_PENDING;
-			pi->owner = NULL;
+			piece_release(pi);
 			pi->last_activity = 0;
 			pi->data = NULL;
 
@@ -628,7 +649,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			t->have_count++;
 			if (tp && tp->failures > 0) tp->failures--;
 			pi->state = MBT_PIECE_PENDING;
-			pi->owner = NULL;
+			piece_release(pi);
 
 			/* Reset failure count on success */
 			tp->hash_failures = 0;
@@ -881,7 +902,7 @@ on_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, 
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (tp && pi->owner == tp) {
 		pi->state = MBT_PIECE_PENDING;
-		pi->owner = NULL;
+		piece_release(pi);
 		pi->requested = 0;
 		pi->received = 0;
 			if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
@@ -903,18 +924,15 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	if (!tp) return;
 
 	/* Reset any pieces this peer was downloading */
-	if (t->pieces) {
-		for (uint32_t i = 0; i < t->piece_count; i++) {
-			if (t->pieces[i].owner == tp) {
-				t->pieces[i].state = MBT_PIECE_PENDING;
-				t->pieces[i].owner = NULL;
-				t->pieces[i].received = 0;
-				t->pieces[i].requested = 0;
-				free(t->pieces[i].data);
-				t->pieces[i].data = NULL;
-				if (t->pieces[i].blocks) { mbt_bitmap_unref(t->pieces[i].blocks); t->pieces[i].blocks = NULL; }
-			}
-		}
+	struct piece_info *pi;
+	while ((pi = SLIST_FIRST(&tp->active_pieces)) != NULL) {
+		pi->state = MBT_PIECE_PENDING;
+		piece_release(pi);
+		pi->received = 0;
+		pi->requested = 0;
+		free(pi->data);
+		pi->data = NULL;
+		if (pi->blocks) { mbt_bitmap_unref(pi->blocks); pi->blocks = NULL; }
 	}
 
 	/* Remove peer from list */
@@ -998,23 +1016,16 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
 		int idx = -1;
-		int owns_active = 0;
-		for (uint32_t i = 0; i < t->piece_count; i++) {
-			if (t->pieces[i].owner == tp && t->pieces[i].state == MBT_PIECE_ACTIVE) {
-				owns_active++;
-				if (t->pieces[i].requested < t->pieces[i].length && idx < 0)
-					idx = i;
+		struct piece_info *api;
+		SLIST_FOREACH(api, &tp->active_pieces, owner_entry) {
+			if (api->requested < api->length) {
+				idx = (int)(api - t->pieces);
+				break;
 			}
 		}
-		/* Don't pick a new piece if already at cap; finish requesting existing ones.
-		 * Auto-scale so we can fill the pipeline regardless of piece size. */
+		/* Don't pick a new piece if already at cap; finish requesting existing ones */
 		int max_pp = t->max_pieces_per_peer ? t->max_pieces_per_peer : 4;
-		if (t->piece_length > 0) {
-			int bpp = (int)((t->piece_length + BLOCK_SIZE - 1) / BLOCK_SIZE);
-			int needed = (limit + bpp - 1) / bpp;
-			if (needed > max_pp) max_pp = needed;
-		}
-		if (idx < 0 && owns_active >= max_pp)
+		if (idx < 0 && tp->active_count >= max_pp)
 			break;
 		/* If no existing piece, pick a new one */
 		if (idx < 0)
@@ -1062,7 +1073,7 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 
 		if (pi->state != MBT_PIECE_ACTIVE) {
 			pi->state = MBT_PIECE_ACTIVE;
-			pi->owner = tp;
+			piece_assign(pi, tp);
 			pi->last_activity = now_usec();
 		}
 
