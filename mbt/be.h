@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: ISC
 #include "export.h"
-#include <sys/uio.h>
 #include <sys/queue.h>
 #include <inttypes.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 enum {
@@ -27,7 +28,7 @@ struct mbt_be_value
 	TAILQ_ENTRY(mbt_be_value) next;
 	union {
 		long long integer;
-		struct iovec string;
+		struct { uint8_t *buf; size_t len; } string;
 		struct mbt_be_value_head listhead;
 	};
 };
@@ -63,6 +64,6 @@ mbt_be_streq(struct mbt_be_value *v, const char *s)
 {
 	size_t slen = strlen(s);
 	return v && v->type == BE_STRING &&
-	       v->string.iov_len == slen &&
-	       memcmp(v->string.iov_base, s, slen) == 0;
+	       v->string.len == slen &&
+	       memcmp(v->string.buf, s, slen) == 0;
 }

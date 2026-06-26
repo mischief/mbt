@@ -11,7 +11,6 @@
 #include <arpa/inet.h>
 #include <stdint.h>
 #include <sys/types.h>
-#include <sys/uio.h>
 
 #include "mbt/dht.h"
 #include "mbt/be.h"
@@ -81,10 +80,10 @@ get_token(int sock, uint16_t port, const uint8_t *ih, size_t *token_len_out)
 	struct mbt_be_value *tok = r ? mbt_be_find(r, "token") : NULL;
 	uint8_t *token = NULL;
 	if (tok && tok->type == BE_STRING) {
-		token = malloc(tok->string.iov_len);
+		token = malloc(tok->string.len);
 		if (token) {
-			memcpy(token, tok->string.iov_base, tok->string.iov_len);
-			*token_len_out = tok->string.iov_len;
+			memcpy(token, tok->string.buf, tok->string.len);
+			*token_len_out = tok->string.len;
 		}
 	}
 	mbt_be_unref(resp);
@@ -199,7 +198,7 @@ int main(void)
 			struct mbt_be_value *samples = mbt_be_find(r, "samples");
 			struct mbt_be_value *num = mbt_be_find(r, "num");
 			if (samples && samples->type == BE_STRING) {
-				int nsamp = samples->string.iov_len / 20;
+				int nsamp = samples->string.len / 20;
 				printf("bep51_test: got %d samples, num=%lld\n",
 				       nsamp, num ? (long long)num->integer : -1LL);
 				assert(nsamp > 0);

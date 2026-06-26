@@ -19,7 +19,6 @@
 #include <sha1.h>
 #include <stdint.h>
 #include <sys/types.h>
-#include <sys/uio.h>
 
 #define DHT_PEER_ID_LEN 20
 #define DHT_PEER_ID_STRLEN (DHT_PEER_ID_LEN * 2)
@@ -720,7 +719,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	struct mbt_be_value *y = mbt_be_find(msg, "y");
 	if (!y || y->type != BE_STRING) goto out;
 
-	char type = *(char *)y->string.iov_base;
+	char type = *(char *)y->string.buf;
 
 	if (type == 'r') {
 		/* Response */
@@ -729,8 +728,8 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 		/* Extract sender's node ID and add to routing table */
 		struct mbt_be_value *rid = mbt_be_find(r, "id");
-		if (rid && rid->type == BE_STRING && rid->string.iov_len == 20)
-			routing_add(d, rid->string.iov_base, &from);
+		if (rid && rid->type == BE_STRING && rid->string.len == 20)
+			routing_add(d, rid->string.buf, &from);
 
 		/* Check for nodes (find_node or get_peers response) */
 		struct mbt_be_value *nodes = mbt_be_find(r, "nodes");
@@ -748,12 +747,12 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 					d->lookups[i].nodes[j].responded = 1;
 					d->lookups[i].pending--;
 					/* Update node ID from response */
-					if (rid && rid->type == BE_STRING && rid->string.iov_len == 20)
-						memcpy(d->lookups[i].nodes[j].id, rid->string.iov_base, 20);
+					if (rid && rid->type == BE_STRING && rid->string.len == 20)
+						memcpy(d->lookups[i].nodes[j].id, rid->string.buf, 20);
 					/* Store token */
-					if (token && token->type == BE_STRING && token->string.iov_len <= TOKEN_LEN) {
-						memcpy(d->lookups[i].nodes[j].token, token->string.iov_base, token->string.iov_len);
-						d->lookups[i].nodes[j].token_len = token->string.iov_len;
+					if (token && token->type == BE_STRING && token->string.len <= TOKEN_LEN) {
+						memcpy(d->lookups[i].nodes[j].token, token->string.buf, token->string.len);
+						d->lookups[i].nodes[j].token_len = token->string.len;
 					}
 					lk = &d->lookups[i];
 					break;
@@ -764,16 +763,16 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 		/* Parse nodes */
 		if (nodes && nodes->type == BE_STRING)
-			parse_compact_nodes(d, nodes->string.iov_base, nodes->string.iov_len, lk);
+			parse_compact_nodes(d, nodes->string.buf, nodes->string.len, lk);
 		if (nodes6 && nodes6->type == BE_STRING)
-			parse_compact_nodes6(d, nodes6->string.iov_base, nodes6->string.iov_len, lk);
+			parse_compact_nodes6(d, nodes6->string.buf, nodes6->string.len, lk);
 
 		/* Parse peers (values is a list of compact peer strings) */
 		if (values && values->type == BE_LIST && lk) {
 			struct mbt_be_value *val;
 			TAILQ_FOREACH(val, &values->listhead, next) {
-				if (val->type == BE_STRING && val->string.iov_len >= 6)
-					parse_compact_peers(val->string.iov_base, val->string.iov_len,
+				if (val->type == BE_STRING && val->string.len >= 6)
+					parse_compact_peers(val->string.buf, val->string.len,
 					                    lk->peers_cb, lk->arg);
 			}
 		}
@@ -792,19 +791,19 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 		char _qaddr[64];
 		mbt_log_debug(MBT_LOG_DHT, "query %.*s from %s",
-		              (int)q->string.iov_len, (char *)q->string.iov_base,
+		              (int)q->string.len, (char *)q->string.buf,
 		              sa_str(&from, _qaddr, sizeof(_qaddr)));
 
 		/* Add querying node to routing table */
 		struct mbt_be_value *qid = mbt_be_find(a, "id");
-		if (qid && qid->type == BE_STRING && qid->string.iov_len == 20)
-			routing_add(d, qid->string.iov_base, &from);
+		if (qid && qid->type == BE_STRING && qid->string.len == 20)
+			routing_add(d, qid->string.buf, &from);
 
 		if (mbt_be_streq(q, "ping")) {
 			/* Respond to ping */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
@@ -817,10 +816,10 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		} else if (mbt_be_streq(q, "find_node")) {
 			/* Respond with closest nodes */
 			struct mbt_be_value *target_v = mbt_be_find(a, "target");
-			if (!target_v || target_v->type != BE_STRING || target_v->string.iov_len != 20)
+			if (!target_v || target_v->type != BE_STRING || target_v->string.len != 20)
 				goto out;
 			struct dht_node closest[K];
-			int n = routing_closest(d, target_v->string.iov_base, closest, K);
+			int n = routing_closest(d, target_v->string.buf, closest, K);
 			uint8_t compact[K * NODE_COMPACT_LEN];
 			uint8_t compact6[K * NODE6_COMPACT_LEN];
 			int n4 = 0, n6 = 0;
@@ -839,7 +838,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			}
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
@@ -856,13 +855,13 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		} else if (mbt_be_streq(q, "get_peers")) {
 			/* Check if we have stored peers for this infohash */
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
-			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
+			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.len != 20)
 				goto out;
 			uint8_t token[TOKEN_LEN];
 			dht_make_token(d, &from, token);
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
@@ -870,7 +869,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Check stored peers */
 			int found_stored = 0;
 			for (int i = 0; i < d->stored_count; i++) {
-				if (memcmp(d->stored[i].infohash, ih_v->string.iov_base, 20) == 0) {
+				if (memcmp(d->stored[i].infohash, ih_v->string.buf, 20) == 0) {
 					/* Return peers as "values" list */
 					_cleanup_be_ struct mbt_be_value *vals = NULL;
 					if (mbt_be_list_new(&vals) < 0) goto out;
@@ -900,7 +899,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			if (!found_stored) {
 				/* Return closest nodes */
 				struct dht_node closest[K];
-				int n = routing_closest(d, ih_v->string.iov_base, closest, K);
+				int n = routing_closest(d, ih_v->string.buf, closest, K);
 				uint8_t compact_nodes[K * NODE_COMPACT_LEN];
 				uint8_t compact_nodes6[K * NODE6_COMPACT_LEN];
 				int cn4 = 0, cn6 = 0;
@@ -933,13 +932,13 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
 			struct mbt_be_value *port_v = mbt_be_find(a, "port");
 			struct mbt_be_value *tok_v = mbt_be_find(a, "token");
-			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.iov_len != 20)
+			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.len != 20)
 				goto out;
 			if (!tok_v || tok_v->type != BE_STRING ||
-			    !dht_verify_token(d, &from, tok_v->string.iov_base, tok_v->string.iov_len)) {
+			    !dht_verify_token(d, &from, tok_v->string.buf, tok_v->string.len)) {
 				_cleanup_be_ struct mbt_be_value *err = NULL, *el = NULL, *ec = NULL, *em = NULL;
 				if (mbt_be_dict_new(&err) < 0) goto out;
-				if (mbt_be_dict_append_string(err, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+				if (mbt_be_dict_append_string(err, "t", t->string.buf, t->string.len) < 0) goto out;
 				if (mbt_be_dict_append_string(err, "y", "e", 1) < 0) goto out;
 				if (mbt_be_list_new(&el) < 0) goto out;
 				if (mbt_be_integer_new(&ec, 203) < 0) goto out;
@@ -960,12 +959,12 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Find or create storage slot */
 			int slot = -1;
 			for (int i = 0; i < d->stored_count; i++) {
-				if (memcmp(d->stored[i].infohash, ih_v->string.iov_base, 20) == 0)
+				if (memcmp(d->stored[i].infohash, ih_v->string.buf, 20) == 0)
 					{ slot = i; break; }
 			}
 			if (slot < 0 && d->stored_count < DHT_MAX_STORED) {
 				slot = d->stored_count++;
-				memcpy(d->stored[slot].infohash, ih_v->string.iov_base, 20);
+				memcpy(d->stored[slot].infohash, ih_v->string.buf, 20);
 				d->stored[slot].peer_count = 0;
 			}
 			if (slot >= 0 && d->stored[slot].peer_count < 8) {
@@ -980,7 +979,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Respond */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
@@ -992,7 +991,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		} else if (mbt_be_streq(q, "sample_infohashes")) {
 			/* BEP 51: return sample of stored infohashes */
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
-			if (!tgt || tgt->type != BE_STRING || tgt->string.iov_len != 20)
+			if (!tgt || tgt->type != BE_STRING || tgt->string.len != 20)
 				goto out;
 			/* Build samples: up to 20 random infohashes */
 			int nsamp = d->stored_count < 20 ? d->stored_count : 20;
@@ -1012,7 +1011,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			}
 			/* Closest nodes to target */
 			struct dht_node closest[K];
-			int nclosest = routing_closest(d, tgt->string.iov_base, closest, K);
+			int nclosest = routing_closest(d, tgt->string.buf, closest, K);
 			uint8_t compact[K * 26];
 			int clen = 0;
 			for (int i = 0; i < nclosest; i++) {
@@ -1025,7 +1024,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			}
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
@@ -1042,19 +1041,19 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		} else if (mbt_be_streq(q, "get")) {
 			/* BEP 44: get */
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
-			if (!tgt || tgt->type != BE_STRING || tgt->string.iov_len != 20)
+			if (!tgt || tgt->type != BE_STRING || tgt->string.len != 20)
 				goto out;
-			struct dht_item *it = dht_item_find(d, tgt->string.iov_base);
+			struct dht_item *it = dht_item_find(d, tgt->string.buf);
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
 			uint8_t tok[4]; make_txn(d, tok);
 			if (mbt_be_dict_append_string(rb, "token", tok, 4) < 0) goto out;
 			struct dht_node closest[K];
-			int nc2 = routing_closest(d, tgt->string.iov_base, closest, K);
+			int nc2 = routing_closest(d, tgt->string.buf, closest, K);
 			uint8_t cn[K * NODE_COMPACT_LEN]; int cl = 0;
 			for (int j = 0; j < nc2; j++) {
 				if (closest[j].addr.ss_family != AF_INET) continue;
@@ -1088,20 +1087,20 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			if (v_enc_len > MBT_DHT_MAX_VALUE) { free(v_enc); goto out; }
 			struct mbt_be_value *k_val = mbt_be_find(a, "k");
 			if (k_val && k_val->type == BE_STRING &&
-			    k_val->string.iov_len == MBT_DHT_PUBKEY_LEN) {
+			    k_val->string.len == MBT_DHT_PUBKEY_LEN) {
 				struct mbt_be_value *sig_val = mbt_be_find(a, "sig");
 				struct mbt_be_value *seq_val = mbt_be_find(a, "seq");
 				struct mbt_be_value *salt_val = mbt_be_find(a, "salt");
-				if (!sig_val || sig_val->string.iov_len != MBT_DHT_SIG_LEN ||
+				if (!sig_val || sig_val->string.len != MBT_DHT_SIG_LEN ||
 				    !seq_val || seq_val->type != BE_INTEGER) {
 					free(v_enc); goto out;
 				}
 				const char *salt = NULL; size_t slen = 0;
 				if (salt_val && salt_val->type == BE_STRING) {
-					salt = salt_val->string.iov_base; slen = salt_val->string.iov_len;
+					salt = (const char *)salt_val->string.buf; slen = salt_val->string.len;
 				}
-				mbt_dht_put_mutable(d, k_val->string.iov_base,
-				    sig_val->string.iov_base, seq_val->integer,
+				mbt_dht_put_mutable(d, k_val->string.buf,
+				    sig_val->string.buf, seq_val->integer,
 				    salt, slen, v_enc, v_enc_len, NULL, NULL);
 			} else {
 				mbt_dht_put_immutable(d, v_enc, v_enc_len, NULL, NULL);
@@ -1110,7 +1109,7 @@ dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			/* Respond */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.iov_base, t->string.iov_len) < 0) goto out;
+			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;

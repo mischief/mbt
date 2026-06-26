@@ -14,7 +14,6 @@
 #include <stdint.h>
 #include <sys/queue.h>
 #include <sys/types.h>
-#include <sys/uio.h>
 
 #include "mbt/metainfo.h"
 #include "mbt/infohash.h"
@@ -151,7 +150,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 	/* Name */
 	struct mbt_be_value *v = mbt_be_find(info, "name");
 	if (v && v->type == BE_STRING)
-		mi->name = strndup(v->string.iov_base, v->string.iov_len);
+		mi->name = strndup((char *)v->string.buf, v->string.len);
 
 	/* Piece length */
 	v = mbt_be_find(info, "piece length");
@@ -161,10 +160,10 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 	/* Pieces */
 	v = mbt_be_find(info, "pieces");
 	if (v && v->type == BE_STRING) {
-		mi->piece_count = v->string.iov_len / 20;
-		mi->pieces = malloc(v->string.iov_len);
+		mi->piece_count = v->string.len / 20;
+		mi->pieces = malloc(v->string.len);
 		if (mi->pieces)
-			memcpy(mi->pieces, v->string.iov_base, v->string.iov_len);
+			memcpy(mi->pieces, v->string.buf, v->string.len);
 	}
 
 	/* Single file or multi-file */
@@ -195,7 +194,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 					struct mbt_be_value *comp;
 					TAILQ_FOREACH(comp, &fp->listhead, next) {
 						if (path[0]) strcat(path, "/");
-						strncat(path, comp->string.iov_base, comp->string.iov_len);
+						strncat(path, (char *)comp->string.buf, comp->string.len);
 					}
 					mi->files[idx].path = strdup(path);
 				}
@@ -218,20 +217,20 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 			struct mbt_be_value *url;
 			TAILQ_FOREACH(url, &tier->listhead, next) {
 				if (url->type == BE_STRING && mi->tracker_count < MAX_TRACKERS)
-					mi->trackers[mi->tracker_count++] = strndup(url->string.iov_base, url->string.iov_len);
+					mi->trackers[mi->tracker_count++] = strndup((char *)url->string.buf, url->string.len);
 			}
 		}
 	}
 	if (mi->tracker_count == 0) {
 		struct mbt_be_value *ann = mbt_be_find(be, "announce");
 		if (ann && ann->type == BE_STRING)
-			mi->trackers[mi->tracker_count++] = strndup(ann->string.iov_base, ann->string.iov_len);
+			mi->trackers[mi->tracker_count++] = strndup((char *)ann->string.buf, ann->string.len);
 	}
 
 	/* Comment */
 	v = mbt_be_find(be, "comment");
 	if (v && v->type == BE_STRING)
-		mi->comment = strndup(v->string.iov_base, v->string.iov_len);
+		mi->comment = strndup((char *)v->string.buf, v->string.len);
 
 	/* DHT bootstrap nodes: "nodes" = [["host", port], ...] */
 	struct mbt_be_value *nodes = mbt_be_find(be, "nodes");
@@ -246,7 +245,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 			if (mi->node_count >= MAX_TRACKERS) break;
 			snprintf(mi->nodes[mi->node_count].host,
 			         sizeof(mi->nodes[0].host), "%.*s",
-			         (int)host->string.iov_len, (char *)host->string.iov_base);
+			         (int)host->string.len, (char *)host->string.buf);
 			mi->nodes[mi->node_count].port = (uint16_t)port->integer;
 			mi->node_count++;
 		}

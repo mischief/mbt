@@ -7,7 +7,6 @@
 #include <errno.h>
 #include <time.h>
 #include <stdint.h>
-#include <sys/uio.h>
 
 #include "mbt/state.h"
 #include "mbt/torrent.h"
@@ -174,7 +173,7 @@ state_enumerate_impl(void *ctx,
 		if (resume) {
 			struct mbt_be_value *v = mbt_be_find(resume, "data_dir");
 			if (v && v->type == BE_STRING)
-				data_dir = v->string.iov_base;
+				data_dir = (const char *)v->string.buf;
 			v = mbt_be_find(resume, "added");
 			if (v && v->type == BE_INTEGER)
 				added = v->integer;

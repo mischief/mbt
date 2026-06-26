@@ -4,7 +4,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <sys/queue.h>
-#include <sys/uio.h>
 
 #include "mbt/be.h"
 
@@ -17,8 +16,8 @@ test_parse_string(void)
 	rv = mbt_be_value_parse((const unsigned char *)"4:eggs", 6, &be);
 	assert(rv == 6);
 	assert(be->type == BE_STRING);
-	assert(be->string.iov_len == 4);
-	assert(memcmp(be->string.iov_base, "eggs", 4) == 0);
+	assert(be->string.len == 4);
+	assert(memcmp(be->string.buf, "eggs", 4) == 0);
 	mbt_be_unref(be);
 }
 
@@ -59,12 +58,12 @@ test_parse_list(void)
 	struct mbt_be_value *first = TAILQ_FIRST(&be->listhead);
 	assert(first);
 	assert(first->type == BE_STRING);
-	assert(memcmp(first->string.iov_base, "spam", 4) == 0);
+	assert(memcmp(first->string.buf, "spam", 4) == 0);
 
 	struct mbt_be_value *second = TAILQ_NEXT(first, next);
 	assert(second);
 	assert(second->type == BE_STRING);
-	assert(memcmp(second->string.iov_base, "eggs", 4) == 0);
+	assert(memcmp(second->string.buf, "eggs", 4) == 0);
 
 	mbt_be_unref(be);
 }
@@ -82,12 +81,12 @@ test_parse_dict(void)
 	struct mbt_be_value *cow = mbt_be_find(be, "cow");
 	assert(cow);
 	assert(cow->type == BE_STRING);
-	assert(memcmp(cow->string.iov_base, "moo", 3) == 0);
+	assert(memcmp(cow->string.buf, "moo", 3) == 0);
 
 	struct mbt_be_value *spam = mbt_be_find(be, "spam");
 	assert(spam);
 	assert(spam->type == BE_STRING);
-	assert(memcmp(spam->string.iov_base, "eggs", 4) == 0);
+	assert(memcmp(spam->string.buf, "eggs", 4) == 0);
 
 	assert(mbt_be_find(be, "missing") == NULL);
 
@@ -248,12 +247,12 @@ test_binary_string_roundtrip(void)
 	rv = mbt_be_value_parse(input, sizeof(input), &be);
 	assert(rv == 6);
 	assert(be->type == BE_STRING);
-	assert(be->string.iov_len == 4);
+	assert(be->string.len == 4);
 	/* verify the null byte is preserved */
-	assert(((unsigned char *)be->string.iov_base)[0] == 0x01);
-	assert(((unsigned char *)be->string.iov_base)[1] == 0x00);
-	assert(((unsigned char *)be->string.iov_base)[2] == 0x02);
-	assert(((unsigned char *)be->string.iov_base)[3] == 0x03);
+	assert(((unsigned char *)be->string.buf)[0] == 0x01);
+	assert(((unsigned char *)be->string.buf)[1] == 0x00);
+	assert(((unsigned char *)be->string.buf)[2] == 0x02);
+	assert(((unsigned char *)be->string.buf)[3] == 0x03);
 
 	/* encode it back */
 	rv = mbt_be_value_encode(be, &out, &len);

@@ -10,7 +10,6 @@
 #include <netinet/in.h>
 #include <sha1.h>
 #include <stdint.h>
-#include <sys/uio.h>
 
 #include "mbt/log.h"
 #include "mbt/event.h"
@@ -1205,9 +1204,9 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 
 	/* Extract name */
 	tmp = mbt_be_find(be, "name");
-	if (tmp && tmp->type == BE_STRING && tmp->string.iov_len > 0) {
+	if (tmp && tmp->type == BE_STRING && tmp->string.len > 0) {
 		free(t->name);
-		t->name = strndup(tmp->string.iov_base, tmp->string.iov_len);
+		t->name = strndup((char *)tmp->string.buf, tmp->string.len);
 	}
 
 	/* Extract piece length */
@@ -1267,9 +1266,9 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 					if (comp->type != BE_STRING) continue;
 					if (pos > 0 && pos < sizeof(pathbuf) - 1)
 						pathbuf[pos++] = '/';
-					size_t clen = comp->string.iov_len;
+					size_t clen = comp->string.len;
 					if (pos + clen < sizeof(pathbuf)) {
-						memcpy(pathbuf + pos, comp->string.iov_base, clen);
+						memcpy(pathbuf + pos, comp->string.buf, clen);
 						pos += clen;
 					}
 				}
@@ -1294,7 +1293,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	if (!tmp || tmp->type != BE_STRING)
 		return -EINVAL;
 
-	t->piece_count = (uint32_t)(tmp->string.iov_len / 20);
+	t->piece_count = (uint32_t)(tmp->string.len / 20);
 
 	/* Allocate piece tracking */
 	t->pieces = calloc(t->piece_count, sizeof(struct piece_info));
@@ -1302,7 +1301,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		return -ENOMEM;
 
 	/* Set up each piece */
-	uint8_t *hashes = tmp->string.iov_base;
+	uint8_t *hashes = tmp->string.buf;
 	for (uint32_t i = 0; i < t->piece_count; i++) {
 		memcpy(t->pieces[i].hash, hashes + i * 20, 20);
 		if (i == t->piece_count - 1) {

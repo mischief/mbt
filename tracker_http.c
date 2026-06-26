@@ -7,7 +7,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdint.h>
-#include <sys/uio.h>
 
 #include "mbt/infohash.h"
 #include "mbt/tracker.h"
@@ -60,7 +59,7 @@ http_announce_done(struct mbt_http_response *resp, void *arg)
 	struct mbt_be_value *fail = mbt_be_find(be, "failure reason");
 	if (fail && fail->type == BE_STRING) {
 		mbt_log_warn(MBT_LOG_SESSION, "tracker: %.*s",
-		             (int)fail->string.iov_len, (char *)fail->string.iov_base);
+		             (int)fail->string.len, (char *)fail->string.buf);
 		mbt_be_unref(be);
 		free(resp->data);
 		if (req->done_cb)
@@ -79,8 +78,8 @@ http_announce_done(struct mbt_http_response *resp, void *arg)
 	/* Parse compact peer list */
 	struct mbt_be_value *peers = mbt_be_find(be, "peers");
 	if (peers && peers->type == BE_STRING) {
-		int count = (int)(peers->string.iov_len / 6);
-		uint8_t *p = peers->string.iov_base;
+		int count = (int)(peers->string.len / 6);
+		uint8_t *p = peers->string.buf;
 
 		mbt_log_info(MBT_LOG_SESSION, "tracker: %d peers, interval %ds", count, interval);
 
@@ -100,8 +99,8 @@ http_announce_done(struct mbt_http_response *resp, void *arg)
 	/* BEP 7: peers6 (18 bytes per peer) */
 	struct mbt_be_value *peers6 = mbt_be_find(be, "peers6");
 	if (peers6 && peers6->type == BE_STRING) {
-		int count = (int)(peers6->string.iov_len / 18);
-		uint8_t *p = peers6->string.iov_base;
+		int count = (int)(peers6->string.len / 18);
+		uint8_t *p = peers6->string.buf;
 
 		for (int i = 0; i < count; i++) {
 			char addr[INET6_ADDRSTRLEN];

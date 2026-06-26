@@ -8,7 +8,6 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <sys/types.h>
-#include <sys/uio.h>
 
 #include "mbt/peer_source.h"
 #include "mbt/log.h"
@@ -264,9 +263,9 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 		p->reqq = (int)tmp->integer;
 
 	tmp = mbt_be_find(be, "v");
-	if (tmp && tmp->type == BE_STRING && tmp->string.iov_len > 0) {
-		size_t n = MIN(tmp->string.iov_len, sizeof(p->client_version) - 1);
-		const unsigned char *src = (const unsigned char *)tmp->string.iov_base;
+	if (tmp && tmp->type == BE_STRING && tmp->string.len > 0) {
+		size_t n = MIN(tmp->string.len, sizeof(p->client_version) - 1);
+		const unsigned char *src = (const unsigned char *)tmp->string.buf;
 		for (size_t i = 0; i < n; i++)
 			p->client_version[i] = (src[i] >= 0x20 && src[i] != 0x7f) ? (char)src[i] : '?';
 		p->client_version[n] = '\0';
@@ -434,9 +433,9 @@ peer_rx_message(struct mbt_peer *p)
 			rv = mbt_be_value_parse(pbuf, sz, &be);
 			if (rv > 0) {
 				struct mbt_be_value *added = mbt_be_find(be, "added");
-				if (added && added->type == BE_STRING && added->string.iov_len >= 6) {
-					int count = (int)(added->string.iov_len / 6);
-					uint8_t *d = (uint8_t *)added->string.iov_base;
+				if (added && added->type == BE_STRING && added->string.len >= 6) {
+					int count = (int)(added->string.len / 6);
+					uint8_t *d = (uint8_t *)added->string.buf;
 					for (int i = 0; i < count; i++) {
 						char addr[INET_ADDRSTRLEN];
 						uint16_t port;

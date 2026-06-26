@@ -8,7 +8,6 @@
 #include <assert.h>
 #include <stdint.h>
 #include <sys/queue.h>
-#include <sys/uio.h>
 
 #include "mbt/be.h"
 
@@ -45,7 +44,7 @@ be_value_free_impl(struct mbt_be_value *v)
 	for(; v;){
 		switch(v->type){
 		case BE_STRING:
-			free(v->string.iov_base);
+			free(v->string.buf);
 			break;
 		case BE_INTEGER:
 			break;
@@ -164,16 +163,16 @@ be_value_parse_string(const unsigned char *buf, size_t sz, struct mbt_be_value *
 		return -ERANGE;
 	}
 
-	v->string.iov_base = malloc(insz+1);
-	if(!v->string.iov_base){
+	v->string.buf = malloc(insz+1);
+	if(!v->string.buf){
 		mbt_be_unref(v);
 		return -ENOMEM;
 	}
 
-	v->string.iov_len = insz;
+	v->string.len = insz;
 
-	memcpy(v->string.iov_base, cp+1, insz);
-	memset(((char*)v->string.iov_base)+insz, '\0', 1);
+	memcpy(v->string.buf, cp+1, insz);
+	memset(((char*)v->string.buf)+insz, '\0', 1);
 
 	*out = v;
 	return (cp+1-p) + insz;
@@ -311,8 +310,8 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 		}
 
 		/* kidnap key */
-		inner->key = key->string.iov_base;
-		key->string.iov_base = NULL;
+		inner->key = (char *)key->string.buf;
+		key->string.buf = NULL;
 		mbt_be_unref(key);
 
 		be_insert(v, inner);
@@ -383,7 +382,7 @@ mbt_be_pp(struct mbt_be_value *be, void *arg)
 		printf("i%llde\n", be->integer);
 		break;
 	case BE_STRING:
-		printf("%lu:%s\n", be->string.iov_len, (char*)be->string.iov_base);
+		printf("%lu:%s\n", be->string.len, (char*)be->string.buf);
 		break;
 	case BE_LIST:
 		printf("l\n");
@@ -496,10 +495,10 @@ mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf,
 	struct mbt_be_value *v;
 	int rv = be_alloc(BE_STRING, dict, &v);
 	if (rv < 0) return rv;
-	v->string.iov_base = malloc(len);
-	if (!v->string.iov_base) { mbt_be_unref(v); return -ENOMEM; }
-	memcpy(v->string.iov_base, buf, len);
-	v->string.iov_len = len;
+	v->string.buf = malloc(len);
+	if (!v->string.buf) { mbt_be_unref(v); return -ENOMEM; }
+	memcpy(v->string.buf, buf, len);
+	v->string.len = len;
 	rv = mbt_be_dict_append(dict, key, v);
 	mbt_be_unref(v); /* drop creator ref; parent holds its own */
 	return rv;
@@ -510,10 +509,10 @@ mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len)
 {
 	int rv = be_alloc(BE_STRING, NULL, out);
 	if (rv < 0) return rv;
-	(*out)->string.iov_base = malloc(len);
-	if (!(*out)->string.iov_base) { mbt_be_unref(*out); *out = NULL; return -ENOMEM; }
-	memcpy((*out)->string.iov_base, buf, len);
-	(*out)->string.iov_len = len;
+	(*out)->string.buf = malloc(len);
+	if (!(*out)->string.buf) { mbt_be_unref(*out); *out = NULL; return -ENOMEM; }
+	memcpy((*out)->string.buf, buf, len);
+	(*out)->string.len = len;
 	return 0;
 }
 
@@ -562,10 +561,10 @@ encode_getsize_cb(struct mbt_be_value *v, void *arg)
 	switch(v->type){
 	case BE_STRING:
 		/* size:string */
-		slen = snprintf(buf, sizeof(buf), "%lu", v->string.iov_len);
+		slen = snprintf(buf, sizeof(buf), "%lu", v->string.len);
 		e->len += slen;
 		e->len += 1;
-		e->len += v->string.iov_len;
+		e->len += v->string.len;
 		break;
 
 	case BE_INTEGER:
@@ -603,10 +602,10 @@ encode_cb(struct mbt_be_value *v, void *arg)
 	switch(v->type){
 	case BE_STRING:
 		/* size:string */
-		slen = sprintf(e->ptr, "%zu:", v->string.iov_len);
+		slen = sprintf(e->ptr, "%zu:", v->string.len);
 		e->ptr += slen;
-		memcpy(e->ptr, v->string.iov_base, v->string.iov_len);
-		e->ptr += v->string.iov_len;
+		memcpy(e->ptr, v->string.buf, v->string.len);
+		e->ptr += v->string.len;
 		break;
 
 	case BE_INTEGER:
