@@ -39,6 +39,10 @@ if host_machine.system() == 'linux'
   deps += libmd_dep
 elif host_machine.system() == 'freebsd'
   deps += cc.find_library('md')
+elif host_machine.system() == 'sunos'
+  deps += cc.find_library('socket')
+  deps += cc.find_library('nsl')
+  deps += cc.find_library('md')
 endif
 
 # Event backend (one or the other)
