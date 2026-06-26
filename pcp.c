@@ -15,7 +15,7 @@
 #include <errno.h>
 #include <stdint.h>
 
-#ifndef __linux__
+#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <net/route.h>
 
@@ -258,7 +258,7 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 		p->gateway.ss_family = AF_INET;
 		((struct sockaddr_in *)&p->gateway)->sin_port = htons(PCP_PORT);
 		((struct sockaddr_in *)&p->gateway)->sin_addr.s_addr = gw;
-#else
+#elif defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__APPLE__)
 		/* BSD: use sysctl routing table to find default gateway */
 		uint32_t gw = 0;
 		int mib[7] = { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0, 0 };
@@ -293,6 +293,10 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 		p->gateway.ss_family = AF_INET;
 		((struct sockaddr_in *)&p->gateway)->sin_port = htons(PCP_PORT);
 		((struct sockaddr_in *)&p->gateway)->sin_addr.s_addr = gw;
+#else
+		/* No gateway auto-detection on this platform */
+		free(p);
+		return -ENOENT;
 #endif
 	}
 
