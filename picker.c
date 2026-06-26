@@ -75,11 +75,10 @@ mbt_picker_rarest(struct mbt_torrent *t, void *peer, void *ctx)
 	/* Phase 3: endgame — allow duplicate requests */
 	/* (handled by drive_peer when endgame flag is set) */
 
-	/* Phase 2: rarest first — scan candidates, pick lowest availability */
+	/* Phase 2: rarest first — use precomputed per-piece availability counters */
 	int best = -1;
 	int best_avail = INT_MAX;
 	int ties = 0;
-	int npeer = mbt_torrent_peer_count(t);
 
 	for (uint32_t i = 0; i < bits; i++) {
 		if (mbt_bitmap_isset(peer_bits, i) <= 0)
@@ -89,15 +88,7 @@ mbt_picker_rarest(struct mbt_torrent *t, void *peer, void *ctx)
 		if (mbt_torrent_piece_fully_requested(t, i))
 			continue;
 
-		/* Count how many peers have this piece */
-		int avail = 0;
-		for (int j = 0; j < npeer; j++) {
-			struct mbt_peer *pp = mbt_torrent_peer_at(t, j);
-			struct mbt_bitmap *pb = pp ? mbt_peer_bitfield(pp) : NULL;
-			if (pb && mbt_bitmap_isset(pb, i) > 0)
-				avail++;
-		}
-
+		int avail = mbt_torrent_piece_avail(t, i);
 		if (avail < best_avail) {
 			best_avail = avail;
 			best = (int)i;

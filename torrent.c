@@ -112,6 +112,9 @@ struct mbt_torrent {
 	struct mbt_bitmap *have;
 	uint32_t have_count;
 
+	/* Per-piece availability count (how many connected peers have each piece) */
+	uint16_t *avail;
+
 	/* Peers */
 	SLIST_HEAD(, torrent_peer) peers;
 	int peer_count;
@@ -508,6 +511,9 @@ on_have(struct mbt_peer *p, uint32_t piece, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
+	if (t->avail && piece < t->piece_count && t->avail[piece] < UINT16_MAX)
+		t->avail[piece]++;
+
 	/* Become interested if peer has a piece we need */
 	if (t->have && mbt_bitmap_isset(t->have, piece) <= 0 &&
 	    !mbt_peer_interested(p))
@@ -528,6 +534,12 @@ on_bitfield(struct mbt_peer *p, struct mbt_bitmap *bits, void *arg)
 	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: bitfield %zu/%u pieces",
 	              mbt_peer_addr(p), mbt_peer_conn_port(p),
 	              mbt_bitmap_count(bits), t->piece_count);
+
+	if (t->avail) {
+		for (uint32_t i = 0; i < t->piece_count; i++)
+			if (mbt_bitmap_isset(bits, i) > 0 && t->avail[i] < UINT16_MAX)
+				t->avail[i]++;
+	}
 
 	if (!mbt_peer_choked(p) && t->pieces)
 		torrent_drive_peer(t, tp);
@@ -923,6 +935,16 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
+	/* Decrement availability for all pieces this peer had */
+	if (t->avail) {
+		struct mbt_bitmap *pb = mbt_peer_bitfield(p);
+		if (pb) {
+			for (uint32_t i = 0; i < t->piece_count; i++)
+				if (mbt_bitmap_isset(pb, i) > 0 && t->avail[i] > 0)
+					t->avail[i]--;
+		}
+	}
+
 	/* Reset any pieces this peer was downloading */
 	struct piece_info *pi;
 	while ((pi = SLIST_FIRST(&tp->active_pieces)) != NULL) {
@@ -1185,6 +1207,7 @@ mbt_torrent_free(struct mbt_torrent *t)
 		}
 		free(t->pieces);
 	}
+	free(t->avail);
 
 	if (t->timeout_timer)
 		mbt_ev_timer_free(t->timeout_timer);
@@ -1365,6 +1388,9 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		}
 		t->pieces[i].state = MBT_PIECE_PENDING;
 	}
+
+	/* Allocate availability counters */
+	t->avail = calloc(t->piece_count, sizeof(*t->avail));
 
 	/* Allocate have bitmap */
 	mbt_bitmap_new_bits(&t->have, t->piece_count);
@@ -1635,6 +1661,14 @@ mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece)
 	if (!t->pieces || piece >= t->piece_count)
 		return 0;
 	return t->pieces[piece].requested >= t->pieces[piece].length;
+}
+
+int
+mbt_torrent_piece_avail(struct mbt_torrent *t, uint32_t piece)
+{
+	if (!t->avail || piece >= t->piece_count)
+		return 0;
+	return t->avail[piece];
 }
 
 void

@@ -95,6 +95,7 @@ MBT_API struct mbt_peer *mbt_torrent_peer_at(struct mbt_torrent *t, int idx);
 MBT_API int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);
 MBT_API int mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece);
 MBT_API int mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece);
+MBT_API int mbt_torrent_piece_avail(struct mbt_torrent *t, uint32_t piece);
 
 /* Bulk piece state query: 0=pending, 1=active(requested), 2=have */
 MBT_API void mbt_torrent_piece_map(struct mbt_torrent *t, uint8_t *out, uint32_t count);
