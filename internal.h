@@ -33,7 +33,8 @@
 
 static inline uint32_t mbt_random32(void) {
 	uint32_t v;
-	if (getentropy(&v, sizeof(v)) < 0) v = 0;
+	while (getentropy(&v, sizeof(v)) < 0)
+		;
 	return v;
 }
 
