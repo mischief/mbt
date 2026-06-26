@@ -104,6 +104,7 @@ int main(void)
 
 	/* Cleanup */
 	mbt_session_free(session);
+	mbt_storage_file_free(&cfg.default_storage);
 	mbt_ev_destroy(ev);
 
 	char fpath[256];
