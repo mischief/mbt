@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: ISC
-#include <sys/param.h> /* MIN */
+#include "mbt/compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

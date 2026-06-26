@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: ISC
-#include <sys/param.h>
+#include "mbt/compat.h"
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>

@@ -2,6 +2,7 @@ project('mbt', 'c', version: '0.1', default_options: ['c_std=c23', 'warning_leve
 
 add_project_arguments('-D_DEFAULT_SOURCE', '-D_GNU_SOURCE', language: 'c')
 
+
 cc = meson.get_compiler('c')
 
 checkargs = '''
