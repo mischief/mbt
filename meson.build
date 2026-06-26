@@ -196,7 +196,10 @@ endif
 executable('mbt-probe', 'tools/mbt-probe.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 executable('mbt-pcp', 'tools/mbt-pcp.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
-ncurses_dep = dependency('ncurses', required: false)
+ncurses_dep = dependency('ncursesw', required: false)
+if not ncurses_dep.found()
+  ncurses_dep = dependency('ncurses', required: false)
+endif
 if ncurses_dep.found() and libcurl_dep.found()
   executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep, libcurl_dep], install: true)
 endif
