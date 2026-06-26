@@ -143,18 +143,30 @@ poll_reap(struct poll_ev *pev)
 	}
 }
 
+int mbt_ev_io_count(struct mbt_ev *ev);
+
 static int
 poll_run(struct mbt_ev *ev)
 {
 	struct poll_ev *pev = (struct poll_ev *)ev;
+	struct pollfd *fds = NULL;
+	int cap = 0;
 	pev->running = 1;
 	while (pev->running) {
-		struct pollfd fds[64];
-		int n = mbt_ev_pollfd(ev, fds, 64);
+		int need = mbt_ev_io_count(ev);
+		if (need > cap) {
+			int newcap = need + 16;
+			struct pollfd *tmp = realloc(fds, newcap * sizeof(*fds));
+			if (!tmp) break;
+			fds = tmp;
+			cap = newcap;
+		}
+		int n = mbt_ev_pollfd(ev, fds, cap);
 		int ms = mbt_ev_timeout_ms(ev);
 		poll(fds, n, ms);
 		mbt_ev_dispatch(ev, fds, n);
 	}
+	free(fds);
 	return 0;
 }
 
@@ -200,6 +212,17 @@ mbt_ev_new_pollable(struct mbt_ev **out)
 	SLIST_INIT(&pev->timers);
 	*out = &pev->base;
 	return 0;
+}
+
+int
+mbt_ev_io_count(struct mbt_ev *ev)
+{
+	struct poll_ev *pev = (struct poll_ev *)ev;
+	int n = 0;
+	struct poll_io *io;
+	SLIST_FOREACH(io, &pev->ios, entry)
+		if (!io->dead) n++;
+	return n;
 }
 
 int
@@ -250,13 +273,12 @@ mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds)
 	struct poll_io *io;
 	SLIST_FOREACH(io, &pev->ios, entry) {
 		if (i >= nfds) break;
-		if (!io->dead) {
-			uint32_t fired = 0;
-			if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) fired |= MBT_EV_READ;
-			if (fds[i].revents & POLLOUT) fired |= MBT_EV_WRITE;
-			if (fired)
-				io->cb((struct mbt_ev_io *)io, io->fd, fired, io->arg);
-		}
+		if (io->dead) continue;
+		uint32_t fired = 0;
+		if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) fired |= MBT_EV_READ;
+		if (fds[i].revents & POLLOUT) fired |= MBT_EV_WRITE;
+		if (fired)
+			io->cb((struct mbt_ev_io *)io, io->fd, fired, io->arg);
 		i++;
 	}
 
