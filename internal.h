@@ -55,5 +55,6 @@ struct mbt_ratelimit *mbt_session_get_download_limit(struct mbt_session *s);
 void mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s);
 int mbt_session_max_pieces_per_peer(struct mbt_session *s);
 int mbt_session_reqq(struct mbt_session *s);
+int mbt_session_max_pipeline(struct mbt_session *s);
 
 #endif

@@ -95,6 +95,7 @@ struct mbt_session {
 	int max_peers;
 	int max_pieces_per_peer;
 	int reqq;
+	int max_pipeline;
 	mbt_http_fn http;
 	void *http_arg;
 	uint8_t peer_id[20];
@@ -575,6 +576,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->max_pieces_per_peer = cfg->max_pieces_per_peer ? cfg->max_pieces_per_peer : 4;
 	s->reqq = cfg->reqq;
+	s->max_pipeline = cfg->max_pipeline;
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
 
@@ -1440,6 +1442,13 @@ mbt_session_reqq(struct mbt_session *s)
 {
 	return s ? s->reqq : 0;
 }
+
+int
+mbt_session_max_pipeline(struct mbt_session *s)
+{
+	return (s && s->max_pipeline > 0) ? s->max_pipeline : 0;
+}
+
 void
 mbt_session_set_upload_rate(struct mbt_session *s, uint64_t bytes_per_sec)
 {

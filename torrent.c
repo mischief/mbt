@@ -38,7 +38,8 @@ enum {
 	BLOCK_SIZE = 16384,
 	METADATA_BLOCK_SIZE = 16384,
 	MAX_PEERS = 50,
-	PIPELINE_DEPTH = 512,
+	PIPELINE_DEPTH = 512,  /* default max per-peer pipeline */
+	PIPELINE_INIT = 4,     /* slow-start initial window */
 };
 
 /* Per-piece tracking */
@@ -244,7 +245,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 					pi->owner = NULL;
 				}
 				tp->outstanding = 0;
-				tp->reqq_window = 4;
+				tp->reqq_window = PIPELINE_INIT;
 			}
 		}
 	}
@@ -575,7 +576,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	pi->last_activity = now_usec();
 
 	if (tp->outstanding > 0) tp->outstanding--;
-	if (tp->reqq_window < 512)
+	if (tp->reqq_window < PIPELINE_DEPTH)
 		tp->reqq_window++;
 
 	/* Piece complete? */
@@ -984,13 +985,15 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		return;
 	}
 	if (tp->reqq_window == 0)
-		tp->reqq_window = 4;
+		tp->reqq_window = PIPELINE_INIT;
 	int limit = tp->reqq_window;
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0 && peer_limit < limit)
 		limit = peer_limit;
-	if (limit > 512)
-		limit = 512;
+	int max_pipeline = mbt_session_max_pipeline(t->session);
+	if (max_pipeline == 0) max_pipeline = PIPELINE_DEPTH;
+	if (limit > max_pipeline)
+		limit = max_pipeline;
 
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
