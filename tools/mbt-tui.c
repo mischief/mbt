@@ -73,6 +73,8 @@ static int selected;
 static int detail_view; /* 0=overview, 1=peers, 2=pieces */
 static int detail_scroll;
 static int debug_mode;
+static volatile sig_atomic_t resize_pending;
+static void do_resize(void);
 
 /* Log ring buffer */
 #define LOG_LINES 256
@@ -366,6 +368,7 @@ static void
 on_input(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
 {
 	(void)io; (void)fd; (void)events; (void)arg;
+	if (resize_pending) { resize_pending = 0; do_resize(); }
 	int ch = getch();
 	if (ch == ERR) return;
 
@@ -413,6 +416,7 @@ static void
 on_refresh(struct mbt_ev_timer *timer, void *arg)
 {
 	(void)arg;
+	if (resize_pending) { resize_pending = 0; do_resize(); }
 
 	/* Compute download rate from bytes received across all active torrents */
 	uint64_t total_bytes = 0;
@@ -440,14 +444,23 @@ static void
 on_resize(int sig)
 {
 	(void)sig;
+	resize_pending = 1;
+}
+
+static void
+do_resize(void)
+{
+	/* Let ncurses query the terminal for the new size */
 	endwin();
 	refresh();
-	/* Recreate windows */
+	resizeterm(LINES, COLS);
+
 	int list_h = LINES / 2;
 	int det_h = LINES - list_h - 2;
 	wresize(win_list, list_h, COLS);
+	mvwin(win_list, 1, 0);
 	wresize(win_detail, det_h, COLS);
-	mvwin(win_detail, list_h, 0);
+	mvwin(win_detail, list_h + 1, 0);
 	wresize(win_cmd, 1, COLS);
 	mvwin(win_cmd, LINES - 1, 0);
 	draw_all();
