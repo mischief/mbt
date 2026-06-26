@@ -132,12 +132,16 @@ bt_src = [
 
 mbt_inc = include_directories('.')
 
+_verscript = '-Wl,--version-script=' + meson.current_source_dir() / 'libmbt.map'
+libmbt_link_args = cc.has_link_argument(_verscript) ? [_verscript] : []
+libmbt_link_depends = libmbt_link_args.length() > 0 ? files('libmbt.map') : []
+
 libmbt = library('mbt', bt_src, dependencies: deps, install: true,
                  include_directories: mbt_inc,
                  soversion: 0,
                  c_args: ['-fvisibility=hidden', '-DMBT_BUILDING'],
-                 link_args: ['-Wl,--version-script=' + meson.current_source_dir() / 'libmbt.map'],
-                 link_depends: files('libmbt.map'))
+                 link_args: libmbt_link_args,
+                 link_depends: libmbt_link_depends)
 
 install_headers(
   'mbt/mbt.h',
