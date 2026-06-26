@@ -1025,6 +1025,11 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		}
 		/* Don't pick a new piece if already at cap; finish requesting existing ones */
 		int max_pp = t->max_pieces_per_peer ? t->max_pieces_per_peer : 4;
+		if (t->piece_length > 0) {
+			int bpp = (int)((t->piece_length + BLOCK_SIZE - 1) / BLOCK_SIZE);
+			int needed = (limit + bpp - 1) / bpp;
+			if (needed > max_pp) max_pp = needed;
+		}
 		if (idx < 0 && tp->active_count >= max_pp)
 			break;
 		/* If no existing piece, pick a new one */
