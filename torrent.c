@@ -230,6 +230,19 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 				              mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer),
 				              mbt_peer_choked(tp->peer) ? "choked" : "no response",
 				              t->timers.snub_timeout);
+				/* Cancel outstanding requests and release owned pieces */
+				for (uint32_t i = 0; i < t->piece_count; i++) {
+					struct piece_info *pi = &t->pieces[i];
+					if (pi->owner != tp) continue;
+					size_t clen = BLOCK_SIZE;
+					for (size_t off = pi->received; off < pi->requested; off += clen) {
+						if (off + clen > pi->length) clen = pi->length - off;
+						mbt_peer_send_cancel(tp->peer, i, off, clen);
+					}
+					pi->requested = pi->received;
+					pi->owner = NULL;
+				}
+				tp->outstanding = 0;
 			}
 		}
 	}
@@ -968,10 +981,10 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 	}
 	int limit = 64; /* default pipeline depth */
 	int peer_limit = mbt_peer_reqq(tp->peer);
-	if (peer_limit > 0)
+	if (peer_limit > 0 && peer_limit < limit)
 		limit = peer_limit;
-	if (limit > 4096)
-		limit = 4096;
+	if (limit > 256)
+		limit = 256;
 
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
