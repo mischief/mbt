@@ -90,6 +90,7 @@ struct mbt_torrent {
 	size_t metadata_len;
 	size_t metadata_have;  /* bytes received */
 	int metadata_pieces;   /* total metadata pieces expected */
+	struct mbt_bitmap *metadata_recv; /* which pieces have been received */
 
 	/* Piece map (populated after metadata) */
 	struct piece_info *pieces;
@@ -419,6 +420,7 @@ on_active(struct mbt_peer *p, void *arg)
 			t->metadata_len = mbt_peer_metadata_size(p);
 			t->metadata = calloc(1, t->metadata_len);
 			t->metadata_pieces = (t->metadata_len + METADATA_BLOCK_SIZE - 1) / METADATA_BLOCK_SIZE;
+			mbt_bitmap_new_bits(&t->metadata_recv, t->metadata_pieces);
 		}
 		torrent_request_metadata(t, tp);
 	}
@@ -710,10 +712,13 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 		return;
 
 	size_t copy_len = MIN(len, t->metadata_len - offset);
-	memcpy(t->metadata + offset, data, copy_len);
-	t->metadata_have += copy_len;
-	if (t->metadata_have > t->metadata_len)
-		t->metadata_have = t->metadata_len;
+	/* Only count this piece once — duplicate delivery from multiple peers */
+	if (!t->metadata_recv || !mbt_bitmap_isset(t->metadata_recv, piece)) {
+		memcpy(t->metadata + offset, data, copy_len);
+		t->metadata_have += copy_len;
+		if (t->metadata_recv)
+			mbt_bitmap_set(t->metadata_recv, piece);
+	}
 
 	/* All metadata received? */
 	if (t->metadata_have >= t->metadata_len) {
@@ -735,6 +740,8 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 			    got, want, t->metadata_len, t->metadata_have);
 			t->metadata_have = 0;
 			memset(t->metadata, 0, t->metadata_len);
+			if (t->metadata_recv)
+				mbt_bitmap_clear(t->metadata_recv);
 			return;
 		}
 
@@ -1145,6 +1152,7 @@ mbt_torrent_free(struct mbt_torrent *t)
 		mbt_ev_timer_free(t->ratelimit_timer);
 	mbt_peerdb_free(&t->peerdb);
 	mbt_bitmap_unref(t->have);
+	mbt_bitmap_unrefp(&t->metadata_recv);
 	free(t->metadata);
 	free(t->name);
 	if (t->files) {
