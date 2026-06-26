@@ -59,6 +59,7 @@ struct torrent_peer {
 	SLIST_ENTRY(torrent_peer) entry;
 	struct mbt_peer *peer;
 	int outstanding;       /* in-flight requests */
+	int reqq_window;       /* dynamic pipeline target, grows on delivery */
 	int hash_failures;     /* consecutive hash failures from this peer */
 	int failures;          /* peer penalty score (decays over time) */
 	int snubbed;           /* peer not sending data, skip in drive_peer */
@@ -243,6 +244,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 					pi->owner = NULL;
 				}
 				tp->outstanding = 0;
+				tp->reqq_window = 4;
 			}
 		}
 	}
@@ -573,6 +575,8 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	pi->last_activity = now_usec();
 
 	if (tp->outstanding > 0) tp->outstanding--;
+	if (tp->reqq_window < 512)
+		tp->reqq_window++;
 
 	/* Piece complete? */
 	if (pi->received >= pi->length) {
@@ -979,12 +983,14 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			mbt_ev_timer_new(t->ev, &t->ratelimit_timer, d, torrent_ratelimit_retry, t);
 		return;
 	}
-	int limit = 64; /* default pipeline depth */
+	if (tp->reqq_window == 0)
+		tp->reqq_window = 4;
+	int limit = tp->reqq_window;
 	int peer_limit = mbt_peer_reqq(tp->peer);
 	if (peer_limit > 0 && peer_limit < limit)
 		limit = peer_limit;
-	if (limit > 256)
-		limit = 256;
+	if (limit > 512)
+		limit = 512;
 
 	while (tp->outstanding < limit) {
 		/* Prefer continuing a piece this peer already owns */
