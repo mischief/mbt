@@ -38,8 +38,12 @@ static inline uint32_t mbt_random32(void) {
 }
 
 static inline uint32_t mbt_random_uniform(uint32_t upper) {
-	if (upper == 0) return 0;
-	return arc4random_uniform(upper);
+	if (upper <= 1) return 0;
+	/* rejection sampling to avoid modulo bias */
+	uint32_t min = -upper % upper;
+	uint32_t r;
+	do { r = mbt_random32(); } while (r < min);
+	return r % upper;
 }
 
 /* Internal interfaces shared between session.c and torrent.c */

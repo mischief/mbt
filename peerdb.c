@@ -4,9 +4,12 @@
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
-#include <sys/tree.h>
 
 #include "mbt/peerdb.h"
+
+#define PEERDB_INIT_CAP 64
+#define PEERDB_LOAD_NUM 3
+#define PEERDB_LOAD_DEN 4  /* grow at 75% load */
 
 static uint64_t
 peerdb_now(void)
@@ -16,35 +19,71 @@ peerdb_now(void)
 	return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
-static int
-peer_cmp(struct mbt_peer_entry *a, struct mbt_peer_entry *b)
+static uint32_t
+peer_hash(const char *addr, uint16_t port)
 {
-	int rv = strcmp(a->addr, b->addr);
-	if (rv != 0)
-		return rv;
-	return (int)a->port - (int)b->port;
+	/* FNV-1a */
+	uint32_t h = 2166136261u;
+	for (const unsigned char *p = (const unsigned char *)addr; *p; p++) {
+		h ^= *p;
+		h *= 16777619u;
+	}
+	h ^= port & 0xff;
+	h *= 16777619u;
+	h ^= (port >> 8) & 0xff;
+	h *= 16777619u;
+	return h;
 }
 
-RB_GENERATE(mbt_peerdb, mbt_peer_entry, entry, peer_cmp)
+static struct mbt_peer_entry **
+peer_slot(struct mbt_peer_entry **slots, size_t cap,
+          const char *addr, uint16_t port)
+{
+	size_t i = peer_hash(addr, port) & (cap - 1);
+	while (slots[i] && (strcmp(slots[i]->addr, addr) != 0 || slots[i]->port != port))
+		i = (i + 1) & (cap - 1);
+	return &slots[i];
+}
+
+static int
+peerdb_grow(struct mbt_peerdb *db)
+{
+	size_t newcap = db->cap ? db->cap * 2 : PEERDB_INIT_CAP;
+	struct mbt_peer_entry **newslots = calloc(newcap, sizeof(*newslots));
+	if (!newslots)
+		return -1;
+
+	for (size_t i = 0; i < db->cap; i++) {
+		if (!db->slots[i]) continue;
+		*peer_slot(newslots, newcap, db->slots[i]->addr, db->slots[i]->port) = db->slots[i];
+	}
+
+	free(db->slots);
+	db->slots = newslots;
+	db->cap = newcap;
+	return 0;
+}
 
 void
 mbt_peerdb_init(struct mbt_peerdb *db)
 {
-	RB_INIT(db);
+	db->slots = NULL;
+	db->cap = 0;
+	db->count = 0;
 }
 
 struct mbt_peer_entry *
 mbt_peerdb_insert(struct mbt_peerdb *db, const char *addr, uint16_t port, int source)
 {
-	struct mbt_peer_entry key;
-	snprintf(key.addr, sizeof(key.addr), "%s", addr);
-	key.port = port;
+	if (db->count * PEERDB_LOAD_DEN >= db->cap * PEERDB_LOAD_NUM)
+		if (peerdb_grow(db) < 0)
+			return NULL;
 
-	struct mbt_peer_entry *existing = RB_FIND(mbt_peerdb, db, &key);
-	if (existing) {
-		existing->source = source;
-		existing->last_seen = peerdb_now();
-		return existing;
+	struct mbt_peer_entry **slot = peer_slot(db->slots, db->cap, addr, port);
+	if (*slot) {
+		(*slot)->source = source;
+		(*slot)->last_seen = peerdb_now();
+		return *slot;
 	}
 
 	struct mbt_peer_entry *e = calloc(1, sizeof(*e));
@@ -57,35 +96,34 @@ mbt_peerdb_insert(struct mbt_peerdb *db, const char *addr, uint16_t port, int so
 	e->source = source;
 	e->last_seen = peerdb_now();
 
-	RB_INSERT(mbt_peerdb, db, e);
+	*slot = e;
+	db->count++;
 	return e;
 }
 
 struct mbt_peer_entry *
 mbt_peerdb_find(struct mbt_peerdb *db, const char *addr, uint16_t port)
 {
-	struct mbt_peer_entry key;
-	snprintf(key.addr, sizeof(key.addr), "%s", addr);
-	key.port = port;
-	return RB_FIND(mbt_peerdb, db, &key);
+	if (!db->cap)
+		return NULL;
+	return *peer_slot(db->slots, db->cap, addr, port);
 }
 
 struct mbt_peer_entry *
 mbt_peerdb_select(struct mbt_peerdb *db)
 {
 	struct mbt_peer_entry *best = NULL;
-	struct mbt_peer_entry *e;
 	uint64_t now = peerdb_now();
 
-	RB_FOREACH(e, mbt_peerdb, db) {
+	for (size_t i = 0; i < db->cap; i++) {
+		struct mbt_peer_entry *e = db->slots[i];
+		if (!e) continue;
+
 		if (e->state != MBT_PEERDB_KNOWN && e->state != MBT_PEERDB_FAILED)
 			continue;
-
-		/* Don't retry banned peers */
 		if (e->state == MBT_PEERDB_BANNED)
 			continue;
 
-		/* Exponential backoff: 30s, 2m, 10m, 30m, 1h, 1h, ... */
 		if (e->state == MBT_PEERDB_FAILED && e->last_attempt > 0) {
 			static const uint64_t backoff[] = {
 				30, 120, 600, 1800, 3600,
@@ -95,7 +133,6 @@ mbt_peerdb_select(struct mbt_peerdb *db)
 				continue;
 		}
 
-		/* Prefer most recently seen */
 		if (!best || e->last_seen > best->last_seen)
 			best = e;
 	}
@@ -110,9 +147,8 @@ int
 mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peerdb_state state)
 {
 	int n = 0;
-	struct mbt_peer_entry *e;
-	RB_FOREACH(e, mbt_peerdb, db)
-		if (e->state == state)
+	for (size_t i = 0; i < db->cap; i++)
+		if (db->slots[i] && db->slots[i]->state == state)
 			n++;
 	return n;
 }
@@ -120,19 +156,16 @@ mbt_peerdb_count(struct mbt_peerdb *db, enum mbt_peerdb_state state)
 int
 mbt_peerdb_total(struct mbt_peerdb *db)
 {
-	int n = 0;
-	struct mbt_peer_entry *e;
-	RB_FOREACH(e, mbt_peerdb, db)
-		n++;
-	return n;
+	return (int)db->count;
 }
 
 void
 mbt_peerdb_free(struct mbt_peerdb *db)
 {
-	struct mbt_peer_entry *e, *next;
-	RB_FOREACH_SAFE(e, mbt_peerdb, db, next) {
-		RB_REMOVE(mbt_peerdb, db, e);
-		free(e);
-	}
+	for (size_t i = 0; i < db->cap; i++)
+		free(db->slots[i]);
+	free(db->slots);
+	db->slots = NULL;
+	db->cap = 0;
+	db->count = 0;
 }

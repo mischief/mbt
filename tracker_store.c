@@ -3,6 +3,7 @@
  * tracker_store.c — shared peer storage for tracker servers (IPv4 + IPv6)
  */
 #include <sys/queue.h>
+#include "mbt/compat.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>

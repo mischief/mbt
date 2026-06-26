@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <time.h>
 #include <sys/queue.h>
+#include "mbt/compat.h"
 #include <sha1.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -1137,7 +1138,7 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 	/* Evict stale nodes (no activity in 5 min) */
 	time_t now = time(NULL);
 	for (struct dht_bucket *b = d->buckets; b; b = b->next) {
-		struct dht_node *n, *tmp; (void)tmp;
+		struct dht_node *n, *tmp;
 		SLIST_FOREACH_SAFE(n, &b->nodes, entry, tmp) {
 			if (now - n->last_seen > 300) {
 				SLIST_REMOVE(&b->nodes, n, dht_node, entry);

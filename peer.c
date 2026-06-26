@@ -266,7 +266,7 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 	tmp = mbt_be_find(be, "v");
 	if (tmp && tmp->type == BE_STRING && tmp->string.iov_len > 0) {
 		size_t n = MIN(tmp->string.iov_len, sizeof(p->client_version) - 1);
-		const unsigned char *src = tmp->string.iov_base;
+		const unsigned char *src = (const unsigned char *)tmp->string.iov_base;
 		for (size_t i = 0; i < n; i++)
 			p->client_version[i] = (src[i] >= 0x20 && src[i] != 0x7f) ? (char)src[i] : '?';
 		p->client_version[n] = '\0';
@@ -436,7 +436,7 @@ peer_rx_message(struct mbt_peer *p)
 				struct mbt_be_value *added = mbt_be_find(be, "added");
 				if (added && added->type == BE_STRING && added->string.iov_len >= 6) {
 					int count = (int)(added->string.iov_len / 6);
-					uint8_t *d = added->string.iov_base;
+					uint8_t *d = (uint8_t *)added->string.iov_base;
 					for (int i = 0; i < count; i++) {
 						char addr[INET_ADDRSTRLEN];
 						uint16_t port;

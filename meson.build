@@ -35,8 +35,6 @@ configure_file(
 deps = []
 
 if host_machine.system() == 'linux'
-  libbsd_dep = dependency('libbsd-overlay')
-  deps += libbsd_dep
   libmd_dep = dependency('libmd')
   deps += libmd_dep
 elif host_machine.system() == 'freebsd'

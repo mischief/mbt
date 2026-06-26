@@ -4,7 +4,6 @@
 
 #include "export.h"
 
-#include <sys/tree.h>
 #include <netinet/in.h>
 #include <stdint.h>
 #include <time.h>
@@ -28,11 +27,13 @@ struct mbt_peer_entry {
 	int failures;            /* consecutive failure count */
 	uint64_t last_seen;      /* last time reported by tracker/DHT/PEX (usec) */
 	uint64_t last_attempt;   /* last time we tried connecting (usec) */
-
-	RB_ENTRY(mbt_peer_entry) entry;
 };
 
-RB_HEAD(mbt_peerdb, mbt_peer_entry);
+struct mbt_peerdb {
+	struct mbt_peer_entry **slots;
+	size_t cap;   /* power of two */
+	size_t count;
+};
 
 /* Initialize an empty peer database */
 MBT_API void mbt_peerdb_init(struct mbt_peerdb *db);
