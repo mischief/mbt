@@ -52,6 +52,8 @@ struct mbt_torrent_callbacks {
 	void (*on_error)(struct mbt_torrent *t, int err, void *arg);
 	/* Called after each piece is verified during resume (have=1 if piece is good) */
 	void (*on_verify_progress)(struct mbt_torrent *t, uint32_t piece, int have, void *arg);
+	/* Called when resume verify finishes (whether or not torrent is complete) */
+	void (*on_verify_complete)(struct mbt_torrent *t, void *arg);
 };
 
 /* Lifecycle */

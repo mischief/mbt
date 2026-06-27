@@ -321,6 +321,9 @@ verify_complete(struct mbt_torrent *t)
 	t->verify_buf = NULL;
 	t->verifying = 0;
 
+	if (t->cb.on_verify_complete)
+		t->cb.on_verify_complete(t, t->cb_arg);
+
 	if (t->have_count > 0) {
 		mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
 		             t->have_count, t->piece_count);
