@@ -43,6 +43,8 @@ enum {
 	PIPELINE_INIT = 4,     /* slow-start initial window */
 };
 
+static uint64_t now_usec(void);
+
 /* Per-piece tracking (only allocated for active pieces) */
 struct piece_info {
 	uint32_t piece;
@@ -212,6 +214,7 @@ static void
 piece_assign(struct piece_info *pi, struct torrent_peer *tp)
 {
 	pi->owner = tp;
+	pi->last_activity = now_usec();
 	SLIST_INSERT_HEAD(&tp->active_pieces, pi, owner_entry);
 	tp->active_count++;
 }
