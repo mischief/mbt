@@ -281,7 +281,7 @@ mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds)
 	struct poll_io *io;
 	SLIST_FOREACH(io, &pev->ios, entry) {
 		if (i >= nfds) break;
-		if (io->dead) continue;
+		if (io->dead) { i++; continue; }
 		uint32_t fired = 0;
 		if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) fired |= MBT_EV_READ;
 		if (fds[i].revents & POLLOUT) fired |= MBT_EV_WRITE;
