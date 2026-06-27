@@ -331,11 +331,8 @@ reschedule:
 static struct torrent_peer *
 find_torrent_peer(struct mbt_torrent *t, struct mbt_peer *p)
 {
-	struct torrent_peer *tp;
-	SLIST_FOREACH(tp, &t->peers, entry)
-		if (tp->peer == p)
-			return tp;
-	return NULL;
+	(void)t;
+	return mbt_peer_user(p);
 }
 
 /* --- PEX send (BEP 11) — broadcast connected peers every 60s --- */
@@ -1504,6 +1501,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 		mbt_peer_set_our_listen_port(peer, mbt_session_listen_port(t->session));
 
 	tp->peer = peer;
+	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
 	SLIST_INSERT_HEAD(&t->peers, tp, entry);
 	t->peer_count++;
@@ -1533,6 +1531,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 	}
 
 	tp->peer = peer;
+	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
 	SLIST_INSERT_HEAD(&t->peers, tp, entry);
 	t->peer_count++;

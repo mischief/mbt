@@ -52,6 +52,7 @@ struct mbt_peer {
 
 	struct mbt_peer_callbacks cb;
 	void *cb_arg;
+	void *user; /* torrent.c stashes torrent_peer* here */
 
 	/* choke/interest state */
 	int peer_choking;   /* they are choking us */
@@ -889,6 +890,18 @@ int
 mbt_peer_reqq(struct mbt_peer *p)
 {
 	return p->reqq;
+}
+
+void *
+mbt_peer_user(struct mbt_peer *p)
+{
+	return p->user;
+}
+
+void
+mbt_peer_set_user(struct mbt_peer *p, void *user)
+{
+	p->user = user;
 }
 
 const char *
