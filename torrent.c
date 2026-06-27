@@ -84,6 +84,7 @@ struct torrent_peer {
 	int peer_interested;   /* peer wants data from us */
 	int am_choking;        /* we are choking this peer */
 	time_t last_recv;      /* last time we received piece data */
+	time_t last_sent;      /* last time we sent piece data */
 };
 
 struct mbt_torrent {
@@ -476,9 +477,10 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
 			struct mbt_bitmap *idle_bf = mbt_peer_bitfield(tp->peer);
-			if (tp->outstanding == 0 && !tp->peer_interested &&
+			time_t last_exchange = tp->last_sent > tp->last_recv ? tp->last_sent : tp->last_recv;
+			if (tp->outstanding == 0 &&
 			    (!idle_bf || mbt_bitmap_count(idle_bf) == 0) &&
-			    now_t - tp->last_recv >= t->timers.snub_timeout &&
+			    now_t - last_exchange >= t->timers.snub_timeout &&
 			    idle_drop_n < 16) {
 				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: disconnecting idle 0%% peer",
 				              mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer));
@@ -1147,6 +1149,7 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	if (tp) {
 		tp->bytes_to += length;
 		tp->total_up += length;
+		tp->last_sent = time(NULL);
 	}
 	free(buf);
 }
