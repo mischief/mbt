@@ -390,7 +390,7 @@ verify_tick(struct mbt_ev_timer *timer, void *arg)
 	}
 
 	if (t->verify_cursor < t->piece_count)
-		mbt_ev_timer_new(t->ev, &t->verify_timer, 1000, verify_tick, t);
+		mbt_ev_timer_mod(t->verify_timer, 1000);
 	else
 		verify_complete(t);
 }
