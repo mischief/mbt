@@ -71,4 +71,9 @@ int mbt_session_reqq(struct mbt_session *s);
 int mbt_session_max_pipeline(struct mbt_session *s);
 int mbt_picker_rarest_bucket(struct mbt_torrent *t, void *peer, void *ctx);
 
+/* peer.h */
+struct mbt_peer;
+void *mbt_peer_user(struct mbt_peer *p);
+void mbt_peer_set_user(struct mbt_peer *p, void *user);
+
 #endif

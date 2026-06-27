@@ -137,8 +137,6 @@ MBT_API int mbt_peer_has_extension(struct mbt_peer *p);       /* BEP 10 supporte
 MBT_API uint32_t mbt_peer_flags(struct mbt_peer *p);          /* mbt_peer_flags bitmask */
 MBT_API size_t mbt_peer_metadata_size(struct mbt_peer *p);    /* 0 if unknown */
 MBT_API int mbt_peer_reqq(struct mbt_peer *p);                /* max outstanding, 0=unknown */
-MBT_API void *mbt_peer_user(struct mbt_peer *p);
-MBT_API void mbt_peer_set_user(struct mbt_peer *p, void *user);
 MBT_API const char *mbt_peer_addr(struct mbt_peer *p);
 MBT_API uint16_t mbt_peer_conn_port(struct mbt_peer *p);   /* ephemeral TCP source port */
 MBT_API const char *mbt_peer_version(struct mbt_peer *p);  /* BEP 10 "v" client string, NULL if unknown */
