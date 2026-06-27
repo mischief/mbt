@@ -27,21 +27,32 @@
 #define RESERVED_FAST      0x04  /* ext[7] bit 2 */
 #define RESERVED_EXTENSION 0x10  /* ext[5] bit 4 */
 
-/* Random number helpers (use getentropy, POSIX 2024) */
+/* Random number helpers — splitmix64 PRNG seeded once from getentropy */
 #include <unistd.h>
 #include <stdint.h>
 
+static inline uint64_t mbt_splitmix64(void) {
+	static uint64_t state;
+	static int seeded;
+	if (!seeded) {
+		while (getentropy(&state, sizeof(state)) < 0)
+			;
+		seeded = 1;
+	}
+	uint64_t z = (state += 0x9e3779b97f4a7c15ULL);
+	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+	return z ^ (z >> 31);
+}
+
 static inline uint32_t mbt_random32(void) {
-	uint32_t v;
-	while (getentropy(&v, sizeof(v)) < 0)
-		;
-	return v;
+	return (uint32_t)(mbt_splitmix64() >> 32);
 }
 
 static inline uint32_t mbt_random_uniform(uint32_t upper) {
 	if (upper <= 1) return 0;
 	/* rejection sampling to avoid modulo bias */
-	uint32_t min = -upper % upper;
+	uint32_t min = (uint32_t)(-(uint64_t)upper % upper);
 	uint32_t r;
 	do { r = mbt_random32(); } while (r < min);
 	return r % upper;
