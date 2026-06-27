@@ -128,6 +128,36 @@ on_piece(struct mbt_torrent *t, uint32_t piece, void *arg)
 }
 
 static void
+on_verify_progress(struct mbt_torrent *t, uint32_t piece, int have, void *arg)
+{
+	(void)arg; (void)piece; (void)have;
+	if (!no_progress)
+		fprintf(stderr, "\rverifying: %u/%u pieces (%.1f%%)   ",
+		        mbt_torrent_have_count(t),
+		        mbt_torrent_piece_count(t),
+		        mbt_torrent_progress(t) * 100.0f);
+}
+
+static void
+on_verify_complete(struct mbt_torrent *t, void *arg)
+{
+	(void)arg;
+	if (!no_progress)
+		fprintf(stderr, "\r");
+	if (mbt_torrent_complete(t)) {
+		fprintf(stderr, "resume complete: %s (%u pieces)\n",
+		        mbt_torrent_name(t), mbt_torrent_have_count(t));
+		if (!seed_mode)
+			mbt_session_stop(session);
+		else
+			fprintf(stderr, "seeding...\n");
+	} else if (!no_progress) {
+		fprintf(stderr, "resuming: %u/%u pieces, downloading remainder\n",
+		        mbt_torrent_have_count(t), mbt_torrent_piece_count(t));
+	}
+}
+
+static void
 on_complete(struct mbt_torrent *t, void *arg)
 {
 	(void)arg;
@@ -283,6 +313,8 @@ main(int argc, char *argv[])
 		struct mbt_torrent_callbacks cb = {
 			.on_piece_complete = on_piece,
 			.on_complete = on_complete,
+			.on_verify_progress = on_verify_progress,
+			.on_verify_complete = on_verify_complete,
 		};
 		mbt_torrent_set_callbacks(t, &cb, NULL);
 		fprintf(stderr, "downloading: %s\n", mbt_torrent_name(t) ? mbt_torrent_name(t) : "(metadata pending)");
