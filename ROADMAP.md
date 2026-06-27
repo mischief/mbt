@@ -228,7 +228,8 @@
 - [ ] Upload speed tracking per peer (rate, not just cumulative)
 - [ ] mbt-tui: DOWN/UP columns in peer list
 - [ ] Persisted bitfield for resume without full re-hash
-- [ ] Async verify: batch pieces across event loop iterations, on_verify_progress callback per piece (unblocks UI during startup; also enables torrent move operation without stalling the loop)
+- [x] Async verify: time-bounded timer callback (10ms/tick, 1ms yield), on_verify_progress + on_verify_complete callbacks, mbt_ev_step() on all backends
+- [x] ev_sd: timer accuracy 1µs (fixes 250ms coalescing that made verify 50× slower)
 - [ ] Async disk I/O for upload under heavy load (stretch goal)
 
 ## Phase 13: Documentation
