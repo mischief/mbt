@@ -142,16 +142,22 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 	url_encode_binary(req->ih->hash_sha1, 20, ih_enc, sizeof(ih_enc));
 	url_encode_binary(req->peer_id, 20, pid_enc, sizeof(pid_enc));
 
+	const char *event_str = "";
+	if (req->event == MBT_TRACKER_EVENT_STARTED)   event_str = "&event=started";
+	else if (req->event == MBT_TRACKER_EVENT_STOPPED)   event_str = "&event=stopped";
+	else if (req->event == MBT_TRACKER_EVENT_COMPLETED) event_str = "&event=completed";
+
 	snprintf(announce_url, sizeof(announce_url),
 	         "%s%cinfo_hash=%s&peer_id=%s&port=%hu"
 	         "&uploaded=%llu&downloaded=%llu&left=%llu"
-	         "&compact=1&event=started&numwant=200",
+	         "&compact=1%s&numwant=200",
 	         url,
 	         strchr(url, '?') ? '&' : '?',
 	         ih_enc, pid_enc, req->listen_port,
 	         (unsigned long long)req->uploaded,
 	         (unsigned long long)req->downloaded,
-	         (unsigned long long)req->left);
+	         (unsigned long long)req->left,
+	         event_str);
 
 	struct mbt_http_request hreq = {
 		.url = announce_url,
