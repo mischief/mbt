@@ -269,6 +269,14 @@ mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds)
 	struct poll_ev *pev = (struct poll_ev *)ev;
 	pev->dispatching = 1;
 
+	/* Fire timers first so UI/housekeeping isn't starved by heavy I/O */
+	uint64_t now = now_us();
+	struct poll_timer *t;
+	SLIST_FOREACH(t, &pev->timers, entry) {
+		if (!t->dead && t->fire_at_us <= now)
+			t->cb((struct mbt_ev_timer *)t, t->arg);
+	}
+
 	int i = 0;
 	struct poll_io *io;
 	SLIST_FOREACH(io, &pev->ios, entry) {
@@ -280,13 +288,6 @@ mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds)
 		if (fired)
 			io->cb((struct mbt_ev_io *)io, io->fd, fired, io->arg);
 		i++;
-	}
-
-	uint64_t now = now_us();
-	struct poll_timer *t;
-	SLIST_FOREACH(t, &pev->timers, entry) {
-		if (!t->dead && t->fire_at_us <= now)
-			t->cb((struct mbt_ev_timer *)t, t->arg);
 	}
 
 	pev->dispatching = 0;
