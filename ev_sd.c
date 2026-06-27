@@ -127,7 +127,7 @@ sd_timer_new(struct mbt_ev *ev, struct mbt_ev_timer **out, uint64_t usec,
 	}
 
 	rv = sd_event_add_time(s->loop, &t->src, CLOCK_MONOTONIC,
-	                       now + usec, 0, sd_timer_handler, t);
+	                       now + usec, 1, sd_timer_handler, t);
 	if (rv < 0) {
 		free(t);
 		return rv;
