@@ -21,6 +21,7 @@ struct mbt_torrent;
 
 static struct mbt_session *session;
 static int seed_mode;
+static int no_progress;
 
 /* --- curl HTTP callback (async-shaped, blocks internally) --- */
 
@@ -117,12 +118,13 @@ on_piece(struct mbt_torrent *t, uint32_t piece, void *arg)
 
 	rate_slots[rate_idx] += plen;
 
-	fprintf(stderr, "\r%.1f%% [%u/%u pieces, %d peers] %.0f KB/s   ",
-	        mbt_torrent_progress(t) * 100.0f,
-	        mbt_torrent_have_count(t),
-	        mbt_torrent_piece_count(t),
-	        mbt_torrent_peer_count(t),
-	        rate_kbps());
+	if (!no_progress)
+		fprintf(stderr, "\r%.1f%% [%u/%u pieces, %d peers] %.0f KB/s   ",
+		        mbt_torrent_progress(t) * 100.0f,
+		        mbt_torrent_have_count(t),
+		        mbt_torrent_piece_count(t),
+		        mbt_torrent_peer_count(t),
+		        rate_kbps());
 }
 
 static void
@@ -147,8 +149,9 @@ on_signal(int sig)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-dDPSL] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "usage: %s [-dqDPSL] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] <file.torrent | magnet:?...>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
+	fprintf(stderr, "  -q            suppress progress output\n");
 	fprintf(stderr, "  -D            enable DHT\n");
 	fprintf(stderr, "  -L            disable LSD (Local Service Discovery)\n");
 	fprintf(stderr, "  -P            enable PCP port mapping\n");
@@ -157,7 +160,7 @@ usage(const char *prog)
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
 	fprintf(stderr, "  -r KB/s       download rate limit (default: unlimited)\n");
-	fprintf(stderr, "  -s strategy   piece picker: sequential (default) or random\n");
+	fprintf(stderr, "  -s strategy   piece picker: rarest (default), sequential or random\n");
 	exit(1);
 }
 
@@ -173,12 +176,15 @@ main(int argc, char *argv[])
 	int max_peers = 0;
 	int listen_port = 0;
 	uint64_t dl_rate = 0;
-	mbt_picker_fn picker = mbt_picker_sequential;
+	mbt_picker_fn picker = mbt_picker_rarest;
 
-	while ((ch = getopt(argc, argv, "dhDPSLl:o:p:r:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dhqDPSLl:o:p:r:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
+			break;
+		case 'q':
+			no_progress = 1;
 			break;
 		case 'S':
 			seed_mode = 1;
@@ -205,12 +211,14 @@ main(int argc, char *argv[])
 			dl_rate = (uint64_t)atoi(optarg) * 1024;
 			break;
 		case 's':
-			if (strcmp(optarg, "random") == 0)
+			if (strcmp(optarg, "rarest") == 0)
+				picker = mbt_picker_rarest;
+			else if (strcmp(optarg, "random") == 0)
 				picker = mbt_picker_random;
 			else if (strcmp(optarg, "sequential") == 0)
 				picker = mbt_picker_sequential;
 			else {
-				fprintf(stderr, "unknown picker: %s (use sequential or random)\n", optarg);
+				fprintf(stderr, "unknown picker: %s (use rarest, sequential or random)\n", optarg);
 				return 1;
 			}
 			break;
