@@ -153,7 +153,9 @@ draw_torrent_list(void)
 		}
 
 		const char *state = "";
+		enum mbt_torrent_state st = mbt_torrent_state(t);
 		if (!total) state = "meta";
+		else if (st == MBT_TORRENT_VERIFYING) state = "vrfy";
 		else if (pct >= 100.0f) state = "seed";
 		else if (peers == 0) state = "wait";
 		else state = "dl";
