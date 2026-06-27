@@ -9,7 +9,16 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "export.h"
-#include "endian.h"
+
+/* Avoid platform htobe32/be32toh macros which may expand to static functions,
+ * breaking -Wstatic-in-inline on clang (seen on OpenBSD). Use builtins directly. */
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#  define MBT_HTOBE32(x) __builtin_bswap32(x)
+#  define MBT_BE32TOH(x) __builtin_bswap32(x)
+#else
+#  define MBT_HTOBE32(x) (uint32_t)(x)
+#  define MBT_BE32TOH(x) (uint32_t)(x)
+#endif
 
 /*
  * Type-safe binary pack/unpack using cursor structs.
@@ -55,7 +64,7 @@ inline void
 mbt_pack_u32(struct mbt_packer *pk, uint32_t v)
 {
 	assert(pk->p + 4 <= pk->end);
-	uint32_t be = htobe32(v);
+	uint32_t be = MBT_HTOBE32(v);
 	memcpy(pk->p, &be, 4);
 	pk->p += 4;
 }
@@ -96,7 +105,7 @@ mbt_unpack_u32(struct mbt_unpacker *pk)
 	uint32_t be;
 	memcpy(&be, pk->p, 4);
 	pk->p += 4;
-	return be32toh(be);
+	return MBT_BE32TOH(be);
 }
 
 inline void
