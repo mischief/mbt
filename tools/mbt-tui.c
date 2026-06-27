@@ -454,14 +454,13 @@ on_resize(int sig)
 static void
 do_resize(void)
 {
+	endwin();
+	refresh();
 	struct winsize ws;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0)
 		resizeterm(ws.ws_row, ws.ws_col);
-	else {
-		endwin();
-		refresh();
+	else
 		resizeterm(LINES, COLS);
-	}
 
 	int list_h = LINES / 2;
 	int det_h = LINES - list_h - 2;
