@@ -6,6 +6,12 @@
  * Pieces 4-7 are "rarer" (only A has them, availability=1).
  * Pieces 0-3 are "common" (both A and B have them, availability=2).
  * Leecher uses rarest picker → should get pieces 4-7 first.
+ *
+ * The leecher uses add_torrent_buf so piece_count is known from the start.
+ * Peers are added after verify completes so their bitfields are processed
+ * immediately with the correct piece_count (no deferred empty-bitmap issue).
+ * min_peers_before_download=2 holds off requests until both bitfields are
+ * counted, giving the bucket queue accurate avail before any pick runs.
  */
 #include <assert.h>
 #include <stdio.h>
@@ -21,6 +27,7 @@
 #include "mbt/picker.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "test_util.h"
 
 struct mbt_ev_timer;
 struct mbt_torrent;
@@ -31,6 +38,7 @@ struct mbt_torrent;
 
 static struct mbt_ev *ev;
 static int complete;
+static int timed_out;
 static int pieces_order[NUM_PIECES];
 static int pieces_idx;
 
@@ -41,7 +49,7 @@ static void on_complete(struct mbt_torrent *t, void *arg)
 { (void)t; (void)arg; complete = 1; mbt_ev_stop(ev); }
 
 static void timeout_cb(struct mbt_ev_timer *timer, void *arg)
-{ (void)timer; (void)arg; mbt_ev_stop(ev); }
+{ (void)timer; (void)arg; timed_out = 1; mbt_ev_stop(ev); }
 
 int main(void)
 {
@@ -79,47 +87,42 @@ int main(void)
 	struct mbt_session *sA;
 	mbt_session_new(&sA, &cfgA);
 	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL);
+	test_wait_verified(ev, mbt_session_torrent_first(sA));
 
 	/* Seeder B: has only pieces 0-3 (first half) */
 	struct mbt_storage_memory *memB = mbt_storage_memory_new();
-	mbt_storage_memory_put_file(memB, 0, data, PIECE_LEN * 4); /* only first 4 pieces */
+	mbt_storage_memory_put_file(memB, 0, data, PIECE_LEN * 4);
 	struct mbt_session_config cfgB = {
 		.ev = ev, .default_storage = mbt_storage_memory_storage(memB), .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
 	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL);
+	test_wait_verified(ev, mbt_session_torrent_first(sB));
 
-	/* Leecher: uses rarest picker, connects to both */
+	/* Leecher: add_torrent_buf so piece_count is known from the start.
+	 * min_peers=2 holds off requests until both bitfields are counted. */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
 		.ev = ev, .default_storage = mbt_storage_memory_storage(memL), .listen_port = 0,
 		.picker = mbt_picker_rarest,
-		.max_pieces_per_peer = 1, /* serialize for predictable pick order */
+		.max_pieces_per_peer = 1,
+		.min_peers_before_download = 2,
 	};
 	struct mbt_session *sL;
 	mbt_session_new(&sL, &cfgL);
-
-	/* Compute infohash for magnet */
-	unsigned char *is = memmem(encoded, enc_len, "4:infod", 7);
-	if (!is) is = memmem(encoded, enc_len, "4:info", 6);
-	is += 6;
-	struct mbt_be_value *tmp = NULL;
-	int ilen = mbt_be_value_parse(is, enc_len - (is - encoded), &tmp);
-	mbt_be_unref(tmp);
-	SHA1_CTX ctx; uint8_t digest[20]; char hex[41];
-	SHA1Init(&ctx); SHA1Update(&ctx, is, ilen); SHA1Final(digest, &ctx);
-	mbt_hex_encode(digest, 20, hex, sizeof(hex));
-
-	char magnet[256];
-	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
-	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB));
-	mbt_session_add_magnet(sL, magnet, NULL);
+	mbt_session_add_torrent_buf(sL, encoded, enc_len, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
+	test_wait_verified(ev, tL);
+
 	struct mbt_torrent_callbacks cb = { .on_piece_complete = on_piece, .on_complete = on_complete };
 	mbt_torrent_set_callbacks(tL, &cb, NULL);
+
+	/* Add both peers now — piece_count is known, bitfields processed immediately */
+	struct mbt_infohash *ih = mbt_torrent_infohash(tL);
+	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sA), MBT_SOURCE_PEX);
+	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sB), MBT_SOURCE_PEX);
 
 	struct mbt_ev_timer *to;
 	mbt_ev_timer_new(ev, &to, 15 * 1000000ULL, timeout_cb, NULL);
@@ -130,9 +133,6 @@ int main(void)
 	for (int i = 0; i < pieces_idx; i++) fprintf(stderr, "%d ", pieces_order[i]);
 	fprintf(stderr, "\n");
 
-	/* The first piece is random (phase 1). After that, rarest-first
-	 * should strongly prefer pieces 4-7 (avail=1) over 0-3 (avail=2).
-	 * Assert all 8 pieces arrived and at least 1 rare piece in first 4. */
 	assert(pieces_idx == NUM_PIECES);
 	int rare_in_first4 = 0;
 	for (int i = 0; i < 4; i++)

@@ -131,6 +131,7 @@ struct mbt_torrent {
 	/* Peers */
 	SLIST_HEAD(, torrent_peer) peers;
 	int peer_count;
+	int peers_with_avail; /* peers that have sent a bitfield or HAVE_ALL */
 
 	/* Peer database (owned by torrent) */
 	struct mbt_peerdb peerdb;
@@ -173,6 +174,7 @@ static const uint8_t *piece_hash(struct mbt_torrent *t, uint32_t i) {
 }
 
 static void torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp);
+static void torrent_drive_all_peers(struct mbt_torrent *t);
 static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
 
@@ -763,6 +765,15 @@ on_bitfield(struct mbt_peer *p, struct mbt_bitmap *bits, void *arg)
 		if (mbt_bitmap_isset(bits, i) > 0)
 			bucket_piece_inc(t, i);
 
+	/* Only count this peer's avail contribution if we had metadata to process it */
+	if (t->piece_count > 0) {
+		t->peers_with_avail++;
+		int min_peers = mbt_session_min_peers_before_download(t->session);
+		if (min_peers > 0 && t->peers_with_avail == min_peers) {
+			torrent_drive_all_peers(t);
+			return;
+		}
+	}
 	if (!mbt_peer_choked(p) && t->piece_count > 0)
 		torrent_drive_peer(t, tp);
 }
@@ -1209,6 +1220,14 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 /* --- Drive piece requests --- */
 
 static void
+torrent_drive_all_peers(struct mbt_torrent *t)
+{
+	struct torrent_peer *tp;
+	SLIST_FOREACH(tp, &t->peers, entry)
+		torrent_drive_peer(t, tp);
+}
+
+static void
 torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
 	if (t->piece_count == 0 || mbt_peer_choked(tp->peer) || t->verifying) {
@@ -1216,6 +1235,9 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		              t->piece_count == 0, mbt_peer_choked(tp->peer), t->verifying);
 		return;
 	}
+	int min_peers = mbt_session_min_peers_before_download(t->session);
+	if (min_peers > 0 && t->peers_with_avail < min_peers)
+		return;
 	if (tp->snubbed)
 		return;
 	if (t->have_count == t->piece_count)

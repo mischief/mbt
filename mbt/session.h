@@ -43,6 +43,7 @@ struct mbt_session_config {
 	uint16_t listen_port;  /* 0 = don't listen for incoming */
 	int max_peers;         /* max peers per torrent (0 = default 30) */
 	int max_pieces_per_peer; /* active pieces per peer (0 = default 4) */
+	int min_peers_before_download; /* hold off requesting until this many peers connected (0 = off) */
 	int reqq;              /* max outstanding requests we accept (0 = don't advertise) */
 	int max_pipeline;      /* max in-flight requests per peer (0 = default 512) */
 	int mbt_lsd_announce;      /* if nonzero, periodically multicast our infohashes via LSD */

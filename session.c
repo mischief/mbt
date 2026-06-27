@@ -94,6 +94,7 @@ struct mbt_session {
 	struct mbt_timers timers;
 	int max_peers;
 	int max_pieces_per_peer;
+	int min_peers_before_download;
 	int reqq;
 	int max_pipeline;
 	mbt_http_fn http;
@@ -575,6 +576,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (!s->timers.connect_timeout) s->timers.connect_timeout = 10;
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->max_pieces_per_peer = cfg->max_pieces_per_peer ? cfg->max_pieces_per_peer : 4;
+	s->min_peers_before_download = cfg->min_peers_before_download;
 	s->reqq = cfg->reqq ? cfg->reqq : 500;
 	s->max_pipeline = cfg->max_pipeline;
 	s->http = cfg->http;
@@ -1436,6 +1438,11 @@ mbt_session_max_pieces_per_peer(struct mbt_session *s)
 	return s ? s->max_pieces_per_peer : 4;
 }
 
+int
+mbt_session_min_peers_before_download(struct mbt_session *s)
+{
+	return s ? s->min_peers_before_download : 0;
+}
 
 int
 mbt_session_reqq(struct mbt_session *s)
