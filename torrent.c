@@ -468,19 +468,29 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	{
 		time_t now_t = time(NULL);
 		struct torrent_peer *tp;
+		/* First pass: identify idle 0% peers to drop (disconnect after loop
+		 * to avoid SLIST corruption from synchronous on_error removal) */
+		struct mbt_peer *idle_drop[16];
+		int idle_drop_n = 0;
 		SLIST_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
-			/* Disconnect idle peers with nothing to offer after timeout */
 			struct mbt_bitmap *idle_bf = mbt_peer_bitfield(tp->peer);
 			if (tp->outstanding == 0 &&
 			    (!idle_bf || mbt_bitmap_count(idle_bf) == 0) &&
-			    now_t - tp->last_recv >= t->timers.snub_timeout) {
+			    now_t - tp->last_recv >= t->timers.snub_timeout &&
+			    idle_drop_n < 16) {
 				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: disconnecting idle 0%% peer",
 				              mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer));
-				mbt_peer_disconnect(tp->peer);
-				continue;
+				idle_drop[idle_drop_n++] = tp->peer;
 			}
+		}
+		for (int i = 0; i < idle_drop_n; i++)
+			mbt_peer_disconnect(idle_drop[i]);
+
+		SLIST_FOREACH(tp, &t->peers, entry) {
+			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
+				continue;
 			if ((tp->outstanding > 0 || mbt_peer_choked(tp->peer)) &&
 			    now_t - tp->last_recv >= t->timers.snub_timeout) {
 				tp->snubbed = 1;
