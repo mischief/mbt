@@ -1306,12 +1306,13 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 						mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
 					}
 					struct mbt_bitmap *peer_bits = mbt_peer_bitfield(tp->peer);
+					if (!peer_bits) break;
 					for (int _eb = 0; _eb < PIECE_TABLE_BUCKETS && tp->outstanding < limit; _eb++) {
 						struct piece_info *epi;
 						SLIST_FOREACH(epi, &t->piece_table[_eb], table_entry) {
 						if (mbt_bitmap_isset(t->have, epi->piece) > 0)
 							continue;
-						if (peer_bits && mbt_bitmap_isset(peer_bits, epi->piece) <= 0)
+						if (mbt_bitmap_isset(peer_bits, epi->piece) <= 0)
 							continue;
 						size_t eplen = piece_length_for(t, epi->piece);
 						for (size_t off = 0; off < eplen && tp->outstanding < limit; off += BLOCK_SIZE) {
