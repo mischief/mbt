@@ -3,6 +3,7 @@
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -48,7 +49,6 @@ struct piece_info {
 	size_t length;
 	size_t received;       /* bytes received so far */
 	size_t requested;      /* bytes requested so far (>= received) */
-	uint8_t hash[20];      /* expected SHA1 */
 	struct mbt_bitmap *blocks; /* received block bitmap */
 	enum mbt_piece_state state;
 	struct torrent_peer *owner; /* peer downloading this piece, NULL if pending */
@@ -90,9 +90,11 @@ struct mbt_torrent {
 	struct mbt_torrent_callbacks cb;
 	void *cb_arg;
 
-	/* Metadata (info dict) */
+	/* Metadata (info dict) — immutable after mbt_torrent_set_metadata returns */
 	uint8_t *metadata;
 	size_t metadata_len;
+	const uint8_t *pieces_hash;     /* pointer into metadata; NULL until metadata parsed */
+	size_t pieces_hash_len;         /* == piece_count * 20 */
 	size_t metadata_have;  /* bytes received */
 	int metadata_pieces;   /* total metadata pieces expected */
 	struct mbt_bitmap *metadata_recv; /* which pieces have been received */
@@ -147,6 +149,13 @@ enum {
 };
 
 /* --- Forward declarations --- */
+static const uint8_t *piece_hash(struct mbt_torrent *t, uint32_t i) {
+	size_t off = (size_t)i * 20;
+	if (!t->pieces_hash || off + 20 > t->pieces_hash_len)
+		return NULL;
+	return t->pieces_hash + off;
+}
+
 static void torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp);
 static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
@@ -622,11 +631,11 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 		SHA1Update(&ctx, pi->data, pi->length);
 		SHA1Final(digest, &ctx);
 
-		if (memcmp(digest, pi->hash, 20) != 0) {
+		if (memcmp(digest, piece_hash(t, piece), 20) != 0) {
 			/* Hash mismatch — reset piece, blame peer */
 			char got[41], want[41];
 			mbt_hex_encode(digest, 20, got, sizeof(got));
-			mbt_hex_encode(pi->hash, 20, want, sizeof(want));
+			mbt_hex_encode((unsigned char *)piece_hash(t, piece), 20, want, sizeof(want));
 			mbt_log_warn(MBT_LOG_TORRENT, "piece %u: hash mismatch from %s:%hu",
 			             piece, mbt_peer_addr(p), mbt_peer_conn_port(p));
 			mbt_log_debug(MBT_LOG_TORRENT, "  got=%s want=%s len=%zu received=%zu blocks=0x%x",
@@ -1369,6 +1378,20 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		return -EINVAL;
 
 	t->piece_count = (uint32_t)(tmp->string.len / 20);
+	t->pieces_hash_len = tmp->string.len;
+
+	/* Locate the pieces data in the raw metadata buffer.
+	 * Bencoded format: "6:pieces" + "<len>:" + <data>. */
+	{
+		char needle[32];
+		int nlen = snprintf(needle, sizeof(needle), "6:pieces%zu:", tmp->string.len);
+		const uint8_t *p = memmem(info, len, needle, nlen);
+		if (!p)
+			return -EINVAL;
+		/* p + nlen points to the hash data within the info buffer;
+		 * t->metadata is a copy of info at the same layout. */
+		t->pieces_hash = t->metadata + (p + nlen - (const uint8_t *)info);
+	}
 
 	/* Allocate piece tracking */
 	t->pieces = calloc(t->piece_count, sizeof(struct piece_info));
@@ -1376,11 +1399,8 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		return -ENOMEM;
 
 	/* Set up each piece */
-	uint8_t *hashes = tmp->string.buf;
 	for (uint32_t i = 0; i < t->piece_count; i++) {
-		memcpy(t->pieces[i].hash, hashes + i * 20, 20);
 		if (i == t->piece_count - 1) {
-			/* Last piece may be shorter */
 			uint64_t remaining = t->total_length - (uint64_t)i * t->piece_length;
 			t->pieces[i].length = (size_t)remaining;
 		} else {
@@ -1424,7 +1444,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 				SHA1Update(&ctx, buf, plen);
 				SHA1Final(digest, &ctx);
 
-				if (memcmp(digest, t->pieces[i].hash, 20) == 0) {
+				if (memcmp(digest, piece_hash(t, i), 20) == 0) {
 					mbt_bitmap_set(t->have, i);
 					t->have_count++;
 				}
