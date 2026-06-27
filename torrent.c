@@ -507,6 +507,13 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 				}
 				tp->outstanding = 0;
 				tp->reqq_window = PIPELINE_INIT;
+				/* Drive remaining peers to pick up released pieces */
+				struct torrent_peer *rtp;
+				SLIST_FOREACH(rtp, &t->peers, entry) {
+					if (rtp != tp && rtp->peer && rtp->failures < 10 &&
+					    !mbt_peer_choked(rtp->peer) && !rtp->snubbed)
+						torrent_drive_peer(t, rtp);
+				}
 			}
 		}
 	}
@@ -1185,6 +1192,16 @@ on_error(struct mbt_peer *p, int err, void *arg)
 		struct piece_info *pi, *npi;
 		SLIST_FOREACH_SAFE(pi, &tp->active_pieces, owner_entry, npi)
 			piece_info_free_one(t, pi);
+	}
+
+	/* Drive remaining peers to pick up released pieces */
+	{
+		struct torrent_peer *rtp;
+		SLIST_FOREACH(rtp, &t->peers, entry) {
+			if (rtp != tp && rtp->peer && rtp->failures < 10 &&
+			    !mbt_peer_choked(rtp->peer) && !rtp->snubbed)
+				torrent_drive_peer(t, rtp);
+		}
 	}
 
 	/* Remove peer from list */
