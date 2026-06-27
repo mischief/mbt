@@ -142,19 +142,13 @@ static void
 on_verify_complete(struct mbt_torrent *t, void *arg)
 {
 	(void)arg;
-	if (!no_progress)
-		fprintf(stderr, "\r");
-	if (mbt_torrent_complete(t)) {
-		fprintf(stderr, "resume complete: %s (%u pieces)\n",
+	if (no_progress) return;
+	if (mbt_torrent_complete(t))
+		fprintf(stderr, "\rresume complete: %s (%u pieces)\n",
 		        mbt_torrent_name(t), mbt_torrent_have_count(t));
-		if (!seed_mode)
-			mbt_session_stop(session);
-		else
-			fprintf(stderr, "seeding...\n");
-	} else if (!no_progress) {
-		fprintf(stderr, "resuming: %u/%u pieces, downloading remainder\n",
+	else
+		fprintf(stderr, "\rresumed %u/%u pieces, downloading remainder\n",
 		        mbt_torrent_have_count(t), mbt_torrent_piece_count(t));
-	}
 }
 
 static void
