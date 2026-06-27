@@ -1,82 +1,106 @@
 .\" SPDX-License-Identifier: ISC
-.Dd June 14, 2026
+.Dd June 27, 2026
 .Dt MBT_PACK 3
 .Os
 .Sh NAME
-.Nm mbt_pack ,
-.Nm mbt_unpack
-.Nd Wire format pack/unpack helpers
+.Nm mbt_pack_init ,
+.Nm mbt_pack_u8 ,
+.Nm mbt_pack_u32 ,
+.Nm mbt_pack_mem ,
+.Nm mbt_pack_end ,
+.Nm mbt_unpack_init ,
+.Nm mbt_unpack_u8 ,
+.Nm mbt_unpack_u32 ,
+.Nm mbt_unpack_mem ,
+.Nm mbt_unpack_end
+.Nd wire format pack/unpack helpers
 .Sh SYNOPSIS
 .In mbt/pack.h
-.Ft int
-.Fn mbt_pack "unsigned char *out" "char *v" "..."
-.Ft int
-.Fn mbt_unpack "unsigned char *in" "char *v" "..."
+.Ft void
+.Fn mbt_pack_init "struct mbt_packer *pk" "void *buf" "size_t len"
+.Ft void
+.Fn mbt_pack_u8 "struct mbt_packer *pk" "uint8_t v"
+.Ft void
+.Fn mbt_pack_u32 "struct mbt_packer *pk" "uint32_t v"
+.Ft void
+.Fn mbt_pack_mem "struct mbt_packer *pk" "const void *src" "size_t n"
+.Ft size_t
+.Fn mbt_pack_end "struct mbt_packer *pk"
+.Ft void
+.Fn mbt_unpack_init "struct mbt_unpacker *pk" "const void *buf" "size_t len"
+.Ft uint8_t
+.Fn mbt_unpack_u8 "struct mbt_unpacker *pk"
+.Ft uint32_t
+.Fn mbt_unpack_u32 "struct mbt_unpacker *pk"
+.Ft void
+.Fn mbt_unpack_mem "struct mbt_unpacker *pk" "void *dst" "size_t n"
+.Ft size_t
+.Fn mbt_unpack_end "struct mbt_unpacker *pk"
 .Sh DESCRIPTION
-Provides helpers for encoding and decoding data in a specific wire format.
-These functions use a format string to specify how data should be packed into or
-unpacked from buffers.
+Type-safe cursor-based helpers for encoding and decoding binary wire
+format data.
 .Pp
-The following format characters are supported:
-.Bl -tag -width 12
-.It 'b'
-1 byte.
-    .Bl -tag -width 1
-    .It pack
-Pass an `int` argument.
-    .It unpack
-Populate an `unsigned char *out` pointer.
-.El
-.Bl -tag -width 12
-.It 'l'
-4 bytes, big-endian.
-    .Bl -tag -width 1
-    .It pack
-Pass a `uint32_t` argument.
-    .It unpack
-Populate a `uint32_t *out` pointer.
-.El
-.Bl -tag -width 12
-.It '*'
-Raw bytes.
-    .Bl -tag -width 1
-    .It pack
-Pass `size_t len` and `void *data`.
-    .It unpack
-Expected `int len` is provided, populates an `unsigned char *out` pointer.
-.El
+.Fn mbt_pack_init
+initialises a packer cursor over the buffer
+.Fa buf
+of length
+.Fa len .
 .Pp
-.Fn mbt_pack
-encodes data into the buffer pointed to by
-.Fa out
-using the format string
-.Fa v.
-Returns the number of bytes produced.
+.Fn mbt_pack_u8
+writes a single byte to the cursor.
 .Pp
-.Fn mbt_unpack
-decodes data from the buffer pointed to
-to by
-.Fa in
-using the format string
-.Fa v.
-Returns the number of bytes consumed.
-.Sh RETURN VALUES
-Both functions return the number of bytes processed (produced for `mbt_pack`,
-consumed for `mbt_unpack`). A negative value indicates an error.
+.Fn mbt_pack_u32
+writes a 32-bit unsigned integer in big-endian byte order.
+.Pp
+.Fn mbt_pack_mem
+copies
+.Fa n
+bytes from
+.Fa src
+into the cursor.
+.Pp
+.Fn mbt_pack_end
+asserts that the buffer was not overflowed and returns the total number of
+bytes written.
+The assertion aborts the process unconditionally if the buffer was exceeded.
+.Pp
+.Fn mbt_unpack_init ,
+.Fn mbt_unpack_u8 ,
+.Fn mbt_unpack_u32 ,
+.Fn mbt_unpack_mem ,
+and
+.Fn mbt_unpack_end
+are the corresponding decode operations.
+.Fn mbt_unpack_end
+returns the total number of bytes consumed.
+.Pp
+Per-operation bounds checks use
+.Xr assert 3
+and are active in debug builds.
+.Fn mbt_pack_end
+and
+.Fn mbt_unpack_end
+always abort on overflow regardless of build type.
 .Sh EXAMPLES
-Packing and unpacking a byte and a 32-bit integer:
+Packing and unpacking a BT request message:
 .Bd -literal
-unsigned char buf[64];
-unsigned char out_buf[64];
-int n;
+unsigned char buf[13];
 
-// Pack a byte (0x42) and a uint32 (0x12345678)
-n = mbt_pack(buf, "bl", 0x42, 0x12345678);
+struct mbt_packer pk;
+mbt_pack_init(&pk, buf, sizeof(buf));
+mbt_pack_u8(&pk, BT_REQUEST);
+mbt_pack_u32(&pk, piece);
+mbt_pack_u32(&pk, offset);
+mbt_pack_u32(&pk, length);
+size_t n = mbt_pack_end(&pk);
 
-// Unpack it
-unsigned char b;
-uint32_t l;
-if (mbt_unpack(buf, "bl", &b, &l) > 0) {
-    // b is 0x42, l is 0x12345678
-}
+struct mbt_unpacker upk;
+mbt_unpack_init(&upk, buf, n);
+uint8_t  cmd    = mbt_unpack_u8(&upk);
+uint32_t piece  = mbt_unpack_u32(&upk);
+uint32_t offset = mbt_unpack_u32(&upk);
+uint32_t length = mbt_unpack_u32(&upk);
+mbt_unpack_end(&upk);
 .Ed
+.Sh SEE ALSO
+.Xr mbt_peer 3

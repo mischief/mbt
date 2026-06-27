@@ -1,89 +1,14 @@
 // SPDX-License-Identifier: ISC
-#include <stdarg.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include "mbt/endian.h"
-
 #include "mbt/pack.h"
 
-int
-mbt_pack(unsigned char *out, char *v, ...)
-{
-	int s;
-	size_t l;
-	va_list ap;
-	uint32_t be;
+extern inline MBT_API void   mbt_pack_init(struct mbt_packer *pk, void *buf, size_t len);
+extern inline MBT_API void   mbt_pack_u8(struct mbt_packer *pk, uint8_t v);
+extern inline MBT_API void   mbt_pack_u32(struct mbt_packer *pk, uint32_t v);
+extern inline MBT_API void   mbt_pack_mem(struct mbt_packer *pk, const void *src, size_t n);
+extern inline MBT_API size_t mbt_pack_end(struct mbt_packer *pk);
 
-	s = 0;
-
-	va_start(ap, v);
-
-	while(*v){
-		switch(*v++){
-		case 'b':
-			*out++ = (char) va_arg(ap, int);
-			s++;
-			break;
-		case 'l':
-			be = htobe32(va_arg(ap, uint32_t));
-			memcpy(out, &be, sizeof(uint32_t));
-			out += 4;
-			s += 4;
-			break;
-		case '*':
-			l = va_arg(ap, size_t);
-			memmove(out, va_arg(ap, void*), l);
-			out += l;
-			s += l;
-			break;
-		default:
-			abort();
-		}
-	}
-
-	va_end(ap);
-
-	return s;
-}
-
-int
-mbt_unpack(unsigned char *in, char *v, ...)
-{
-	int s, l;
-	va_list ap;
-	uint32_t be;
-
-	s = 0;
-
-	va_start(ap, v);
-
-	while(*v){
-		switch(*v){
-		case 'b':
-			*va_arg(ap, unsigned char*) = *in;
-			in++;
-			s++;
-			break;
-		case 'l':
-			memmove(&be, in, sizeof(uint32_t));
-			be = be32toh(be);
-			*va_arg(ap, uint32_t*) = be;
-			in += 4;
-			s += 4;
-			break;
-		case '*':
-			l = va_arg(ap, int);
-			memmove(va_arg(ap, unsigned char*), in, l);
-			in += l;
-			s += l;
-			break;
-		}
-
-		v++;
-	}
-
-	va_end(ap);
-
-	return s;
-}
+extern inline MBT_API void     mbt_unpack_init(struct mbt_unpacker *pk, const void *buf, size_t len);
+extern inline MBT_API uint8_t  mbt_unpack_u8(struct mbt_unpacker *pk);
+extern inline MBT_API uint32_t mbt_unpack_u32(struct mbt_unpacker *pk);
+extern inline MBT_API void     mbt_unpack_mem(struct mbt_unpacker *pk, void *dst, size_t n);
+extern inline MBT_API size_t   mbt_unpack_end(struct mbt_unpacker *pk);
