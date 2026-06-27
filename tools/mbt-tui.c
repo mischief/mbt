@@ -478,7 +478,6 @@ main(int argc, char *argv[])
 {
 	setlocale(LC_ALL, "");
 	signal(SIGPIPE, SIG_IGN);
-	signal(SIGWINCH, on_resize);
 
 	/* Parse options */
 	int ch;
@@ -508,6 +507,7 @@ main(int argc, char *argv[])
 	nodelay(stdscr, TRUE);
 	keypad(stdscr, TRUE);
 	curs_set(0);
+	signal(SIGWINCH, on_resize);
 
 	int list_h = LINES / 2;
 	int det_h = LINES - list_h - 2;
