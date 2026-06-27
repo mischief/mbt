@@ -471,8 +471,17 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		SLIST_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
+			/* Disconnect idle peers with nothing to offer after timeout */
+			struct mbt_bitmap *idle_bf = mbt_peer_bitfield(tp->peer);
+			if (tp->outstanding == 0 &&
+			    (!idle_bf || mbt_bitmap_count(idle_bf) == 0) &&
+			    now_t - tp->last_recv >= t->timers.snub_timeout) {
+				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: disconnecting idle 0%% peer",
+				              mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer));
+				mbt_peer_disconnect(tp->peer);
+				continue;
+			}
 			if ((tp->outstanding > 0 || mbt_peer_choked(tp->peer)) &&
-			    tp->last_recv > 0 &&
 			    now_t - tp->last_recv >= t->timers.snub_timeout) {
 				tp->snubbed = 1;
 				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: snubbed (%s, no data for %ds)",
@@ -1970,7 +1979,7 @@ mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *ou
 			out->uploaded = tp->total_up;
 			struct mbt_bitmap *bf = mbt_peer_bitfield(tp->peer);
 			if (bf && t->piece_count > 0)
-				out->done_pct = 100 * mbt_bitmap_count(bf) / t->piece_count;
+				out->done_pct = (100 * mbt_bitmap_count(bf) + t->piece_count / 2) / t->piece_count;
 			else
 				out->done_pct = 0;
 			return 0;
