@@ -1647,6 +1647,12 @@ mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece)
 	return mbt_bitmap_isset(t->have, piece) > 0;
 }
 
+struct mbt_bitmap *
+mbt_torrent_have_bitmap(struct mbt_torrent *t)
+{
+	return t ? t->have : NULL;
+}
+
 int
 mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece)
 {
