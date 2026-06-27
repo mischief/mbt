@@ -484,9 +484,13 @@ peer_rx_message(struct mbt_peer *p)
 		if (cmd == BT_HAVE_ALL && (p->flags & MBT_PEER_FLAG_FAST)) {
 			/* HAVE_ALL — peer has everything */
 			if (p->piece_count == 0) {
+				mbt_log_debug(MBT_LOG_PEER, "%s:%hu: HAVE_ALL (deferred, piece_count unknown)",
+				              p->addr, p->conn_port);
 				p->have_all = 1; /* deferred until piece_count known */
 				break;
 			}
+			mbt_log_debug(MBT_LOG_PEER, "%s:%hu: HAVE_ALL (%u pieces)",
+			              p->addr, p->conn_port, p->piece_count);
 			if (p->bitfield)
 				mbt_bitmap_unref(p->bitfield);
 			mbt_bitmap_new_bits(&p->bitfield, p->piece_count);
@@ -498,6 +502,8 @@ peer_rx_message(struct mbt_peer *p)
 		}
 		if (cmd == BT_HAVE_NONE && (p->flags & MBT_PEER_FLAG_FAST)) {
 			/* HAVE_NONE — peer has nothing */
+			mbt_log_debug(MBT_LOG_PEER, "%s:%hu: HAVE_NONE",
+			              p->addr, p->conn_port);
 			if (p->piece_count == 0) break;
 			if (p->bitfield)
 				mbt_bitmap_unref(p->bitfield);

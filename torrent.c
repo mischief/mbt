@@ -694,8 +694,11 @@ on_active(struct mbt_peer *p, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
-	mbt_log_debug(MBT_LOG_TORRENT, "on_active: metadata=%p metadata_size=%zu",
-	              (void *)t->metadata, mbt_peer_metadata_size(p));
+	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: active (fast=%d ext=%d piece_count=%u)",
+	              mbt_peer_addr(p), mbt_peer_conn_port(p),
+	              !!(mbt_peer_flags(p) & MBT_PEER_FLAG_FAST),
+	              !!(mbt_peer_flags(p) & MBT_PEER_FLAG_EXTENSION),
+	              t->piece_count);
 
 	/* Send bitfield if we have pieces */
 	if (t->have && mbt_bitmap_count(t->have) > 0)
@@ -1187,6 +1190,14 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
+
+	{
+		struct mbt_bitmap *pb = mbt_peer_bitfield(p);
+		uint32_t have = pb ? mbt_bitmap_count(pb) : 0;
+		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: disconnected (had %u/%u pieces, err=%d)",
+		              mbt_peer_addr(p), mbt_peer_conn_port(p),
+		              have, t->piece_count, err);
+	}
 
 	/* Decrement availability for all pieces this peer had */
 	{
