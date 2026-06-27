@@ -1268,20 +1268,18 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			if (mbt_peer_bitfield(tp->peer))
 				mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: picker returned -1 (have=%u/%u)",
 				              t->have_count, t->piece_count);
-			/* Check if we should enter endgame */
+			/* Endgame: picker returned -1 meaning all remaining pieces are
+			 * fully requested by their owners. If this peer is idle, send
+			 * duplicate requests for in-flight pieces so a slow owner doesn't
+			 * stall completion. Trigger on any remaining count when idle
+			 * (not just the small threshold) — outstanding==0 prevents spam. */
 			if (t->piece_count > 0) {
 				uint32_t remaining = t->piece_count - t->have_count;
-				if (remaining <= ENDGAME_THRESHOLD && remaining > 0) {
+				if (remaining > 0 && (remaining <= ENDGAME_THRESHOLD || tp->outstanding == 0)) {
 					if (!t->endgame) {
 						t->endgame = 1;
 						mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
 					}
-					/* Duplicate-request all in-flight pieces from this peer.
-					 * Must repeat every time picker returns -1 in endgame, not
-					 * just on entry: after a timeout resets a piece, only the
-					 * first drive_peer call picks it up as owner; subsequent
-					 * peers see it fully_requested and would otherwise break
-					 * here with nothing to do. */
 					struct mbt_bitmap *peer_bits = mbt_peer_bitfield(tp->peer);
 					for (int _eb = 0; _eb < PIECE_TABLE_BUCKETS && tp->outstanding < limit; _eb++) {
 						struct piece_info *epi;
