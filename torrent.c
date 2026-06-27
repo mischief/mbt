@@ -497,6 +497,18 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		}
 	}
 
+	/* In endgame, re-drive idle unchoked peers every tick so duplicate
+	 * requests keep going out even when no piece completions trigger it. */
+	if (t->endgame && t->have_count < t->piece_count) {
+		struct torrent_peer *tp;
+		SLIST_FOREACH(tp, &t->peers, entry) {
+			if (tp->failures < 10 && tp->peer &&
+			    !mbt_peer_choked(tp->peer) && !tp->snubbed &&
+			    tp->outstanding == 0)
+				torrent_drive_peer(t, tp);
+		}
+	}
+
 reschedule:
 	mbt_ev_timer_mod(timer, 5 * 1000000ULL); /* check every 5s */
 }
