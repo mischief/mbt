@@ -46,21 +46,21 @@ struct mbt_unpacker {
 	const unsigned char *end;
 };
 
-inline void
+MBT_API inline void
 mbt_pack_init(struct mbt_packer *pk, void *buf, size_t len)
 {
 	pk->start = pk->p = (unsigned char *)buf;
 	pk->end = pk->start + len;
 }
 
-inline void
+MBT_API inline void
 mbt_pack_u8(struct mbt_packer *pk, uint8_t v)
 {
 	assert(pk->p + 1 <= pk->end);
 	*pk->p++ = v;
 }
 
-inline void
+MBT_API inline void
 mbt_pack_u32(struct mbt_packer *pk, uint32_t v)
 {
 	assert(pk->p + 4 <= pk->end);
@@ -69,7 +69,7 @@ mbt_pack_u32(struct mbt_packer *pk, uint32_t v)
 	pk->p += 4;
 }
 
-inline void
+MBT_API inline void
 mbt_pack_mem(struct mbt_packer *pk, const void *src, size_t n)
 {
 	assert(pk->p + n <= pk->end);
@@ -77,28 +77,28 @@ mbt_pack_mem(struct mbt_packer *pk, const void *src, size_t n)
 	pk->p += n;
 }
 
-inline size_t
+MBT_API inline size_t
 mbt_pack_end(struct mbt_packer *pk)
 {
 	MBT_ASSERT(pk->p <= pk->end);
 	return (size_t)(pk->p - pk->start);
 }
 
-inline void
+MBT_API inline void
 mbt_unpack_init(struct mbt_unpacker *pk, const void *buf, size_t len)
 {
 	pk->start = pk->p = (const unsigned char *)buf;
 	pk->end = pk->start + len;
 }
 
-inline uint8_t
+MBT_API inline uint8_t
 mbt_unpack_u8(struct mbt_unpacker *pk)
 {
 	assert(pk->p + 1 <= pk->end);
 	return *pk->p++;
 }
 
-inline uint32_t
+MBT_API inline uint32_t
 mbt_unpack_u32(struct mbt_unpacker *pk)
 {
 	assert(pk->p + 4 <= pk->end);
@@ -108,7 +108,7 @@ mbt_unpack_u32(struct mbt_unpacker *pk)
 	return MBT_BE32TOH(be);
 }
 
-inline void
+MBT_API inline void
 mbt_unpack_mem(struct mbt_unpacker *pk, void *dst, size_t n)
 {
 	assert(pk->p + n <= pk->end);
@@ -116,7 +116,7 @@ mbt_unpack_mem(struct mbt_unpacker *pk, void *dst, size_t n)
 	pk->p += n;
 }
 
-inline size_t
+MBT_API inline size_t
 mbt_unpack_end(struct mbt_unpacker *pk)
 {
 	MBT_ASSERT(pk->p <= pk->end);
