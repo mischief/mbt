@@ -372,7 +372,7 @@ verify_tick(struct mbt_ev_timer *timer, void *arg)
 			SHA1Update(&ctx, t->verify_buf, plen);
 			SHA1Final(digest, &ctx);
 			int have = memcmp(digest, piece_hash(t, i), 20) == 0;
-			if (have) {
+			if (have && mbt_bitmap_isset(t->have, i) <= 0) {
 				mbt_bitmap_set(t->have, i);
 				t->have_count++;
 				bucket_piece_complete(t, i);
@@ -1196,9 +1196,9 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 static void
 torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
-	if (t->piece_count == 0 || mbt_peer_choked(tp->peer)) {
-		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: skip (no_metadata=%d choked=%d)",
-		              t->piece_count == 0, mbt_peer_choked(tp->peer));
+	if (t->piece_count == 0 || mbt_peer_choked(tp->peer) || t->verifying) {
+		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: skip (no_metadata=%d choked=%d verifying=%d)",
+		              t->piece_count == 0, mbt_peer_choked(tp->peer), t->verifying);
 		return;
 	}
 	if (tp->snubbed)
