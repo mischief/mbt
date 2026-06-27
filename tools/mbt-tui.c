@@ -521,7 +521,9 @@ main(int argc, char *argv[])
 	nodelay(stdscr, TRUE);
 	keypad(stdscr, TRUE);
 	curs_set(0);
-	signal(SIGWINCH, on_resize);
+	struct sigaction sa_winch = { .sa_handler = on_resize, .sa_flags = SA_RESTART };
+	sigemptyset(&sa_winch.sa_mask);
+	sigaction(SIGWINCH, &sa_winch, NULL);
 
 	int list_h = LINES / 2;
 	int det_h = LINES - list_h - 2;
