@@ -791,13 +791,16 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	/* Allocate piece buffer on first block */
 	if (!pi || !pi->data) {
-		/* Only accept if piece is ACTIVE and owned by this peer */
-		if (!pi || pi->owner != tp) {
+		/* In endgame, accept data from any peer; otherwise only the owner
+		 * can trigger buffer allocation to avoid spurious piece assignments. */
+		if (!pi || (!t->endgame && pi->owner != tp)) {
 			if (tp->outstanding > 0) tp->outstanding--;
 			return;
 		}
-		pi->data = calloc(1, plen);
-		if (!pi->data) return;
+		if (!pi->data) {
+			pi->data = calloc(1, plen);
+			if (!pi->data) return;
+		}
 	}
 
 	/* Track block by index, ignore true duplicates */
@@ -1273,7 +1276,6 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 						SLIST_FOREACH(epi, &t->piece_table[_eb], table_entry) {
 						if (mbt_bitmap_isset(t->have, epi->piece) > 0)
 							continue;
-						if (!epi->data) continue;
 						if (peer_bits && mbt_bitmap_isset(peer_bits, epi->piece) <= 0)
 							continue;
 						size_t eplen = piece_length_for(t, epi->piece);
