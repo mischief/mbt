@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <locale.h>
 #include <sys/ioctl.h>
+#include <sys/termios.h>
 #include <ncurses.h>
 #include <curl/curl.h>
 #include <stdint.h>
