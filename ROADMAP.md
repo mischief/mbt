@@ -110,6 +110,25 @@
 - [x] LSD instant announce on add_infohash
 - [x] Storage error propagation (open failures surface to caller)
 - [x] Metainfo parser bounds checking (fuzz-hardened)
+- [x] Dynamic per-peer request pipeline (slow-start: PIPELINE_INIT→PIPELINE_DEPTH)
+- [x] Auto-scale max_pieces_per_peer to fill pipeline
+- [x] Skip drive_peer mid-piece once pipeline covers a full piece (steady-state)
+- [x] BEP 10 v field — send/receive client version string
+- [x] Solaris/illumos portability (poll backend, -lsocket/-lnsl, __EXTENSIONS__)
+- [x] poll(2) connection backend (conn_poll.c) for platforms without libevent/sd-event
+- [x] peerdb RB tree replaced with portable SLIST hash (drop libbsd-overlay)
+- [x] struct iovec replaced in be.h with plain {uint8_t*, size_t}
+- [x] err.h removed from library code (lsd.c)
+- [x] syslog isolated to optional log_syslog.c (not needed on embedded)
+- [x] pack: type-safe cursor API replacing varargs mbt_pack/mbt_unpack
+- [x] DHT: rewrite routing table with split buckets + SLIST
+- [x] DHT: BEP 51 sample_infohashes (server-side)
+- [x] DHT: BEP 5 token validation for announce_peer
+- [x] mbt-tui: ncursesw for UTF-8, SIGWINCH resize, scrolling, IPv6 display
+- [x] OpenBSD CI (Gitea Actions workflow)
+- [x] soversion 0, install targets for tools and library
+- [x] 100% man page coverage (check-docs.sh with mandoc lint)
+
 ### Medium-term (swarm quality)
 - [ ] Tracker store: expire stale peers (no re-announce within 2× interval)
 - [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
@@ -180,26 +199,39 @@
 
 ## Phase 10: Portability hardening
 
-- [ ] Replace peerdb RB tree (sys/tree.h) with flat array — drop libbsd dependency
-- [ ] Bundle sys/queue.h or remove need for libbsd-overlay on Linux
-- [ ] Replace struct iovec in be.h with plain {void*,size_t} struct
-- [ ] Remove err.h usage from library code (errx/warnx → tools only)
-- [ ] Guard syslog.h behind #ifdef in log.c
+- [x] Replace peerdb RB tree (sys/tree.h) with portable SLIST hash — drop libbsd dependency
+- [x] Remove need for libbsd-overlay on Linux (sys/queue.h sufficient)
+- [x] Replace struct iovec in be.h with plain {uint8_t*,size_t} struct
+- [x] Remove err.h usage from library code (errx/warnx → tools only)
+- [x] Guard syslog.h behind optional log_syslog.c
+- [x] poll(2) backend for Solaris/illumos and other platforms
+- [x] Bring-your-own event loop documented + tested (ev_esp32 as reference, ESP32 port live)
 - [ ] Reduce stack-heavy functions (4KB path buffers → 256)
-- [ ] Bring-your-own event loop documented + tested (ev_esp32 as reference)
 
-## Phase 11: Seeding & transfer improvements
+## Phase 11: Performance
+
+- [x] O(1) piece picker: bucket queue indexed by availability (replacing O(piece_count) bitmap walk)
+- [x] O(1) peer lookup: mbt_peer_user pointer set at connect time (replacing O(N) scan)
+- [x] Memory-efficient piece bookkeeping: 128-bucket hash table for active pieces only
+- [x] Piece avail folded into bucket queue entries (avail[] array eliminated)
+- [x] splitmix64 PRNG: single global state replaces per-call getentropy
+- [x] pieces_hash: pointer into raw metadata buffer (eliminates per-piece copy)
+- [x] Picker hotpath: ~4400× speedup (70µs → 16ns per pick on 24k-piece torrent)
+- [x] SHA1Transform dominant at 89% CPU — correct bottleneck for fast peers
+- [ ] OpenSSL SHA1 (SHA-NI): ~2.4× speedup over libmd on x86 with SHA extensions
+- [ ] Incremental SHA-1: accumulate Update() per block, avoid full piece buffer at verify
+
+## Phase 12: Seeding & transfer improvements
 
 - [x] Fix PEX peers not triggering outbound connects from peerdb
 - [ ] Seed-mode unchoking: unchoke all interested peers (not tit-for-tat)
 - [ ] Upload speed tracking per peer (rate, not just cumulative)
 - [ ] mbt-tui: DOWN/UP columns in peer list
 - [ ] Persisted bitfield for resume without full re-hash
-- [ ] Incremental SHA-1 verification (hash blocks in-order, avoid full piece buffer)
 - [ ] Async verify: batch pieces across event loop iterations, on_verify_progress callback per piece (unblocks UI during startup; also enables torrent move operation without stalling the loop)
 - [ ] Async disk I/O for upload under heavy load (stretch goal)
 
-## Phase 12: Documentation
+## Phase 13: Documentation
 
 - [ ] mbt.3 overview man page (architecture, lifetimes, threading model)
 - [ ] Man pages for all public headers (check-docs.sh tracks coverage)
