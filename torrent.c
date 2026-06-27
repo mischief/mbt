@@ -476,7 +476,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
 			struct mbt_bitmap *idle_bf = mbt_peer_bitfield(tp->peer);
-			if (tp->outstanding == 0 &&
+			if (tp->outstanding == 0 && !tp->peer_interested &&
 			    (!idle_bf || mbt_bitmap_count(idle_bf) == 0) &&
 			    now_t - tp->last_recv >= t->timers.snub_timeout &&
 			    idle_drop_n < 16) {
