@@ -1605,7 +1605,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		}
 	}
 
-	if (t->storage.ops && t->storage.ops->read_piece && t->have_count == 0) {
+	if (t->storage.ops && t->storage.ops->read_piece && !t->verifying) {
 		t->verify_buf = malloc(t->piece_length);
 		if (t->verify_buf) {
 			t->verifying = 1;
