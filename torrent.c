@@ -1254,20 +1254,29 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 				mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: picker returned -1 (have=%u/%u)",
 				              t->have_count, t->piece_count);
 			/* Check if we should enter endgame */
-			if (!t->endgame && t->piece_count > 0) {
+			if (t->piece_count > 0) {
 				uint32_t remaining = t->piece_count - t->have_count;
 				if (remaining <= ENDGAME_THRESHOLD && remaining > 0) {
-					t->endgame = 1;
-					mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
-					/* In endgame, request all remaining pieces from this peer too */
+					if (!t->endgame) {
+						t->endgame = 1;
+						mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
+					}
+					/* Duplicate-request all in-flight pieces from this peer.
+					 * Must repeat every time picker returns -1 in endgame, not
+					 * just on entry: after a timeout resets a piece, only the
+					 * first drive_peer call picks it up as owner; subsequent
+					 * peers see it fully_requested and would otherwise break
+					 * here with nothing to do. */
+					struct mbt_bitmap *peer_bits = mbt_peer_bitfield(tp->peer);
 					for (int _eb = 0; _eb < PIECE_TABLE_BUCKETS && tp->outstanding < limit; _eb++) {
 						struct piece_info *epi;
 						SLIST_FOREACH(epi, &t->piece_table[_eb], table_entry) {
 						if (mbt_bitmap_isset(t->have, epi->piece) > 0)
 							continue;
 						if (!epi->data) continue;
+						if (peer_bits && mbt_bitmap_isset(peer_bits, epi->piece) <= 0)
+							continue;
 						size_t eplen = piece_length_for(t, epi->piece);
-						/* Re-request all blocks */
 						for (size_t off = 0; off < eplen && tp->outstanding < limit; off += BLOCK_SIZE) {
 							uint32_t req_len = MIN(BLOCK_SIZE, eplen - off);
 							if (mbt_ratelimit_delay(t->download_limit, req_len) > 0 ||
