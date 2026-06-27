@@ -20,6 +20,7 @@ struct poll_io {
 	mbt_ev_io_cb cb;
 	void *arg;
 	int dead;
+	int pending;
 	SLIST_ENTRY(poll_io) entry;
 };
 
@@ -29,6 +30,7 @@ struct poll_timer {
 	mbt_ev_timer_cb cb;
 	void *arg;
 	int dead;
+	int pending;
 	SLIST_ENTRY(poll_timer) entry;
 };
 
@@ -36,6 +38,8 @@ struct poll_ev {
 	struct mbt_ev base;
 	SLIST_HEAD(, poll_io) ios;
 	SLIST_HEAD(, poll_timer) timers;
+	SLIST_HEAD(, poll_io) pending_ios;
+	SLIST_HEAD(, poll_timer) pending_timers;
 	int dispatching;
 	int running;
 };
@@ -46,6 +50,35 @@ now_us(void)
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static void
+poll_sync(struct poll_ev *pev)
+{
+	struct poll_io *io;
+
+	while ((io = SLIST_FIRST(&pev->pending_ios)) != NULL) {
+		SLIST_REMOVE_HEAD(&pev->pending_ios, entry);
+		if(io->dead){
+			free(io);
+			continue;
+		}
+
+		SLIST_INSERT_HEAD(&pev->ios, io, entry);
+		io->pending = 0;
+	}
+
+	struct poll_timer *t;
+	while ((t = SLIST_FIRST(&pev->pending_timers)) != NULL) {
+		SLIST_REMOVE_HEAD(&pev->pending_timers, entry);
+		if(t->dead){
+			free(t);
+			continue;
+		}
+
+		SLIST_INSERT_HEAD(&pev->timers, t, entry);
+		t->pending = 0;
+	}
 }
 
 static int
@@ -60,7 +93,8 @@ poll_io_new(struct mbt_ev *ev, struct mbt_ev_io **out, int fd, uint32_t events,
 	io->events = events;
 	io->cb = cb;
 	io->arg = arg;
-	SLIST_INSERT_HEAD(&pev->ios, io, entry);
+	io->pending = 1;
+	SLIST_INSERT_HEAD(&pev->pending_ios, io, entry);
 	*out = (struct mbt_ev_io *)io;
 	return 0;
 }
@@ -78,7 +112,7 @@ poll_io_free(struct mbt_ev_io *io_base)
 {
 	struct poll_io *io = (struct poll_io *)io_base;
 	struct poll_ev *pev = (struct poll_ev *)io->ev;
-	if (pev->dispatching) {
+	if (pev->dispatching || io->pending) {
 		io->dead = 1;
 		return;
 	}
@@ -97,7 +131,8 @@ poll_timer_new(struct mbt_ev *ev, struct mbt_ev_timer **out, uint64_t usec,
 	t->fire_at_us = now_us() + usec;
 	t->cb = cb;
 	t->arg = arg;
-	SLIST_INSERT_HEAD(&pev->timers, t, entry);
+	t->pending = 1;
+	SLIST_INSERT_HEAD(&pev->pending_timers, t, entry);
 	*out = (struct mbt_ev_timer *)t;
 	return 0;
 }
@@ -116,7 +151,7 @@ poll_timer_free(struct mbt_ev_timer *timer)
 {
 	struct poll_timer *t = (struct poll_timer *)timer;
 	struct poll_ev *pev = (struct poll_ev *)t->ev;
-	if (pev->dispatching) {
+	if (pev->dispatching || t->pending) {
 		t->dead = 1;
 		return;
 	}
@@ -148,6 +183,8 @@ int mbt_ev_io_count(struct mbt_ev *ev);
 static void
 poll_step(struct mbt_ev *ev, int timeout_ms)
 {
+	struct poll_ev *pev = (struct poll_ev *)ev;
+	poll_sync(pev);
 	int need = mbt_ev_io_count(ev);
 	struct pollfd *fds = malloc((need + 1) * sizeof(*fds));
 	if (!fds) return;
@@ -181,6 +218,7 @@ poll_destroy(struct mbt_ev *ev)
 {
 	struct poll_ev *pev = (struct poll_ev *)ev;
 	struct poll_io *io, *io_tmp;
+	poll_sync(pev);
 	SLIST_FOREACH_SAFE(io, &pev->ios, entry, io_tmp)
 		free(io);
 	struct poll_timer *t, *t_tmp;
@@ -210,6 +248,8 @@ mbt_ev_new_pollable(struct mbt_ev **out)
 	pev->base.ops = &poll_ops;
 	SLIST_INIT(&pev->ios);
 	SLIST_INIT(&pev->timers);
+	SLIST_INIT(&pev->pending_ios);
+	SLIST_INIT(&pev->pending_timers);
 	*out = &pev->base;
 	return 0;
 }
@@ -220,6 +260,8 @@ mbt_ev_io_count(struct mbt_ev *ev)
 	struct poll_ev *pev = (struct poll_ev *)ev;
 	int n = 0;
 	struct poll_io *io;
+
+	poll_sync(pev);
 	SLIST_FOREACH(io, &pev->ios, entry)
 		if (!io->dead) n++;
 	return n;
@@ -231,6 +273,8 @@ mbt_ev_pollfd(struct mbt_ev *ev, struct pollfd *fds, int max)
 	struct poll_ev *pev = (struct poll_ev *)ev;
 	int n = 0;
 	struct poll_io *io;
+
+	poll_sync(pev);
 	SLIST_FOREACH(io, &pev->ios, entry) {
 		if (n >= max) break;
 		if (io->dead) continue;
@@ -252,6 +296,8 @@ mbt_ev_timeout_ms(struct mbt_ev *ev)
 	uint64_t earliest = UINT64_MAX;
 	struct poll_timer *t;
 
+	poll_sync(pev);
+
 	SLIST_FOREACH(t, &pev->timers, entry) {
 		if (t->dead) continue;
 		if (t->fire_at_us <= now) return 0;
@@ -268,6 +314,8 @@ mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds)
 {
 	struct poll_ev *pev = (struct poll_ev *)ev;
 	pev->dispatching = 1;
+
+	poll_sync(pev);
 
 	/* Fire timers first so UI/housekeeping isn't starved by heavy I/O */
 	uint64_t now = now_us();
