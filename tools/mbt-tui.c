@@ -8,6 +8,7 @@
 #include <string.h>
 #include <signal.h>
 #include <locale.h>
+#include <sys/ioctl.h>
 #include <ncurses.h>
 #include <curl/curl.h>
 #include <stdint.h>
@@ -452,10 +453,14 @@ on_resize(int sig)
 static void
 do_resize(void)
 {
-	/* Let ncurses query the terminal for the new size */
-	endwin();
-	refresh();
-	resizeterm(LINES, COLS);
+	struct winsize ws;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0)
+		resizeterm(ws.ws_row, ws.ws_col);
+	else {
+		endwin();
+		refresh();
+		resizeterm(LINES, COLS);
+	}
 
 	int list_h = LINES / 2;
 	int det_h = LINES - list_h - 2;
