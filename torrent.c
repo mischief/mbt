@@ -517,11 +517,14 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 				}
 				tp->outstanding = 0;
 				tp->reqq_window = PIPELINE_INIT;
-				/* Drive remaining peers to pick up released pieces */
+				/* Drive only idle peers to pick up released pieces.
+				 * Driving peers with outstanding requests causes picker -1
+				 * with outstanding==0 mid-loop, falsely triggering endgame. */
 				struct torrent_peer *rtp;
 				SLIST_FOREACH(rtp, &t->peers, entry) {
 					if (rtp != tp && rtp->peer && rtp->failures < 10 &&
-					    !mbt_peer_choked(rtp->peer) && !rtp->snubbed)
+					    !mbt_peer_choked(rtp->peer) && !rtp->snubbed &&
+					    rtp->outstanding == 0)
 						torrent_drive_peer(t, rtp);
 				}
 			}
@@ -1215,12 +1218,13 @@ on_error(struct mbt_peer *p, int err, void *arg)
 			piece_info_free_one(t, pi);
 	}
 
-	/* Drive remaining peers to pick up released pieces */
+	/* Drive only idle peers to pick up released pieces */
 	{
 		struct torrent_peer *rtp;
 		SLIST_FOREACH(rtp, &t->peers, entry) {
 			if (rtp != tp && rtp->peer && rtp->failures < 10 &&
-			    !mbt_peer_choked(rtp->peer) && !rtp->snubbed)
+			    !mbt_peer_choked(rtp->peer) && !rtp->snubbed &&
+			    rtp->outstanding == 0)
 				torrent_drive_peer(t, rtp);
 		}
 	}
