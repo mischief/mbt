@@ -696,8 +696,9 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 			piece_info_free_one(t, pi);
 
-			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu",
-			             piece, mbt_peer_addr(p), mbt_peer_conn_port(p));
+			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu outstanding=%d reqq_window=%d",
+			             piece, mbt_peer_addr(p), mbt_peer_conn_port(p),
+			             tp->outstanding, tp->reqq_window);
 
 			/* Broadcast HAVE to all connected peers */
 			SLIST_FOREACH(hp, &t->peers, entry)
@@ -747,9 +748,13 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 		}
 	}
 
-	/* Keep requesting */
-	/* Keep requesting */
-	torrent_drive_peer(t, tp);
+	/* During slow-start, pipeline may not cover a full piece yet — refill per block.
+	 * Once reqq_window exceeds one piece worth of blocks, piece completion handles it. */
+	{
+		int bpp = t->piece_length ? (int)((t->piece_length + BLOCK_SIZE - 1) / BLOCK_SIZE) : 1;
+		if (tp->reqq_window < bpp)
+			torrent_drive_peer(t, tp);
+	}
 }
 
 static void
