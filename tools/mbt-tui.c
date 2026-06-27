@@ -491,7 +491,9 @@ int
 main(int argc, char *argv[])
 {
 	setlocale(LC_ALL, "");
-	signal(SIGPIPE, SIG_IGN);
+	struct sigaction sa_pipe = { .sa_handler = SIG_IGN, .sa_flags = 0 };
+	sigemptyset(&sa_pipe.sa_mask);
+	sigaction(SIGPIPE, &sa_pipe, NULL);
 
 	/* Parse options */
 	int ch;
