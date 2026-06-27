@@ -20,6 +20,7 @@
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "mbt/infohash.h"
+#include "test_util.h"
 
 struct mbt_ev_timer;
 
@@ -72,6 +73,7 @@ int main(void)
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
 	rv = mbt_session_add_torrent_buf(s1, enc, enc_len, NULL); assert(rv == 0);
 	struct mbt_torrent *t1 = mbt_session_torrent_first(s1);
+	test_wait_verified(ev, t1);
 	assert(mbt_torrent_complete(t1));
 
 	/* Session 2: seeder, connects to s1 via magnet+x.pe */

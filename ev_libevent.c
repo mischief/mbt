@@ -213,6 +213,20 @@ lev_run(struct mbt_ev *ev)
 }
 
 static void
+lev_step(struct mbt_ev *ev, int timeout_ms)
+{
+	struct ev_lev *l = (struct ev_lev *)ev;
+	if (timeout_ms >= 0) {
+		struct timeval tv = {
+			.tv_sec  = timeout_ms / 1000,
+			.tv_usec = (timeout_ms % 1000) * 1000,
+		};
+		event_base_loopexit(l->base_ev, &tv);
+	}
+	event_base_loop(l->base_ev, EVLOOP_ONCE);
+}
+
+static void
 lev_stop(struct mbt_ev *ev)
 {
 	struct ev_lev *l = (struct ev_lev *)ev;
@@ -236,6 +250,7 @@ static const struct mbt_ev_ops lev_ops = {
 	.timer_mod = lev_timer_mod,
 	.timer_free = lev_timer_free,
 	.run       = lev_run,
+	.step      = lev_step,
 	.stop      = lev_stop,
 	.destroy   = lev_destroy,
 };

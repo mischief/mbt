@@ -172,6 +172,14 @@ sd_run(struct mbt_ev *ev)
 }
 
 static void
+sd_step(struct mbt_ev *ev, int timeout_ms)
+{
+	struct ev_sd *s = (struct ev_sd *)ev;
+	uint64_t usec = timeout_ms < 0 ? UINT64_MAX : (uint64_t)timeout_ms * 1000;
+	sd_event_run(s->loop, usec);
+}
+
+static void
 sd_stop(struct mbt_ev *ev)
 {
 	struct ev_sd *s = (struct ev_sd *)ev;
@@ -195,6 +203,7 @@ static const struct mbt_ev_ops sd_ops = {
 	.timer_mod = sd_timer_mod,
 	.timer_free = sd_timer_free,
 	.run       = sd_run,
+	.step      = sd_step,
 	.stop      = sd_stop,
 	.destroy   = sd_destroy,
 };

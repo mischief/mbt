@@ -145,28 +145,27 @@ poll_reap(struct poll_ev *pev)
 
 int mbt_ev_io_count(struct mbt_ev *ev);
 
+static void
+poll_step(struct mbt_ev *ev, int timeout_ms)
+{
+	int need = mbt_ev_io_count(ev);
+	struct pollfd *fds = malloc((need + 1) * sizeof(*fds));
+	if (!fds) return;
+	int n = mbt_ev_pollfd(ev, fds, need + 1);
+	int ms = mbt_ev_timeout_ms(ev);
+	if (timeout_ms >= 0 && (ms < 0 || ms > timeout_ms)) ms = timeout_ms;
+	poll(fds, n, ms);
+	mbt_ev_dispatch(ev, fds, n);
+	free(fds);
+}
+
 static int
 poll_run(struct mbt_ev *ev)
 {
 	struct poll_ev *pev = (struct poll_ev *)ev;
-	struct pollfd *fds = NULL;
-	int cap = 0;
 	pev->running = 1;
-	while (pev->running) {
-		int need = mbt_ev_io_count(ev);
-		if (need > cap) {
-			int newcap = need + 16;
-			struct pollfd *tmp = realloc(fds, newcap * sizeof(*fds));
-			if (!tmp) break;
-			fds = tmp;
-			cap = newcap;
-		}
-		int n = mbt_ev_pollfd(ev, fds, cap);
-		int ms = mbt_ev_timeout_ms(ev);
-		poll(fds, n, ms);
-		mbt_ev_dispatch(ev, fds, n);
-	}
-	free(fds);
+	while (pev->running)
+		poll_step(ev, -1);
 	return 0;
 }
 
@@ -198,6 +197,7 @@ static const struct mbt_ev_ops poll_ops = {
 	.timer_mod  = poll_timer_mod,
 	.timer_free = poll_timer_free,
 	.run        = poll_run,
+	.step       = poll_step,
 	.stop       = poll_stop,
 	.destroy    = poll_destroy,
 };

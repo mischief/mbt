@@ -20,6 +20,7 @@
 #include "mbt/session.h"
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
+#include "test_util.h"
 
 struct mbt_torrent;
 
@@ -134,6 +135,7 @@ main(void)
 	/* Pre-fill seeder storage with test data (piece by piece) */
 	struct mbt_torrent *t1 = mbt_session_torrent_first(s1);
 	assert(t1);
+	test_wait_verified(ev, t1);
 	assert(mbt_torrent_complete(t1) == 1); /* resume verified all pieces */
 
 	/* --- Session 2 (leecher) --- */

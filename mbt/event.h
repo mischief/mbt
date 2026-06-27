@@ -30,6 +30,7 @@ struct mbt_ev_ops {
 	void (*timer_free)(struct mbt_ev_timer *timer);
 
 	int (*run)(struct mbt_ev *ev);
+	void (*step)(struct mbt_ev *ev, int timeout_ms); /* one iteration */
 	void (*stop)(struct mbt_ev *ev);
 	void (*destroy)(struct mbt_ev *ev);
 };
@@ -122,6 +123,12 @@ static inline int
 mbt_ev_run(struct mbt_ev *ev)
 {
 	return ev->ops->run(ev);
+}
+
+static inline void
+mbt_ev_step(struct mbt_ev *ev, int timeout_ms)
+{
+	ev->ops->step(ev, timeout_ms);
 }
 
 static inline void

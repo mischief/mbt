@@ -23,6 +23,7 @@
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "mbt/infohash.h"
+#include "test_util.h"
 
 struct mbt_ev_timer;
 struct mbt_torrent;
@@ -108,6 +109,7 @@ int main(void)
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
 	assert(t2);
+	test_wait_verified(ev, t2);
 	assert(mbt_torrent_have_count(t2) == 6); /* 75% */
 
 	/* Session 1: starts with magnet (no metadata), has 4 pieces on disk */

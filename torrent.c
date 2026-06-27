@@ -148,6 +148,11 @@ struct mbt_torrent {
 	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
 	int max_pieces_per_peer;
 
+	/* Async verify state */
+	uint32_t verify_cursor;
+	uint8_t *verify_buf;
+	struct mbt_ev_timer *verify_timer;
+
 	/* Rate limiting */
 	struct mbt_ratelimit *upload_limit;
 	struct mbt_ratelimit *download_limit;
@@ -303,6 +308,88 @@ bucket_piece_complete(struct mbt_torrent *t, uint32_t piece)
 	if (!e->in_bucket) return;
 	LIST_REMOVE(e, bucket_entry);
 	e->in_bucket = 0;
+}
+
+static void verify_tick(struct mbt_ev_timer *timer, void *arg);
+
+static void
+verify_complete(struct mbt_torrent *t)
+{
+	mbt_ev_timer_free(t->verify_timer);
+	t->verify_timer = NULL;
+	free(t->verify_buf);
+	t->verify_buf = NULL;
+	t->verifying = 0;
+
+	if (t->have_count > 0) {
+		mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
+		             t->have_count, t->piece_count);
+		struct torrent_peer *tp;
+		SLIST_FOREACH(tp, &t->peers, entry) {
+			if (tp->failures >= 10 || !tp->peer) continue;
+			for (uint32_t i = 0; i < t->piece_count; i++)
+				if (mbt_bitmap_isset(t->have, i) > 0)
+					mbt_peer_send_have(tp->peer, i);
+		}
+	}
+	if (t->have_count == t->piece_count) {
+		mbt_log_info(MBT_LOG_TORRENT, "all pieces verified, nothing to download");
+		struct torrent_peer *np;
+		SLIST_FOREACH(np, &t->peers, entry)
+			if (np->peer && np->failures < 10)
+				mbt_peer_send_interested(np->peer, 0);
+		bucket_free(t);
+		if (t->cb.on_complete)
+			t->cb.on_complete(t, t->cb_arg);
+	} else {
+		/* Drive connected peers now that we know what we have */
+		struct torrent_peer *tp;
+		SLIST_FOREACH(tp, &t->peers, entry)
+			if (!mbt_peer_choked(tp->peer))
+				torrent_drive_peer(t, tp);
+	}
+}
+
+static void
+verify_tick(struct mbt_ev_timer *timer, void *arg)
+{
+	struct mbt_torrent *t = arg;
+	struct timespec t0;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+
+	while (t->verify_cursor < t->piece_count) {
+		uint32_t i = t->verify_cursor++;
+		size_t plen = piece_length_for(t, i);
+
+		int rv = t->storage.ops->read_piece(t->storage.ctx, i, t->verify_buf, plen);
+		if (rv >= 0) {
+			SHA1_CTX ctx;
+			uint8_t digest[20];
+			SHA1Init(&ctx);
+			SHA1Update(&ctx, t->verify_buf, plen);
+			SHA1Final(digest, &ctx);
+			int have = memcmp(digest, piece_hash(t, i), 20) == 0;
+			if (have) {
+				mbt_bitmap_set(t->have, i);
+				t->have_count++;
+				bucket_piece_complete(t, i);
+			}
+			if (t->cb.on_verify_progress)
+				t->cb.on_verify_progress(t, i, have, t->cb_arg);
+		}
+
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		long elapsed_ms = (now.tv_sec - t0.tv_sec) * 1000 +
+		                  (now.tv_nsec - t0.tv_nsec) / 1000000;
+		if (elapsed_ms >= 10)
+			break;
+	}
+
+	if (t->verify_cursor < t->piece_count)
+		mbt_ev_timer_new(t->ev, &t->verify_timer, 5000, verify_tick, t);
+	else
+		verify_complete(t);
 }
 
 static void
@@ -1328,6 +1415,9 @@ mbt_torrent_free(struct mbt_torrent *t)
 		mbt_ev_timer_free(t->pex_timer);
 	if (t->ratelimit_timer)
 		mbt_ev_timer_free(t->ratelimit_timer);
+	if (t->verify_timer)
+		mbt_ev_timer_free(t->verify_timer);
+	free(t->verify_buf);
 	mbt_peerdb_free(&t->peerdb);
 	mbt_bitmap_unref(t->have);
 	mbt_bitmap_unrefp(&t->metadata_recv);
@@ -1513,57 +1603,11 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	}
 
 	if (t->storage.ops && t->storage.ops->read_piece && t->have_count == 0) {
-		t->verifying = 1;
-		uint8_t *buf = malloc(t->piece_length);
-		if (buf) {
-			for (uint32_t i = 0; i < t->piece_count; i++) {
-				uint32_t plen = t->piece_length;
-				if (i == t->piece_count - 1) {
-					uint32_t rem = t->total_length % t->piece_length;
-					if (rem) plen = rem;
-				}
-				int rv2 = t->storage.ops->read_piece(t->storage.ctx, i, buf, plen);
-				if (rv2 < 0)
-					continue;
-
-				SHA1_CTX ctx;
-				uint8_t digest[20];
-				SHA1Init(&ctx);
-				SHA1Update(&ctx, buf, plen);
-				SHA1Final(digest, &ctx);
-
-				if (memcmp(digest, piece_hash(t, i), 20) == 0) {
-					mbt_bitmap_set(t->have, i);
-					t->have_count++;
-					bucket_piece_complete(t, i);
-				}
-			}
-			free(buf);
-			t->verifying = 0;
-			if (t->have_count > 0) {
-				mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
-				             t->have_count, t->piece_count);
-				/* Announce resumed pieces to already-connected peers */
-				struct torrent_peer *tp;
-				SLIST_FOREACH(tp, &t->peers, entry) {
-					if (tp->failures >= 10 || !tp->peer) continue;
-					for (uint32_t i = 0; i < t->piece_count; i++) {
-						if (mbt_bitmap_isset(t->have, i) > 0)
-							mbt_peer_send_have(tp->peer, i);
-					}
-				}
-			}
-			if (t->have_count == t->piece_count) {
-				mbt_log_info(MBT_LOG_TORRENT, "all pieces verified, nothing to download");
-				/* Tell connected peers we're no longer interested */
-				struct torrent_peer *np;
-				SLIST_FOREACH(np, &t->peers, entry) {
-					if (np->peer && np->failures < 10)
-						mbt_peer_send_interested(np->peer, 0);
-				}
-				if (t->cb.on_complete)
-					t->cb.on_complete(t, t->cb_arg);
-			}
+		t->verify_buf = malloc(t->piece_length);
+		if (t->verify_buf) {
+			t->verifying = 1;
+			t->verify_cursor = 0;
+			mbt_ev_timer_new(t->ev, &t->verify_timer, 0, verify_tick, t);
 		}
 	}
 

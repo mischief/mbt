@@ -13,6 +13,7 @@
 #include "mbt/torrent.h"
 #include "mbt/storage.h"
 #include "mbt/be.h"
+#include "test_util.h"
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 4
@@ -70,6 +71,7 @@ main(void)
 	/* 5. Check resume verified all pieces */
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
 	assert(t != NULL);
+	test_wait_verified(ev, t);
 	assert(mbt_torrent_complete(t) == 1);
 	assert(mbt_torrent_have_count(t) == NUM_PIECES);
 
