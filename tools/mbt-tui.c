@@ -456,20 +456,34 @@ do_resize(void)
 {
 	endwin();
 	refresh();
-	struct winsize ws;
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0)
-		resizeterm(ws.ws_row, ws.ws_col);
-	else
-		resizeterm(LINES, COLS);
 
-	int list_h = LINES / 2;
-	int det_h = LINES - list_h - 2;
-	wresize(win_list, list_h, COLS);
+	/* Use ioctl directly — LINES/COLS may not update until after resizeterm
+	 * on some ncurses implementations, so compute layout from ws ourselves. */
+	struct winsize ws;
+	int rows, cols;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+		rows = ws.ws_row;
+		cols = ws.ws_col;
+	} else {
+		rows = LINES;
+		cols = COLS;
+	}
+	resizeterm(rows, cols);
+
+	int list_h = rows / 2;
+	int det_h = rows - list_h - 2;
+	wresize(win_list, list_h, cols);
 	mvwin(win_list, 1, 0);
-	wresize(win_detail, det_h, COLS);
+	wresize(win_detail, det_h, cols);
 	mvwin(win_detail, list_h + 1, 0);
-	wresize(win_cmd, 1, COLS);
-	mvwin(win_cmd, LINES - 1, 0);
+	wresize(win_cmd, 1, cols);
+	mvwin(win_cmd, rows - 1, 0);
+
+	/* Force full redraw — sub-windows need touch after endwin/resizeterm */
+	clearok(curscr, TRUE);
+	touchwin(win_list);
+	touchwin(win_detail);
+	touchwin(win_cmd);
 	draw_all();
 }
 
