@@ -247,21 +247,3 @@ mbt_bitmap_intersection(struct mbt_bitmap *a, struct mbt_bitmap *b, struct mbt_b
 
 	return 0;
 }
-
-
-void
-mbt_bitmap_foreach_andnot(struct mbt_bitmap *a, struct mbt_bitmap *b,
-                           void (*cb)(size_t bit, void *arg), void *arg)
-{
-	size_t len = a->bytes < b->bytes ? a->bytes : b->bytes;
-	for (size_t i = 0; i < len; i++) {
-		uint8_t w = bitrev8(a->map[i] & ~b->map[i]);
-		while (w) {
-			int bit = __builtin_ctz(w);
-			size_t idx = i * 8 + bit;
-			if (idx < a->bits)
-				cb(idx, arg);
-			w &= w - 1;
-		}
-	}
-}

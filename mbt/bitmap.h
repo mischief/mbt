@@ -29,7 +29,4 @@ MBT_API ssize_t mbt_bitmap_first_set(struct mbt_bitmap *tb);   /* first set bit,
 MBT_API int mbt_bitmap_union(struct mbt_bitmap *a, struct mbt_bitmap *b, struct mbt_bitmap *out);
 MBT_API int mbt_bitmap_intersection(struct mbt_bitmap *a, struct mbt_bitmap *b, struct mbt_bitmap *out);
 
-/* Iterate set bits of (a & ~b), calling cb(bit_index, arg) for each */
-MBT_API void mbt_bitmap_foreach_andnot(struct mbt_bitmap *a, struct mbt_bitmap *b,
-                                        void (*cb)(size_t bit, void *arg), void *arg);
 

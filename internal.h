@@ -68,5 +68,6 @@ void mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s);
 int mbt_session_max_pieces_per_peer(struct mbt_session *s);
 int mbt_session_reqq(struct mbt_session *s);
 int mbt_session_max_pipeline(struct mbt_session *s);
+int mbt_picker_rarest_bucket(struct mbt_torrent *t, void *peer, void *ctx);
 
 #endif
