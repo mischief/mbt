@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
 		{"disable-tcp", no_argument,       NULL, 'T'},
 		{"disable-utp", no_argument,       NULL, 'U'},
 		{"debug",       no_argument,       NULL, 'd'},
-		{"trace",       no_argument,       NULL, 'R'},  /* uTP wire trace only */
+		{"trace",       no_argument,       NULL, 'R'},  /* trace level, all components */
 		{"help",        no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
@@ -108,7 +108,7 @@ int main(int argc, char *argv[])
 		if (debug)
 			mbt_log_set_debug(MBT_LOG_ALL);
 		if (trace)
-			mbt_log_set_trace(MBT_LOG_UTP);  /* per-packet wire trace */
+			mbt_log_set_trace(MBT_LOG_ALL);  /* trace level, all components */
 	}
 	int piece_len = piece_kib * 1024;
 	int total_len = piece_len * num_pieces;
