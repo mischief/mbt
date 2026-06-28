@@ -23,6 +23,7 @@
 #include "mbt/ratelimit.h"
 #include "mbt/pcp.h"
 #include "net.h"
+#include "udp_mux.h"
 #include "mbt/log.h"
 #include "mbt/lsd.h"
 #include "mbt/dht.h"
@@ -138,6 +139,9 @@ struct mbt_session {
 	char external_addr[INET6_ADDRSTRLEN]; /* our external IP from PCP, empty if unknown */
 	/* Listen socket (TCP) */
 	struct mbt_listener listener;
+
+	/* Shared UDP socket (mux) for uTP + DHT on the listen port */
+	struct mbt_udp_mux *udp_mux;
 
 	/* uTP context (UDP, same port as TCP listener) */
 	struct mbt_utp_ctx *utp_ctx;
@@ -703,6 +707,28 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	int rv = mbt_ev_io_new(s->ev, &pa->io, cfd, MBT_EV_READ, pending_accept_cb, pa);
 	if (rv < 0) { close(cfd); free(pa); return; }
 }
+
+/*
+ * Lazily create the one shared UDP mux (uTP + DHT share it on the listen port).
+ * Returns NULL on failure. After creation, s->listen_port reflects the bound
+ * port (so an ephemeral port is resolved once and reused by both consumers).
+ */
+static struct mbt_udp_mux *
+session_get_mux(struct mbt_session *s)
+{
+	if (s->udp_mux)
+		return s->udp_mux;
+	int rv = mbt_udp_mux_new(&s->udp_mux, s->ev, s->listen_port);
+	if (rv < 0) {
+		mbt_log_warn(MBT_LOG_SESSION, "udp mux bind failed: %s", strerror(-rv));
+		s->udp_mux = NULL;
+		return NULL;
+	}
+	if (s->listen_port == 0)
+		s->listen_port = mbt_udp_mux_port(s->udp_mux);
+	return s->udp_mux;
+}
+
 static int
 session_listen(struct mbt_session *s)
 {
@@ -715,18 +741,21 @@ session_listen(struct mbt_session *s)
 	}
 
 	if (!s->disable_utp) {
-		int rv = mbt_utp_ctx_new(&s->utp_ctx, s->ev, s->listen_port,
-		                         utp_accept_cb, s);
-		if (rv < 0) {
-			mbt_log_warn(MBT_LOG_SESSION, "uTP listen failed: %s", strerror(-rv));
+		struct mbt_udp_mux *mux = session_get_mux(s);
+		if (!mux) {
 			s->utp_ctx = NULL;
 		} else {
-			if (s->utp_window_pkts)
-				mbt_utp_ctx_set_window(s->utp_ctx, s->utp_window_pkts);
-			if (s->disable_tcp)
-				s->listen_port = mbt_utp_ctx_port(s->utp_ctx);
-			mbt_log_info(MBT_LOG_SESSION, "uTP listening on port %hu",
-			             mbt_utp_ctx_port(s->utp_ctx));
+			int rv = mbt_utp_ctx_new_mux(&s->utp_ctx, s->ev, mux,
+			                             utp_accept_cb, s);
+			if (rv < 0) {
+				mbt_log_warn(MBT_LOG_SESSION, "uTP init failed: %s", strerror(-rv));
+				s->utp_ctx = NULL;
+			} else {
+				if (s->utp_window_pkts)
+					mbt_utp_ctx_set_window(s->utp_ctx, s->utp_window_pkts);
+				mbt_log_info(MBT_LOG_SESSION, "uTP listening on port %hu",
+				             mbt_utp_ctx_port(s->utp_ctx));
+			}
 		}
 	}
 
@@ -892,6 +921,10 @@ mbt_session_free(struct mbt_session *s)
 	/* uTP ctx freed after torrents so peer conn_free runs first */
 	if (s->utp_ctx)
 		mbt_utp_ctx_free(s->utp_ctx);
+
+	/* Both uTP and DHT have detached from the shared mux by now; free it. */
+	if (s->udp_mux)
+		mbt_udp_mux_free(s->udp_mux);
 
 	mbt_ratelimit_free(s->upload_limit);
 	mbt_ratelimit_free(s->download_limit);
@@ -1069,7 +1102,11 @@ mbt_session_enable_dht(struct mbt_session *s)
 	if (s->dht)
 		return 0;
 
-	int rv = mbt_dht_new(&s->dht, s->ev, s->listen_port ? s->listen_port : 6881);
+	struct mbt_udp_mux *mux = session_get_mux(s);
+	if (!mux)
+		return -EADDRINUSE;
+	int rv = mbt_dht_new_mux(&s->dht, s->ev, mux,
+	                         s->listen_port ? s->listen_port : 6881);
 	if (rv < 0)
 		return rv;
 
@@ -1095,7 +1132,11 @@ mbt_session_enable_dht_local(struct mbt_session *s)
 	if (s->dht)
 		return 0;
 
-	int rv = mbt_dht_new(&s->dht, s->ev, s->listen_port ? s->listen_port : 6881);
+	struct mbt_udp_mux *mux = session_get_mux(s);
+	if (!mux)
+		return -EADDRINUSE;
+	int rv = mbt_dht_new_mux(&s->dht, s->ev, mux,
+	                         s->listen_port ? s->listen_port : 6881);
 	if (rv < 0)
 		return rv;
 

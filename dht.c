@@ -32,6 +32,8 @@
 #include "mbt/ratelimit.h"
 #include "mbt/resolve.h"
 #include "net.h"
+#include "udp_mux.h"
+#include "internal.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;
@@ -113,7 +115,8 @@ struct dht_lookup {
 
 struct mbt_dht {
 	struct mbt_ev *ev;
-	struct mbt_listener listener;
+	struct mbt_udp_mux *mux;   /* UDP socket, shared with uTP or owned */
+	int owns_mux;              /* free mux in dht_free if we created it */
 	uint8_t id[20];  /* our node ID */
 	uint16_t port;
 
@@ -443,11 +446,8 @@ dht_send(struct mbt_dht *d, const struct sockaddr_storage *addr,
 {
 	socklen_t salen = (addr->ss_family == AF_INET6) ?
 		sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
-	int fd = (addr->ss_family == AF_INET6) ? d->listener.fd6 : d->listener.fd4;
-	if (fd < 0) return -EAFNOSUPPORT;
-	ssize_t rv = sendto(fd, data, len, 0,
-	                    (const struct sockaddr *)addr, salen);
-	return rv < 0 ? -errno : 0;
+	return mbt_udp_mux_sendto(d->mux, data, len,
+	                          (const struct sockaddr *)addr, salen);
 }
 
 static int
@@ -700,16 +700,10 @@ parse_compact_peers(const uint8_t *data, size_t len,
 }
 
 static void
-dht_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
+dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
+           const struct sockaddr_storage *fromp)
 {
-	struct mbt_dht *d = v;
-	uint8_t buf[1500];
-	struct sockaddr_storage from;
-	socklen_t fromlen = sizeof(from);
-	(void)io; (void)events;
-
-	ssize_t n = recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fromlen);
-	if (n <= 0) return;
+	struct sockaddr_storage from = *fromp;
 
 	/* Parse bencode */
 	struct mbt_be_value *msg = NULL;
@@ -1126,6 +1120,17 @@ out:
 	mbt_be_unref(msg);
 }
 
+static int
+dht_mux_handler(const void *buf, size_t len,
+                const struct sockaddr *src, socklen_t srclen, void *arg)
+{
+	struct mbt_dht *d = arg;
+	struct sockaddr_storage from;
+	memcpy(&from, src, srclen < sizeof(from) ? srclen : sizeof(from));
+	dht_handle(d, buf, (ssize_t)len, &from);
+	return 1; /* consumed */
+}
+
 /* --- Refresh timer --- */
 
 static void
@@ -1184,6 +1189,24 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 int
 mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 {
+	/* Standalone: own a private mux on this port. */
+	struct mbt_udp_mux *mux;
+	int rv = mbt_udp_mux_new(&mux, ev, port);
+	if (rv < 0)
+		return rv;
+	rv = mbt_dht_new_mux(out, ev, mux, mbt_udp_mux_port(mux));
+	if (rv < 0) {
+		mbt_udp_mux_free(mux);
+		return rv;
+	}
+	(*out)->owns_mux = 1;
+	return 0;
+}
+
+int
+mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
+                struct mbt_udp_mux *mux, uint16_t port)
+{
 	struct mbt_dht *d = calloc(1, sizeof(*d));
 	if (!d) return -ENOMEM;
 
@@ -1200,9 +1223,10 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 	/* Derive stable node ID from machine-id, or fall back to random */
 	dht_init_node_id(d->id);
 
-	/* Bind dual-stack UDP sockets */
-	int rv = mbt_listen_udp(&d->listener, ev, port, dht_recv, d);
-	if (rv < 0) { free(d); return rv; }
+	/* Use the shared mux for UDP (uTP may share this socket). */
+	d->mux = mux;
+	d->owns_mux = 0;
+	mbt_udp_mux_set_dht(mux, dht_mux_handler, d);
 
 	/* Refresh timer — first fire at 5s to populate routing table quickly */
 	mbt_ev_timer_new(ev, &d->refresh_timer, 5 * 1000000ULL, dht_refresh_cb, d);
@@ -1247,7 +1271,11 @@ mbt_dht_free(struct mbt_dht *d)
 		b = next;
 	}
 	mbt_ratelimit_free(d->send_limit);
-	mbt_listener_close(&d->listener);
+	if (d->mux) {
+		mbt_udp_mux_set_dht(d->mux, NULL, NULL);
+		if (d->owns_mux)
+			mbt_udp_mux_free(d->mux);
+	}
 	free(d);
 }
 
@@ -1378,7 +1406,7 @@ mbt_dht_node_count(struct mbt_dht *d)
 uint16_t
 mbt_dht_port(struct mbt_dht *d)
 {
-	return d->listener.port;
+	return mbt_udp_mux_port(d->mux);
 }
 
 void

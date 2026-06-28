@@ -3,6 +3,22 @@
 #ifndef MBT_INTERNAL_H
 #define MBT_INTERNAL_H
 
+#include <stdint.h>
+#include "mbt/utp.h"   /* mbt_utp_accept_cb, struct mbt_utp_ctx */
+#include "mbt/dht.h"   /* struct mbt_dht */
+
+/* Internal mux-sharing constructors: let uTP and DHT share one UDP socket
+ * (the session creates one mbt_udp_mux and passes it to both). The public
+ * mbt_utp_ctx_new(port) / mbt_dht_new(port) make their own private mux. */
+struct mbt_ev;
+struct mbt_udp_mux;
+int mbt_utp_ctx_new_mux(struct mbt_utp_ctx **out, struct mbt_ev *ev,
+                        struct mbt_udp_mux *mux,
+                        mbt_utp_accept_cb accept_cb, void *accept_arg);
+int mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
+                    struct mbt_udp_mux *mux, uint16_t port);
+
+
 /* BT message IDs (BEP 3) */
 #define BT_CHOKE           0
 #define BT_UNCHOKE         1

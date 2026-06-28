@@ -134,6 +134,7 @@ bt_src = [
   'sdbuf.c',
   'conn.c',
   'utp.c',
+  'udp_mux.c',
 ] + ev_src + resolve_src
 
 mbt_inc = include_directories('.')

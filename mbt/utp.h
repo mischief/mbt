@@ -39,9 +39,6 @@ MBT_API void mbt_utp_ctx_free(struct mbt_utp_ctx *ctx);
 /* UDP port the ctx is bound to */
 MBT_API uint16_t mbt_utp_ctx_port(struct mbt_utp_ctx *ctx);
 
-/* UDP fd -- session can hand this to DHT when DHT is enabled on same port */
-MBT_API int mbt_utp_ctx_fd(struct mbt_utp_ctx *ctx);
-
 /*
  * Feed a received UDP datagram into the multiplexer.
  * Called by the session's UDP read handler after filtering out DHT packets.

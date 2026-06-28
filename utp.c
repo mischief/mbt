@@ -17,6 +17,8 @@
 #include "mbt/event.h"
 #include "mbt/log.h"
 #include "net.h"
+#include "udp_mux.h"
+#include "internal.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -225,7 +227,8 @@ SLIST_HEAD(utp_sock_list, mbt_utp_sock);
 /* ---- multiplexer ---- */
 struct mbt_utp_ctx {
 	struct mbt_ev      *ev;
-	struct mbt_listener listener;
+	struct mbt_udp_mux *mux;       /* UDP socket, shared with DHT or owned */
+	int                 owns_mux;  /* free mux in ctx_free if we created it */
 
 	uint32_t          window_pkts;   /* resolved window for sockets on this ctx */
 
@@ -743,12 +746,8 @@ utp_do_sendto(struct mbt_utp_sock *s, const void *buf, size_t len)
 
 	utp_trace_pkt("tx", buf, len);
 
-	int fd = (s->peer_addr.ss_family == AF_INET6)
-	       ? ctx->listener.fd6 : ctx->listener.fd4;
-
-	ssize_t n = sendto(fd, buf, len, 0,
-	                   (struct sockaddr *)&s->peer_addr, s->peer_addrlen);
-	return n < 0 ? -errno : 0;
+	return mbt_udp_mux_sendto(ctx->mux, buf, len,
+	                          (struct sockaddr *)&s->peer_addr, s->peer_addrlen);
 }
 
 /* Build SACK extension covering the whole window. bit i = recv_queue holds
@@ -1401,21 +1400,13 @@ utp_handle_reset(struct mbt_utp_sock *s)
 
 /* ---- UDP receive callback (registered with mbt_listener) ---- */
 
-static void
-utp_udp_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
+static int
+utp_mux_handler(const void *buf, size_t len,
+                const struct sockaddr *src, socklen_t srclen, void *arg)
 {
-	(void)io; (void)events; (void)fd;
 	struct mbt_utp_ctx *ctx = arg;
-
-	uint8_t buf[65536];
-	struct sockaddr_storage src;
-	socklen_t srclen = sizeof(src);
-
-	ssize_t n = recvfrom(fd, buf, sizeof(buf), 0,
-	                     (struct sockaddr *)&src, &srclen);
-	if (n <= 0) return;
-
-	mbt_utp_recv(ctx, buf, (size_t)n, (struct sockaddr *)&src, srclen);
+	mbt_utp_recv(ctx, buf, len, src, srclen);
+	return 1; /* consumed */
 }
 
 /* ---- public API ---- */
@@ -1425,18 +1416,36 @@ mbt_utp_ctx_new(struct mbt_utp_ctx **out, struct mbt_ev *ev,
                 uint16_t port,
                 mbt_utp_accept_cb accept_cb, void *accept_arg)
 {
+	/* Standalone: own a private mux on this port. */
+	struct mbt_udp_mux *mux;
+	int rv = mbt_udp_mux_new(&mux, ev, port);
+	if (rv < 0)
+		return rv;
+	rv = mbt_utp_ctx_new_mux(out, ev, mux, accept_cb, accept_arg);
+	if (rv < 0) {
+		mbt_udp_mux_free(mux);
+		return rv;
+	}
+	(*out)->owns_mux = 1;
+	return 0;
+}
+
+int
+mbt_utp_ctx_new_mux(struct mbt_utp_ctx **out, struct mbt_ev *ev,
+                    struct mbt_udp_mux *mux,
+                    mbt_utp_accept_cb accept_cb, void *accept_arg)
+{
+	(void)ev;
 	struct mbt_utp_ctx *ctx = calloc(1, sizeof(*ctx));
 	if (!ctx) return -ENOMEM;
 
 	ctx->ev         = ev;
+	ctx->mux        = mux;
+	ctx->owns_mux   = 0;
 	ctx->accept_cb  = accept_cb;
 	ctx->accept_arg = accept_arg;
 
-	int rv = mbt_listen_udp(&ctx->listener, ev, port, utp_udp_recv, ctx);
-	if (rv < 0) {
-		free(ctx);
-		return rv;
-	}
+	mbt_udp_mux_set_utp(mux, utp_mux_handler, ctx);
 
 	*out = ctx;
 	return 0;
@@ -1455,20 +1464,19 @@ mbt_utp_ctx_free(struct mbt_utp_ctx *ctx)
 			utp_sock_real_free(s);
 		}
 	}
-	mbt_listener_close(&ctx->listener);
+	if (ctx->mux) {
+		/* Stop delivery to us; free the socket only if we own it. */
+		mbt_udp_mux_set_utp(ctx->mux, NULL, NULL);
+		if (ctx->owns_mux)
+			mbt_udp_mux_free(ctx->mux);
+	}
 	free(ctx);
 }
 
 uint16_t
 mbt_utp_ctx_port(struct mbt_utp_ctx *ctx)
 {
-	return ctx->listener.port;
-}
-
-int
-mbt_utp_ctx_fd(struct mbt_utp_ctx *ctx)
-{
-	return ctx->listener.fd4;
+	return mbt_udp_mux_port(ctx->mux);
 }
 
 void
