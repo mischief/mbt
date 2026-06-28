@@ -791,28 +791,39 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 
 	if (s->state == UTP_CS_CONNECTED &&
 	    s->send_una != s->seq_nr) {
-		/* Halve window, retransmit oldest unacked */
+		/* Halve window on loss. */
 		s->max_window /= 2;
 		if (s->max_window < UTP_MIN_PACKET_SIZE)
 			s->max_window = UTP_MIN_PACKET_SIZE;
-		/* Reset sent pointer to una to retransmit from there */
-		s->sbuf_snd = s->sbuf_una;
-		/* Invalidate send_queue entries from send_una onwards */
+
+		/*
+		 * Retransmit the unacked window in place. seq numbers are
+		 * immutable once assigned: the receiver buffers out-of-order
+		 * packets and reports them via SACK, so it assumes a given
+		 * seq always carries the same bytes. The previous code rewound
+		 * seq_nr/sbuf_snd to send_una and re-flushed from scratch,
+		 * which re-segmented the stream against the just-halved window
+		 * and reassigned different byte ranges to already-sent (and
+		 * possibly already-SACKed) seq numbers. That desynced the
+		 * receiver -- a block arrived with the right length but wrong
+		 * bytes, then the next length prefix landed mid-payload. Resend
+		 * each still-unacked entry with its original seq and sbuf_off
+		 * instead, and leave seq_nr, sbuf_snd and the queue intact so
+		 * SACK bookkeeping stays valid.
+		 */
 		for (uint16_t seq = s->send_una;
 		     (int16_t)(seq - s->seq_nr) < 0;
 		     seq++) {
-			struct utp_send_entry *e = &s->send_queue[seq & SEND_QUEUE_MASK];
-			if (e->valid && e->seq_nr == seq) {
-				e->sacked = 0;
-				/* Don't clear valid; will be overwritten in flush */
-			}
+			struct utp_send_entry *e =
+			    &s->send_queue[seq & SEND_QUEUE_MASK];
+			if (!e->valid || e->seq_nr != seq || e->sacked)
+				continue;
+			uint8_t payload[UTP_MAX_PACKET_SIZE];
+			sbuf_copy_out(s, e->sbuf_off, payload, e->len);
+			utp_send_data(s, e->seq_nr, payload, e->len);
+			e->retransmits++;
+			e->sent_us = utp_now_us();
 		}
-		/* Reset seq_nr to send_una (we'll resend everything) */
-		s->seq_nr = s->send_una;
-		/* Clear all valid entries in send_queue since we restart */
-		for (int i = 0; i < SEND_QUEUE_SIZE; i++)
-			s->send_queue[i].valid = 0;
-		utp_flush(s);
 		utp_arm_rto(s);
 	}
 }
