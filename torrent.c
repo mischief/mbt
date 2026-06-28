@@ -875,6 +875,18 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	if (offset + len > plen)
 		return; /* out of bounds */
 
+	/* In endgame we duplicate-request the tail across peers, so a needed
+	 * piece may have no active piece_info here (its owner was choked/timed
+	 * out and it was freed). Re-create it so the arriving block is accepted
+	 * rather than dropped, which would livelock that piece. */
+	if (!pi && t->endgame && mbt_bitmap_isset(t->have, piece) <= 0) {
+		pi = piece_info_alloc(t, piece);
+		if (pi) {
+			piece_assign(pi, tp);
+			bucket_piece_complete(t, piece); /* now active, off the picker */
+		}
+	}
+
 	/* Allocate piece buffer on first block */
 	if (!pi || !pi->data) {
 		/* In endgame, accept data from any peer; otherwise only the owner
@@ -904,6 +916,18 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	tp->bytes_from += len;
 	tp->total_down += len;
 	pi->last_activity = now_usec();
+
+	/* Endgame: this block was duplicate-requested across peers. Cancel it
+	 * from everyone else now that it has arrived (bep 3 End Game), so they
+	 * don't waste upload re-sending it. */
+	if (t->endgame) {
+		struct torrent_peer *ctp;
+		SLIST_FOREACH(ctp, &t->peers, entry) {
+			if (ctp == tp || !ctp->peer || ctp->failures >= 10)
+				continue;
+			mbt_peer_send_cancel(ctp->peer, piece, offset, (uint32_t)len);
+		}
+	}
 
 	if (tp->outstanding > 0) tp->outstanding--;
 	if (tp->reqq_window < PIPELINE_DEPTH)
@@ -969,19 +993,6 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 			if (t->cb.on_piece_complete)
 				t->cb.on_piece_complete(t, piece, t->cb_arg);
-
-			/* Endgame: cancel this piece from all other peers */
-			if (t->endgame) {
-				struct torrent_peer *otp;
-				SLIST_FOREACH(otp, &t->peers, entry) {
-					if (otp == tp || !otp->peer || otp->failures >= 10)
-						continue;
-					for (size_t off = 0; off < plen; off += BLOCK_SIZE) {
-						uint32_t clen = MIN(BLOCK_SIZE, plen - off);
-						mbt_peer_send_cancel(otp->peer, piece, off, clen);
-					}
-				}
-			}
 
 			/* Check completion */
 			if (t->have_count == t->piece_count) {
@@ -1434,42 +1445,20 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			if (mbt_peer_bitfield(tp->peer))
 				mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: picker returned -1 (have=%u/%u)",
 				              t->have_count, t->piece_count);
-			/* Endgame: picker returned -1 meaning all remaining pieces are
-			 * fully requested by their owners. If this peer is idle, send
-			 * duplicate requests for in-flight pieces so a slow owner doesn't
-			 * stall completion. Only enter endgame when truly close to done;
-			 * use outstanding==0 to gate the scan, not the trigger. */
+			/* picker returned -1: every piece this peer has is already fully
+			 * requested. Near completion, flag endgame so on_piece cancels
+			 * duplicates per-block and accepts blocks from any peer. The
+			 * actual tail recovery rides the request-timeout scanner, which
+			 * frees a stalled piece (choked/slow owner) and re-drives it to
+			 * other peers; that path is owner-accounted, so it cannot orphan
+			 * the outstanding counter the way ad-hoc duplicate requests do.
+			 * (A true multi-peer duplicate-request endgame needs per-block,
+			 * per-piece request tracking across peers -- see notes.) */
 			if (t->piece_count > 0) {
 				uint32_t remaining = t->piece_count - t->have_count;
-				if (remaining > 0 && remaining <= ENDGAME_THRESHOLD) {
-					if (!t->endgame) {
-						t->endgame = 1;
-						mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
-					}
-				}
-				if (t->endgame && tp->outstanding == 0) {
-					struct mbt_bitmap *peer_bits = mbt_peer_bitfield(tp->peer);
-					if (!peer_bits) break;
-					for (int _eb = 0; _eb < PIECE_TABLE_BUCKETS && tp->outstanding < limit; _eb++) {
-						struct piece_info *epi;
-						SLIST_FOREACH(epi, &t->piece_table[_eb], table_entry) {
-						if (mbt_bitmap_isset(t->have, epi->piece) > 0)
-							continue;
-						if (mbt_bitmap_isset(peer_bits, epi->piece) <= 0)
-							continue;
-						size_t eplen = piece_length_for(t, epi->piece);
-						for (size_t off = 0; off < eplen && tp->outstanding < limit; off += BLOCK_SIZE) {
-							uint32_t req_len = MIN(BLOCK_SIZE, eplen - off);
-							if (mbt_ratelimit_delay(t->download_limit, req_len) > 0 ||
-							    mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), req_len) > 0)
-								break;
-							mbt_ratelimit_consume(t->download_limit, req_len);
-							mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), req_len);
-							mbt_peer_send_request(tp->peer, epi->piece, off, req_len);
-							tp->outstanding++;
-						}
-						} /* SLIST_FOREACH epi */
-					} /* bucket loop */
+				if (remaining > 0 && remaining <= ENDGAME_THRESHOLD && !t->endgame) {
+					t->endgame = 1;
+					mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
 				}
 			}
 			break;
