@@ -1252,7 +1252,12 @@ utp_handle_syn(struct mbt_utp_ctx *ctx,
                const struct utp_hdr *h,
                const struct sockaddr *src, socklen_t srclen)
 {
-	uint16_t recv_id = (uint16_t)(ntohs(h->conn_id) + 1);
+	uint16_t syn_id = ntohs(h->conn_id);
+	/*
+	 * Acceptor (libutp): SYN carries X. We receive the initiator's data on
+	 * X+1 and send our replies on X (which the initiator receives on X).
+	 */
+	uint16_t recv_id = (uint16_t)(syn_id + 1);
 
 	/* Silently drop if conn_id collides */
 	if (utp_ctx_find(ctx, recv_id))
@@ -1262,8 +1267,8 @@ utp_handle_syn(struct mbt_utp_ctx *ctx,
 	if (!s) return;
 
 	s->state        = UTP_CS_SYN_RECV;
-	s->recv_conn_id = recv_id;
-	s->send_conn_id = ntohs(h->conn_id);
+	s->recv_conn_id = recv_id;                       /* = X+1 */
+	s->send_conn_id = syn_id;                        /* = X */
 	s->ack_nr       = ntohs(h->seq_nr);
 	s->seq_nr       = (uint16_t)(arc4random() & 0xFFFF);
 	s->send_una     = s->seq_nr;
@@ -1377,6 +1382,8 @@ utp_handle_state(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	s->peer_wnd    = ntohl(h->wnd_size);
 
 	if (s->state == UTP_CS_SYN_SENT) {
+		/* bep 29: on the SYN-ACK, c.ack_nr = pkt.seq_nr (the STATE consumes a
+		 * sequence number via seq_nr=c.seq_nr++ on the acceptor). */
 		s->ack_nr   = ntohs(h->seq_nr);
 		s->state    = UTP_CS_CONNECTED;
 		utp_disarm_rto(s);
@@ -1616,6 +1623,14 @@ mbt_utp_connect(struct mbt_utp_ctx *ctx,
 	do { cid = (uint16_t)(arc4random() & 0xFFFF); }
 	while (utp_ctx_find(ctx, cid));
 
+	/*
+	 * libutp connection-id scheme (its init args are seed, recv, send):
+	 *   initiator: recv_conn_id = X,  send_conn_id = X+1
+	 *   acceptor:  recv_conn_id = X+1, send_conn_id = X
+	 * The SYN carries conn_id = recv_conn_id (X). After that the initiator
+	 * sends data on X+1 (acceptor receives on X+1) and receives the acceptor's
+	 * replies on X. Verified on the wire against transmission.
+	 */
 	s->recv_conn_id = cid;
 	s->send_conn_id = (uint16_t)(cid + 1);
 	s->seq_nr       = 1;
@@ -1624,7 +1639,7 @@ mbt_utp_connect(struct mbt_utp_ctx *ctx,
 
 	utp_ctx_insert(ctx, s);
 
-	/* SYN: send with recv_conn_id, seq=1 */
+	/* SYN: send with the connection id (send_conn_id == X), seq=1 */
 	uint8_t buf[UTP_HEADER_SIZE];
 	struct utp_hdr *h = (struct utp_hdr *)buf;
 	h->type_ver          = (uint8_t)((ST_SYN << 4) | UTP_VERSION);
