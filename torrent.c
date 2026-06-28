@@ -1350,15 +1350,17 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 			/* Endgame: picker returned -1 meaning all remaining pieces are
 			 * fully requested by their owners. If this peer is idle, send
 			 * duplicate requests for in-flight pieces so a slow owner doesn't
-			 * stall completion. Trigger on any remaining count when idle
-			 * (not just the small threshold) — outstanding==0 prevents spam. */
+			 * stall completion. Only enter endgame when truly close to done;
+			 * use outstanding==0 to gate the scan, not the trigger. */
 			if (t->piece_count > 0) {
 				uint32_t remaining = t->piece_count - t->have_count;
-				if (remaining > 0 && (remaining <= ENDGAME_THRESHOLD || tp->outstanding == 0)) {
+				if (remaining > 0 && remaining <= ENDGAME_THRESHOLD) {
 					if (!t->endgame) {
 						t->endgame = 1;
 						mbt_log_info(MBT_LOG_TORRENT, "entering endgame mode (%u pieces remaining)", remaining);
 					}
+				}
+				if (t->endgame && tp->outstanding == 0) {
 					struct mbt_bitmap *peer_bits = mbt_peer_bitfield(tp->peer);
 					if (!peer_bits) break;
 					for (int _eb = 0; _eb < PIECE_TABLE_BUCKETS && tp->outstanding < limit; _eb++) {
