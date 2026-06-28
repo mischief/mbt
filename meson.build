@@ -132,6 +132,7 @@ bt_src = [
   'net.c',
   'dht.c',
   'sdbuf.c',
+  'utp.c',
 ] + ev_src + resolve_src
 
 mbt_inc = include_directories('.')
@@ -171,6 +172,7 @@ install_headers(
   'mbt/timers.h',
   'mbt/tracker.h',
   'mbt/tracker_server.h',
+  'mbt/utp.h',
   subdir: 'mbt',
 )
 

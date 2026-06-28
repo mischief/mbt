@@ -146,23 +146,24 @@ conn_sd_free(struct mbt_conn *conn)
 	free(c);
 }
 
-static const struct mbt_conn_ops conn_sd_ops = {
-	.set_watermark = conn_sd_set_watermark,
-	.available     = conn_sd_available,
-	.read          = conn_sd_read,
-	.write         = conn_sd_write,
-	.free          = conn_sd_free,
-};
-
-void
-mbt_conn_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
-                       mbt_conn_event_cb eventcb, void *arg)
+static void
+conn_sd_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
+                      mbt_conn_event_cb eventcb, void *arg)
 {
 	struct conn_sd *c = (struct conn_sd *)conn;
 	c->readcb = readcb;
 	c->eventcb = eventcb;
 	c->arg = arg;
 }
+
+static const struct mbt_conn_ops conn_sd_ops = {
+	.set_watermark = conn_sd_set_watermark,
+	.available     = conn_sd_available,
+	.read          = conn_sd_read,
+	.write         = conn_sd_write,
+	.set_callbacks = conn_sd_set_callbacks,
+	.free          = conn_sd_free,
+};
 
 int
 mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)

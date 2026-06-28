@@ -193,8 +193,35 @@
 
 ## Phase 9: Advanced protocols
 
-- [ ] µTP transport (BEP 29)
-- [ ] Holepunch (BEP 55)
+### µTP transport (BEP 29)
+- [ ] `utp.c` / `mbt/utp.h` — uTP multiplexer + stream layer
+  - [ ] 20-byte header parse/emit (type_ver, extension, conn_id, timestamps, wnd_size, seq_nr, ack_nr)
+  - [ ] Packet types: ST_DATA, ST_FIN, ST_STATE, ST_RESET, ST_SYN
+  - [ ] Connection state machine: IDLE → SYN_SENT/SYN_RECV → CONNECTED → FIN_SENT → DESTROY
+  - [ ] Shared UDP socket with DHT (demux: DHT='d' 0x64, uTP first byte 0x01–0x41)
+  - [ ] Multiplexer: hash table of sockets keyed by recv conn_id
+  - [ ] Send buffer + retransmit queue (seq_nr-indexed ring)
+  - [ ] Receive buffer: out-of-order reassembly → in-order stream
+  - [ ] Selective ACK extension (type 1)
+  - [ ] RTT estimator (rtt + rtt_var, Karn's algorithm)
+  - [ ] Timeout: max(rtt + 4*rtt_var, 500ms), doubles on retransmit
+  - [ ] LEDBAT congestion control: base_delay sliding min (2min window), our_delay = diff - base_delay, target 100ms
+  - [ ] Implements `mbt_conn_ops` — plug into peer.c without changes
+  - [ ] Incoming SYN → `mbt_conn` handed to session accept path
+- [ ] Session: advertise uTP port in BEP 10 handshake (`yourip`, `p` fields)
+- [ ] Peer source: `MBT_PEER_SOURCE_UTP` for connections over µTP
+- [ ] Connect via uTP when TCP fails or peer advertises uTP-only
+
+### Holepunch (BEP 55)
+- [ ] `holepunch.c` / `mbt/holepunch.h`
+- [ ] Advertise `ut_holepunch` in BEP 10 extension handshake
+- [ ] Handle `rendezvous` message: forward `connect` to both peers
+- [ ] Handle `connect` message: initiate simultaneous uTP SYN to target
+- [ ] Handle `error` message: log and discard
+- [ ] Error codes: NoSuchPeer, NotConnected, NoSupport, NoSelf
+- [ ] Depends on uTP being implemented first
+
+### HTTP seeding (BEP 19)
 - [ ] HTTP seeding (BEP 19)
 
 ## Phase 10: Portability hardening

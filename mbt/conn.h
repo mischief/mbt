@@ -5,6 +5,7 @@
 #include "export.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 struct mbt_conn;
@@ -20,6 +21,8 @@ struct mbt_conn_ops {
 	size_t (*available)(struct mbt_conn *c);
 	ssize_t (*read)(struct mbt_conn *c, void *buf, size_t len);
 	ssize_t (*write)(struct mbt_conn *c, const void *buf, size_t len);
+	void (*set_callbacks)(struct mbt_conn *c, mbt_conn_read_cb readcb,
+	                      mbt_conn_event_cb eventcb, void *arg);
 	void (*free)(struct mbt_conn *c);
 };
 
@@ -35,8 +38,12 @@ MBT_API int mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
                  mbt_conn_read_cb readcb, mbt_conn_event_cb eventcb, void *arg);
 
 /* Change callbacks (e.g. after handing conn to a peer) */
-MBT_API void mbt_conn_set_callbacks(struct mbt_conn *c, mbt_conn_read_cb readcb,
-                            mbt_conn_event_cb eventcb, void *arg);
+static inline void
+mbt_conn_set_callbacks(struct mbt_conn *c, mbt_conn_read_cb readcb,
+                       mbt_conn_event_cb eventcb, void *arg)
+{
+	c->ops->set_callbacks(c, readcb, eventcb, arg);
+}
 
 /* Get remote peer address (via getpeername). Returns 0 on success. */
 MBT_API int mbt_conn_peer_addr(struct mbt_conn *c, char *buf, size_t buflen, uint16_t *port);
