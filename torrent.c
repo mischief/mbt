@@ -1916,6 +1916,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 	if (!tp)
 		return -ENOMEM;
 	TAILQ_INIT(&tp->pending_sends);
+	tp->am_choking = 1; /* BEP 3: connections start choked */
 
 	rv = mbt_peer_new(&peer, t->ev, conn, t->ih, t->peer_id,
 	                  t->piece_count, source, &torrent_peer_cbs, t);
@@ -1955,6 +1956,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 	if (!tp)
 		return -ENOMEM;
 	TAILQ_INIT(&tp->pending_sends);
+	tp->am_choking = 1; /* BEP 3: connections start choked */
 
 	rv = mbt_peer_new_incoming(&peer, t->ev, conn, t->ih, t->peer_id,
 	                           t->piece_count, MBT_SOURCE_INCOMING, ext, their_id,

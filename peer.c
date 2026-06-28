@@ -999,6 +999,7 @@ mbt_peer_set_our_listen_port(struct mbt_peer *p, uint16_t port)
 int
 mbt_peer_send_interested(struct mbt_peer *p, int interested)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	uint8_t msg = interested ? 2 : 3;
 	unsigned char buf[5];
 	struct mbt_packer pk;
@@ -1013,6 +1014,7 @@ mbt_peer_send_interested(struct mbt_peer *p, int interested)
 int
 mbt_peer_send_choke(struct mbt_peer *p, int choke)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	uint8_t msg = choke ? 0 : 1;
 	unsigned char buf[5];
 	struct mbt_packer pk;
@@ -1027,6 +1029,7 @@ mbt_peer_send_choke(struct mbt_peer *p, int choke)
 int
 mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	unsigned char buf[1 + 4 + 4 + 4];
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, buf, sizeof(buf));
@@ -1040,6 +1043,7 @@ mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint3
 int
 mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	unsigned char buf[1 + 4 + 4 + 4];
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, buf, sizeof(buf));
@@ -1053,6 +1057,7 @@ mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32
 int
 mbt_peer_send_have(struct mbt_peer *p, uint32_t piece)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	unsigned char buf[1 + 4];
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, buf, sizeof(buf));
@@ -1064,6 +1069,7 @@ mbt_peer_send_have(struct mbt_peer *p, uint32_t piece)
 int
 mbt_peer_send_port(struct mbt_peer *p, uint16_t port)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	unsigned char buf[3];
 	buf[0] = BT_PORT;
 	buf[1] = port >> 8;
@@ -1074,6 +1080,7 @@ mbt_peer_send_port(struct mbt_peer *p, uint16_t port)
 int
 mbt_peer_send_bitfield(struct mbt_peer *p, struct mbt_bitmap *bm)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	size_t bytes = mbt_bitmap_bytes(bm);
 	unsigned char *buf = malloc(1 + bytes);
 	if (!buf) return -ENOMEM;
@@ -1094,6 +1101,7 @@ int
 mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
                     const void *data, size_t len)
 {
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	/* Gather-write the framing header and payload so the conn_write is
 	 * atomic without concatenating them into a heap buffer. */
 	uint8_t hdr[4 + 1 + 4 + 4];
