@@ -14,6 +14,7 @@
 
 #include "mbt/event.h"
 #include "mbt/conn.h"
+#include "mbt/utp.h"
 #include "mbt/infohash.h"
 #include "mbt/hex.h"
 #include "mbt/torrent.h"
@@ -118,8 +119,11 @@ struct mbt_session {
 	const char *pcp_gateway;
 	int enable_pcp;
 	char external_addr[INET6_ADDRSTRLEN]; /* our external IP from PCP, empty if unknown */
-	/* Listen socket */
+	/* Listen socket (TCP) */
 	struct mbt_listener listener;
+
+	/* uTP context (UDP, same port as TCP listener) */
+	struct mbt_utp_ctx *utp_ctx;
 
 	/* Maintenance timer (refill peers from pool) */
 	struct mbt_ev_timer *maintain_timer;
@@ -505,6 +509,113 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	free(pa);
 }
 
+/* --- uTP incoming (async BT handshake over uTP conn) --- */
+
+struct pending_utp_accept {
+	struct mbt_session *session;
+	struct mbt_conn    *conn;
+	unsigned char       hs[HANDSHAKE_SIZE];
+	size_t              hs_got;
+};
+
+static void
+pending_utp_accept_free(struct pending_utp_accept *pa, int close_conn)
+{
+	if (close_conn)
+		mbt_conn_free(pa->conn);
+	free(pa);
+}
+
+static void
+pending_utp_read(struct mbt_conn *c, void *v)
+{
+	struct pending_utp_accept *pa = v;
+	struct mbt_session *s = pa->session;
+
+	ssize_t n = mbt_conn_read(c, pa->hs + pa->hs_got,
+	                          HANDSHAKE_SIZE - pa->hs_got);
+	if (n <= 0)
+		return;
+	pa->hs_got += n;
+	if (pa->hs_got < HANDSHAKE_SIZE)
+		return;
+
+	/* Validate BT handshake */
+	if (pa->hs[0] != 19 || memcmp(pa->hs + 1, "BitTorrent protocol", 19) != 0) {
+		pending_utp_accept_free(pa, 1);
+		return;
+	}
+
+	uint8_t ext[8], hash[20], their_id[20];
+	memcpy(ext,      pa->hs + 20, 8);
+	memcpy(hash,     pa->hs + 28, 20);
+	memcpy(their_id, pa->hs + 48, 20);
+
+	if (memcmp(their_id, s->peer_id, MBT_PEER_ID_LEN) == 0) {
+		pending_utp_accept_free(pa, 1);
+		return;
+	}
+
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (memcmp(st->ih->hash_sha1, hash, 20) == 0)
+			break;
+	}
+	if (!st) {
+		pending_utp_accept_free(pa, 1);
+		return;
+	}
+
+	for (int i = 0; i < mbt_torrent_peer_count(st->torrent); i++) {
+		struct mbt_peer *ep = mbt_torrent_peer_at(st->torrent, i);
+		if (ep && mbt_peer_id_eq(mbt_peer_id(ep), their_id)) {
+			pending_utp_accept_free(pa, 1);
+			return;
+		}
+	}
+
+	if (mbt_torrent_peer_count(st->torrent) >= s->max_peers) {
+		pending_utp_accept_free(pa, 1);
+		return;
+	}
+
+	char paddr[INET6_ADDRSTRLEN];
+	uint16_t pport;
+	mbt_conn_peer_addr(pa->conn, paddr, sizeof(paddr), &pport);
+	mbt_log_info(MBT_LOG_SESSION, "incoming uTP peer %s:%hu", paddr, pport);
+
+	struct mbt_conn *conn = pa->conn;
+	free(pa); /* conn ownership transferred to torrent */
+
+	int rv = mbt_torrent_add_peer_incoming(st->torrent, conn, ext, their_id);
+	if (rv < 0)
+		mbt_conn_free(conn);
+}
+
+static void
+pending_utp_event(struct mbt_conn *c, int err, void *v)
+{
+	struct pending_utp_accept *pa = v;
+	(void)c; (void)err;
+	pending_utp_accept_free(pa, 1);
+}
+
+static void
+utp_accept_cb(struct mbt_utp_ctx *ctx, struct mbt_conn *conn,
+              const struct sockaddr *addr, socklen_t addrlen, void *arg)
+{
+	struct mbt_session *s = arg;
+	(void)ctx; (void)addr; (void)addrlen;
+
+	struct pending_utp_accept *pa = calloc(1, sizeof(*pa));
+	if (!pa) { mbt_conn_free(conn); return; }
+	pa->session = s;
+	pa->conn = conn;
+
+	mbt_conn_set_watermark(conn, 1);
+	mbt_conn_set_callbacks(conn, pending_utp_read, pending_utp_event, pa);
+}
+
 static void
 listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 {
@@ -535,6 +646,17 @@ session_listen(struct mbt_session *s)
 	int rv = mbt_listen_tcp(&s->listener, s->ev, s->listen_port, listen_accept_cb, s);
 	if (rv < 0) return rv;
 	s->listen_port = s->listener.port; /* update with actual bound port */
+
+	/* uTP on the same port number (UDP) */
+	rv = mbt_utp_ctx_new(&s->utp_ctx, s->ev, s->listen_port,
+	                     utp_accept_cb, s);
+	if (rv < 0) {
+		mbt_log_warn(MBT_LOG_SESSION, "uTP listen failed: %s", strerror(-rv));
+		s->utp_ctx = NULL; /* non-fatal: TCP still works */
+	} else {
+		mbt_log_info(MBT_LOG_SESSION, "uTP listening on port %hu",
+		             mbt_utp_ctx_port(s->utp_ctx));
+	}
 
 	mbt_log_info(MBT_LOG_SESSION, "listening on port %hu", s->listen_port);
 	return 0;
@@ -627,6 +749,8 @@ mbt_session_free(struct mbt_session *s)
 	if (!s)
 		return;
 
+	if (s->utp_ctx)
+		mbt_utp_ctx_free(s->utp_ctx);
 	mbt_listener_close(&s->listener);
 	if (s->lsd_announce_timer)
 		mbt_ev_timer_free(s->lsd_announce_timer);
