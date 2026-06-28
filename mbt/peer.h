@@ -41,6 +41,18 @@ enum mbt_peer_flags {
 	MBT_PEER_FLAG_EXTENSION = 1 << 2, /* ext[5] & 0x10 — BEP 10 */
 };
 
+/*
+ * PEX "added.f" per-peer flag byte (BEP 11). These are wire values delivered in
+ * the on_pex callback's flags argument; use the named bits rather than literals.
+ */
+enum mbt_pex_flags {
+	MBT_PEX_ENCRYPT    = 0x01, /* peer prefers encrypted connections */
+	MBT_PEX_SEED       = 0x02, /* peer is a seed / upload-only */
+	MBT_PEX_UTP        = 0x04, /* peer supports uTP (BEP 29) */
+	MBT_PEX_HOLEPUNCH  = 0x08, /* peer supports uTP holepunch (BEP 55) */
+	MBT_PEX_REACHABLE  = 0x10, /* peer is connectable (outgoing) */
+};
+
 /* Events reported up to the torrent/owner */
 struct mbt_peer_callbacks {
 	/* Handshake complete — peer is now usable */
