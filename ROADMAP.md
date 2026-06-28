@@ -160,6 +160,9 @@
 - [x] Bitfield test (magnet peer resumes from disk, verifies HAVE propagation)
 - [x] Peer source test (enum values, string conversion)
 - [x] AFL fuzz targets: bencode, metainfo, LSD, DHT, magnet URI
+- [x] uTP tests over real loopback UDP (utp, utp_robust with rx-hook loss/reorder)
+- [x] Transport variants: swarm_utp_only / swarm_utp_mixed; e2e / e2e_utp / e2e_tcp
+- [x] Live interop tested against transmission (libutp) over uTP — handshake parsed
 - [ ] HTTP tracker client test (needs async client)
 
 ## Phase 8: Tools
@@ -193,24 +196,33 @@
 
 ## Phase 9: Advanced protocols
 
-### µTP transport (BEP 29)
-- [ ] `utp.c` / `mbt/utp.h` — uTP multiplexer + stream layer
-  - [ ] 20-byte header parse/emit (type_ver, extension, conn_id, timestamps, wnd_size, seq_nr, ack_nr)
-  - [ ] Packet types: ST_DATA, ST_FIN, ST_STATE, ST_RESET, ST_SYN
-  - [ ] Connection state machine: IDLE → SYN_SENT/SYN_RECV → CONNECTED → FIN_SENT → DESTROY
-  - [ ] Shared UDP socket with DHT (demux: DHT='d' 0x64, uTP first byte 0x01–0x41)
-  - [ ] Multiplexer: hash table of sockets keyed by recv conn_id
-  - [ ] Send buffer + retransmit queue (seq_nr-indexed ring)
-  - [ ] Receive buffer: out-of-order reassembly → in-order stream
-  - [ ] Selective ACK extension (type 1)
-  - [ ] RTT estimator (rtt + rtt_var, Karn's algorithm)
-  - [ ] Timeout: max(rtt + 4*rtt_var, 500ms), doubles on retransmit
-  - [ ] LEDBAT congestion control: base_delay sliding min (2min window), our_delay = diff - base_delay, target 100ms
-  - [ ] Implements `mbt_conn_ops` — plug into peer.c without changes
-  - [ ] Incoming SYN → `mbt_conn` handed to session accept path
-- [ ] Session: advertise uTP port in BEP 10 handshake (`yourip`, `p` fields)
-- [ ] Peer source: `MBT_PEER_SOURCE_UTP` for connections over µTP
-- [ ] Connect via uTP when TCP fails or peer advertises uTP-only
+### µTP transport (BEP 29) — implemented, interop-tested vs libutp/transmission
+- [x] `utp.c` / `mbt/utp.h` — uTP multiplexer + stream layer
+  - [x] 20-byte header parse/emit (type_ver, extension, conn_id, timestamps, wnd_size, seq_nr, ack_nr)
+  - [x] Packet types: ST_DATA, ST_FIN, ST_STATE, ST_RESET, ST_SYN
+  - [x] Connection state machine: IDLE → SYN_SENT/SYN_RECV → CONNECTED → FIN_SENT → DESTROY
+  - [x] Connection-id direction per BEP 29 (initiator recv=X/send=X+1, SYN=X, data=X+1; acceptor recv=X+1/send=X) — verified on the wire vs transmission
+  - [x] Shared UDP socket with DHT (internal udp_mux, first-byte demux: 'd'=DHT, uTP version-nibble)
+  - [x] Multiplexer: hash table of sockets keyed by recv conn_id
+  - [x] Send buffer + retransmit queue (in-place retransmit, no re-segmentation)
+  - [x] Receive buffer: out-of-order reassembly → in-order stream
+  - [x] Selective ACK extension (type 1)
+  - [x] RTT estimator (rtt + rtt_var, Karn's algorithm)
+  - [x] Timeout: max(rtt + 4*rtt_var, 500ms); SYN retransmit cap → connect timeout
+  - [x] LEDBAT congestion control (base_delay min, off_target clamp, IW10, MIN_WINDOW floor)
+  - [x] Implements `mbt_conn_ops` — plugs into peer.c unchanged
+  - [x] Incoming SYN → `mbt_conn` handed to session accept path
+  - [x] window_pkts is the single source of truth (queues/SACK/adv-wnd); validated session knob (cfg.utp_window_pkts)
+- [x] Session: try uTP first, fall back to TCP (peerdb utp_cap); per-peer transport visible (mbt_peer_transport_name, 'u' flag in tui)
+- [ ] FIN eof_pkt wait (currently truncates on a FIN before a reordered tail; cosmetic for hash-checked torrents)
+- [ ] ST_RESET for unknown conn_id (politeness/interop)
+- [ ] RTT sampling from SACKed packets; reset timeout counter on receive (minor conformance)
+- [ ] memory: reorder payloads into rbuf (metadata-only recv_queue); lazy/sized buffers; timer consolidation (see utp.md)
+
+### Message-stream encryption (MSE/PE, BEP 8)
+- [ ] DH key exchange + RC4 obfuscation. Needed to interop with peers that
+      REQUIRE encryption (e.g. transmission "require encryption" rejects our
+      plaintext handshake). uTP transport itself is unaffected.
 
 ### Holepunch (BEP 55)
 - [ ] `holepunch.c` / `mbt/holepunch.h`
@@ -251,7 +263,11 @@
 ## Phase 12: Seeding & transfer improvements
 
 - [x] Fix PEX peers not triggering outbound connects from peerdb
+- [x] Order peers by recent delivery (bytes_from) via O(1) TAILQ nudge — new-piece assignment favours proven peers; new peers insert at tail
 - [ ] Seed-mode unchoking: unchoke all interested peers (not tit-for-tat)
+- [ ] Send-side fairness: a busy seeder can monopolize its send window on a few
+      connections and starve others (mbt<->mbt high-leecher hang/tail-slowness);
+      fairly schedule pending_sends across peers
 - [ ] Upload speed tracking per peer (rate, not just cumulative)
 - [ ] mbt-tui: DOWN/UP columns in peer list
 - [ ] Persisted bitfield for resume without full re-hash
