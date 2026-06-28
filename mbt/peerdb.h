@@ -24,6 +24,7 @@ struct mbt_peer_entry {
 
 	enum mbt_peerdb_state state;
 	int source;              /* mbt_peer_source — how we first found this peer */
+	uint8_t flags;           /* PEX flags: 0x04 = supports uTP */
 	int failures;            /* consecutive failure count */
 	uint64_t last_seen;      /* last time reported by tracker/DHT/PEX (usec) */
 	uint64_t last_attempt;   /* last time we tried connecting (usec) */

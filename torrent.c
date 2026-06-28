@@ -1155,15 +1155,16 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 }
 
 static void
-on_pex(struct mbt_peer *p, const char *addr, uint16_t port, void *arg)
+on_pex(struct mbt_peer *p, const char *addr, uint16_t port, uint8_t flags, void *arg)
 {
 	(void)p;
 	struct mbt_torrent *t = arg;
 	if (t->is_private) return; /* BEP 27: no PEX for private torrents */
 	if (port == 0) return;    /* port 0 is invalid */
-	/* Insert into peerdb */
-	mbt_peerdb_insert(&t->peerdb, addr, port, MBT_SOURCE_PEX);
-	mbt_log_debug(MBT_LOG_TORRENT, "PEX: %s:%hu", addr, port);
+	struct mbt_peer_entry *pe = mbt_peerdb_insert(&t->peerdb, addr, port, MBT_SOURCE_PEX);
+	if (pe)
+		pe->flags = flags;
+	mbt_log_debug(MBT_LOG_TORRENT, "PEX: %s:%hu flags=0x%02x", addr, port, flags);
 }
 
 static void

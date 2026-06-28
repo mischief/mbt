@@ -121,8 +121,8 @@ int main(void)
 
 	/* Add both peers now — piece_count is known, bitfields processed immediately */
 	struct mbt_infohash *ih = mbt_torrent_infohash(tL);
-	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sA), MBT_SOURCE_PEX);
-	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sB), MBT_SOURCE_PEX);
+	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sA), MBT_SOURCE_PEX, 0);
+	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sB), MBT_SOURCE_PEX, 0);
 
 	struct mbt_ev_timer *to;
 	mbt_ev_timer_new(ev, &to, 15 * 1000000ULL, timeout_cb, NULL);

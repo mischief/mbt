@@ -439,6 +439,13 @@ peer_rx_message(struct mbt_peer *p)
 			rv = mbt_be_value_parse(pbuf, sz, &be);
 			if (rv > 0) {
 				struct mbt_be_value *added = mbt_be_find(be, "added");
+				struct mbt_be_value *added_f = mbt_be_find(be, "added.f");
+				const uint8_t *flags_buf = NULL;
+				size_t flags_len = 0;
+				if (added_f && added_f->type == BE_STRING) {
+					flags_buf = (const uint8_t *)added_f->string.buf;
+					flags_len = added_f->string.len;
+				}
 				if (added && added->type == BE_STRING && added->string.len >= 6) {
 					int count = (int)(added->string.len / 6);
 					uint8_t *d = (uint8_t *)added->string.buf;
@@ -448,8 +455,10 @@ peer_rx_message(struct mbt_peer *p)
 						inet_ntop(AF_INET, d + i * 6, addr, sizeof(addr));
 						memcpy(&port, d + i * 6 + 4, 2);
 						port = ntohs(port);
+						uint8_t pf = (flags_buf && (size_t)i < flags_len)
+						             ? flags_buf[i] : 0;
 						if (p->cb.on_pex)
-							p->cb.on_pex(p, addr, port, p->cb_arg);
+							p->cb.on_pex(p, addr, port, pf, p->cb_arg);
 					}
 				}
 			}

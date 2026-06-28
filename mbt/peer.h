@@ -75,7 +75,8 @@ struct mbt_peer_callbacks {
 	void (*on_error)(struct mbt_peer *p, int err, void *arg);
 
 	/* PEX: peer exchange — new peer discovered */
-	void (*on_pex)(struct mbt_peer *p, const char *addr, uint16_t port, void *arg);
+	void (*on_pex)(struct mbt_peer *p, const char *addr, uint16_t port,
+	               uint8_t flags, void *arg);
 
 	/* BEP 5: peer's DHT port */
 	void (*on_port)(struct mbt_peer *p, uint16_t dht_port, void *arg);

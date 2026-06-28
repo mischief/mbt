@@ -80,6 +80,20 @@ struct pending_connect {
 
 STAILQ_HEAD(pending_connect_list, pending_connect);
 
+/* Outgoing uTP connect: conn already established by utp stack,
+ * eventcb fires when connected or on error. */
+struct pending_utp_connect {
+	struct mbt_session *session;
+	struct mbt_torrent *torrent;
+	struct mbt_conn    *conn;
+	char                addr[INET6_ADDRSTRLEN];
+	uint16_t            port;
+	enum mbt_peer_source source;
+	STAILQ_ENTRY(pending_utp_connect) next;
+};
+
+STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
+
 /* --- Session --- */
 
 struct mbt_session {
@@ -136,6 +150,7 @@ struct mbt_session {
 
 	/* Pending outgoing connections */
 	struct pending_connect_list pending;
+	struct pending_utp_connect_list pending_utp;
 
 	/* Rate limiting */
 	struct mbt_ratelimit *upload_limit;
@@ -237,7 +252,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 				break;
 			}
 			pe->state = MBT_PEERDB_CONNECTING;
-			mbt_session_add_peer(s, st->ih, pe->addr, pe->port, pe->source);
+			mbt_session_add_peer(s, st->ih, pe->addr, pe->port, pe->source, pe->flags);
 		}
 
 		/* Peerdb exhausted and no active peers — fire one early re-announce */
@@ -383,6 +398,51 @@ fail:
 	pending_connect_mark_failed(pc);
 	STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
 	free(pc);
+}
+
+/* --- Outgoing uTP connect --- */
+
+static void
+pending_utp_connect_free(struct pending_utp_connect *pc, int close_conn)
+{
+	if (close_conn)
+		mbt_conn_free(pc->conn);
+	free(pc);
+}
+
+static void
+pending_utp_connected(struct mbt_conn *c, void *v)
+{
+	/* readcb fires if data arrives before eventcb — ignore, peer layer handles it */
+	(void)c; (void)v;
+}
+
+static void
+pending_utp_connect_event(struct mbt_conn *c, int err, void *v)
+{
+	struct pending_utp_connect *pc = v;
+	struct mbt_session *s = pc->session;
+	(void)c;
+
+	STAILQ_REMOVE(&s->pending_utp, pc, pending_utp_connect, next);
+
+	if (err < 0) {
+		mbt_log_warn(MBT_LOG_SESSION, "uTP connect to %s:%hu failed: %s",
+		             pc->addr, pc->port, strerror(-err));
+		pending_utp_connect_free(pc, 1);
+		return;
+	}
+
+	mbt_log_debug(MBT_LOG_SESSION, "uTP connected to %s:%hu", pc->addr, pc->port);
+
+	struct mbt_conn *conn = pc->conn;
+	struct mbt_torrent *torrent = pc->torrent;
+	enum mbt_peer_source source = pc->source;
+	free(pc); /* conn ownership passes to torrent */
+
+	int rv = mbt_torrent_add_peer(torrent, conn, source);
+	if (rv < 0)
+		mbt_conn_free(conn);
 }
 
 /* --- Helpers --- */
@@ -707,6 +767,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 
 	STAILQ_INIT(&s->torrents);
 	STAILQ_INIT(&s->pending);
+	STAILQ_INIT(&s->pending_utp);
 
 	session_generate_peer_id(s->peer_id);
 	{
@@ -774,6 +835,11 @@ mbt_session_free(struct mbt_session *s)
 		mbt_ev_io_free(pc->io);
 		close(pc->fd);
 		free(pc);
+	}
+	struct pending_utp_connect *puc;
+	while ((puc = STAILQ_FIRST(&s->pending_utp))) {
+		STAILQ_REMOVE_HEAD(&s->pending_utp, next);
+		pending_utp_connect_free(puc, 1);
 	}
 
 	/* Free torrents */
@@ -890,13 +956,13 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 				}
 				if (st)
 					mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), info->remote, info->port, MBT_SOURCE_LSD);
-				mbt_session_add_peer(s, ih, info->remote, info->port, MBT_SOURCE_LSD);
+				mbt_session_add_peer(s, ih, info->remote, info->port, MBT_SOURCE_LSD, 0);
 			}
 		} else {
 			if (st) {
 				mbt_log_info(MBT_LOG_LSD, "LSD peer %s:%hu for known torrent", info->remote, info->port);
 				mbt_peerdb_insert(mbt_torrent_peerdb(st->torrent), info->remote, info->port, MBT_SOURCE_LSD);
-				mbt_session_add_peer(s, ih, info->remote, info->port, MBT_SOURCE_LSD);
+				mbt_session_add_peer(s, ih, info->remote, info->port, MBT_SOURCE_LSD, 0);
 			}
 		}
 	}
@@ -1063,7 +1129,7 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 
 	/* If below cap, connect immediately */
 	if (mbt_torrent_peer_count(st->torrent) < s->max_peers)
-		mbt_session_add_peer(s, ih, addr, port, MBT_SOURCE_TRACKER);
+		mbt_session_add_peer(s, ih, addr, port, MBT_SOURCE_TRACKER, 0);
 }
 
 static void session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v);
@@ -1343,7 +1409,7 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri, struct mbt_add_to
 
 	/* Connect peer hints (from x.pe in magnet URI) */
 	for (int i = 0; i < m.peer_count; i++)
-		mbt_session_add_peer(s, ih, m.peers[i].addr, m.peers[i].port, MBT_SOURCE_MAGNET);
+		mbt_session_add_peer(s, ih, m.peers[i].addr, m.peers[i].port, MBT_SOURCE_MAGNET, 0);
 
 	/* Announce to trackers from magnet */
 	struct session_torrent *st = session_find(s, ih);
@@ -1486,7 +1552,8 @@ mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih)
 
 int
 mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
-                     const char *addr, uint16_t port, enum mbt_peer_source source)
+                     const char *addr, uint16_t port, enum mbt_peer_source source,
+                     uint8_t flags)
 {
 	int rv, fd;
 	struct session_torrent *st;
@@ -1535,7 +1602,47 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 			return 0;
 	}
 
-	/* Set up non-blocking connect */
+	/* Use uTP if peer advertised support (PEX flags bit 0x04) and ctx is available */
+	if ((flags & 0x04) && s->utp_ctx) {
+		struct sockaddr_storage dst = {0};
+		socklen_t dstlen;
+		struct sockaddr_in  *sin  = (struct sockaddr_in  *)&dst;
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&dst;
+		if (inet_pton(AF_INET6, addr, &sin6->sin6_addr) == 1) {
+			sin6->sin6_family = AF_INET6;
+			sin6->sin6_port   = htons(port);
+			dstlen = sizeof(*sin6);
+		} else if (inet_pton(AF_INET, addr, &sin->sin_addr) == 1) {
+			sin->sin_family = AF_INET;
+			sin->sin_port   = htons(port);
+			dstlen = sizeof(*sin);
+		} else {
+			return -EINVAL;
+		}
+
+		struct pending_utp_connect *puc = calloc(1, sizeof(*puc));
+		if (!puc)
+			return -ENOMEM;
+		puc->session = s;
+		puc->torrent = st->torrent;
+		puc->source  = source;
+		snprintf(puc->addr, sizeof(puc->addr), "%s", addr);
+		puc->port = port;
+
+		mbt_log_debug(MBT_LOG_SESSION, "uTP connecting to %s:%hu", addr, port);
+
+		int rv2 = mbt_utp_connect(s->utp_ctx, &puc->conn,
+		                          (struct sockaddr *)&dst, dstlen,
+		                          pending_utp_connected, pending_utp_connect_event, puc);
+		if (rv2 < 0) {
+			free(puc);
+			return rv2;
+		}
+		STAILQ_INSERT_TAIL(&s->pending_utp, puc, next);
+		return 0;
+	}
+
+	/* Set up non-blocking TCP connect */
 	fd = mbt_connect_tcp(addr, port);
 	if (fd < 0) {
 		mbt_log_warn(MBT_LOG_SESSION, "connect to %s:%hu failed: %s", addr, port, strerror(-fd));

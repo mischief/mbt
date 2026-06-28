@@ -103,8 +103,10 @@ MBT_API int mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, u
 MBT_API void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih);
 MBT_API uint16_t mbt_session_dht_port(struct mbt_session *s);
 MBT_API uint16_t mbt_session_listen_port(struct mbt_session *s);
+/* flags: bit 0x04 = peer supports uTP (from PEX added.f) */
 MBT_API int mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
-                         const char *addr, uint16_t port, enum mbt_peer_source source);
+                         const char *addr, uint16_t port, enum mbt_peer_source source,
+                         uint8_t flags);
 
 /* Manually trigger re-announce to all trackers (or specific torrent if ih != NULL) */
 MBT_API int mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih);
