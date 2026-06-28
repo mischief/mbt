@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: ISC
 /*
- * test/seed_seed_test.c — verify two seeders disconnect after connecting
+ * test/seed_seed_test.c — verify two seeders keep a bounded seed-to-seed link
  *
- * Both sessions have all pieces. They connect via x.pe.
- * After a choke interval, they should send NOT_INTERESTED and disconnect.
+ * Both sessions have all pieces. They connect via x.pe. They send each other
+ * NOT_INTERESTED (no piece data flows), but because KEEP_SEEDS >= 1 each side
+ * keeps the (single) seed peer connected to keep PEX gossip flowing rather
+ * than severing it. So after several choke intervals the connection persists.
  */
 #include <assert.h>
 #include <stdio.h>
@@ -100,15 +102,16 @@ int main(void)
 	mbt_ev_timer_new(ev, &to, 3 * 1000000ULL, on_timeout, NULL);
 	mbt_ev_run(ev);
 
-	/* Both should have 0 peers — disconnected */
+	/* With one seed peer each (<= KEEP_SEEDS), both keep the connection for
+	 * PEX gossip rather than disconnecting. */
 	int p1 = mbt_torrent_peer_count(t1);
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
 	int p2 = t2 ? mbt_torrent_peer_count(t2) : 0;
 	fprintf(stderr, "seed_seed_test: s1 peers=%d, s2 peers=%d\n", p1, p2);
-	assert(p1 == 0);
-	assert(p2 == 0);
+	assert(p1 == 1);
+	assert(p2 == 1);
 
-	fprintf(stderr, "seed_seed_test: PASS (seeders disconnected)\n");
+	fprintf(stderr, "seed_seed_test: PASS (seed-to-seed link kept for PEX)\n");
 
 	free(enc);
 	mbt_ev_timer_free(to);

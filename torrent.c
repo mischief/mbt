@@ -43,6 +43,11 @@ enum {
 	PIPELINE_INIT = 4,     /* slow-start initial window */
 };
 
+/* When we are a complete seed, keep at most this many seed-to-seed peers
+ * connected: they cost ~nothing (no piece data, just PEX/keepalive) and keep
+ * peer-discovery gossip flowing across the seed subgraph. */
+#define KEEP_SEEDS 2
+
 /* A snubbed peer is retried after this cooldown (if it is still unchoked):
  * un-snub on piece arrival is the fast path, but a snubbed peer is not
  * requested from, so without a timed retry a transient stall (e.g. a uTP pipe
@@ -782,6 +787,7 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 	}
 
 	/* Reset counters for next interval */
+	int kept_seeds = 0;
 	TAILQ_FOREACH(tp, &t->peers, entry) {
 		tp->bytes_from = 0;
 		tp->bytes_to = 0;
@@ -793,14 +799,24 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 			mbt_peer_send_choke(tp->peer, 1);
 			tp->am_choking = 1;
 		}
-		/* Disconnect seed-to-seed: we are a complete seed and they're not
-		 * interested. Guard piece_count>0: with no metadata yet both counts
-		 * are 0, and 0==0 would wrongly flag us as a seed and drop peers that
-		 * are merely still handshaking (or from whom we still need metadata). */
+		/* Seed-to-seed: we are a complete seed and they want nothing from us
+		 * (a peer that is itself a seed never becomes interested). Such links
+		 * carry no piece data -- only PEX/keepalive -- so keeping a few is
+		 * nearly free and helps peer-discovery gossip stay connected across
+		 * the seed subgraph. Keep up to KEEP_SEEDS of them and shed the rest
+		 * so we don't hold connections without bound.
+		 *
+		 * Guard piece_count>0: with no metadata yet both counts are 0, and
+		 * 0==0 would wrongly flag us as a seed and drop peers that are merely
+		 * still handshaking (or from whom we still need metadata). */
 		if (tp->peer && tp->failures < 10 && !tp->peer_interested &&
 		    t->piece_count > 0 && t->have_count == t->piece_count) {
-			mbt_peer_disconnect(tp->peer);
-			tp->failures += 5;
+			if (kept_seeds < KEEP_SEEDS) {
+				kept_seeds++;
+			} else {
+				mbt_peer_disconnect(tp->peer);
+				tp->failures += 5;
+			}
 		}
 	}
 
