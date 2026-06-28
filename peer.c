@@ -89,21 +89,25 @@ peer_write(struct mbt_peer *p, const void *buf, size_t len)
 static ssize_t
 peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 {
-	unsigned char prefix[4];
+	uint8_t prefix[4];
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, prefix, sizeof(prefix));
 	mbt_pack_u32(&pk, (uint32_t)len);
 	mbt_pack_end(&pk);
-	if (mbt_conn_write(p->conn, prefix, 4) < 0)
-		return -EIO;
-	if (mbt_conn_write(p->conn, buf, len) < 0)
-		return -EIO;
-	return 0;
+
+	struct iovec iov[2] = {
+		{ .iov_base = prefix,            .iov_len = sizeof(prefix) },
+		{ .iov_base = (void *)buf,       .iov_len = len },
+	};
+	ssize_t rv = mbt_conn_writev(p->conn, iov, 2);
+	return rv < 0 ? rv : 0;
 }
 
 static void
 peer_error(struct mbt_peer *p, int err)
 {
+	if (p->state == MBT_PEER_CLOSED)
+		return;
 	mbt_log_warn(MBT_LOG_PEER, "%s:%hu: %s", p->addr, p->conn_port,
 	             err == 0 ? "EOF" : strerror(-err));
 	p->state = MBT_PEER_CLOSED;
@@ -966,6 +970,12 @@ mbt_peer_conn_port(struct mbt_peer *p)
 	return p->conn_port;
 }
 
+void
+mbt_peer_set_writecb(struct mbt_peer *p, mbt_conn_write_cb cb, void *arg)
+{
+	mbt_conn_set_writecb(p->conn, cb, arg);
+}
+
 const char *
 mbt_peer_version(struct mbt_peer *p)
 {
@@ -1078,7 +1088,9 @@ int
 mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
                     const void *data, size_t len)
 {
-	unsigned char hdr[4 + 1 + 4 + 4];
+	/* Gather-write the framing header and payload so the conn_write is
+	 * atomic without concatenating them into a heap buffer. */
+	uint8_t hdr[4 + 1 + 4 + 4];
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, hdr, sizeof(hdr));
 	mbt_pack_u32(&pk, (uint32_t)(1 + 4 + 4 + len));
@@ -1086,11 +1098,15 @@ mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	mbt_pack_u32(&pk, piece);
 	mbt_pack_u32(&pk, offset);
 	mbt_pack_end(&pk);
-	if (mbt_conn_write(p->conn, hdr, sizeof(hdr)) < 0)
-		return -EIO;
-	if (mbt_conn_write(p->conn, data, len) < 0)
-		return -EIO;
-	return 0;
+
+	struct iovec iov[2] = {
+		{ .iov_base = hdr,          .iov_len = sizeof(hdr) },
+		{ .iov_base = (void *)data, .iov_len = len },
+	};
+	ssize_t rv = mbt_conn_writev(p->conn, iov, 2);
+	if (rv == -ENOBUFS)
+		return -ENOBUFS;
+	return rv < 0 ? (int)rv : 0;
 }
 
 int

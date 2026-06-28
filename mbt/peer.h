@@ -4,6 +4,7 @@
 
 #include "export.h"
 #include "peer_source.h"
+#include "conn.h"
 
 #include <netinet/in.h>
 #include <stdint.h>
@@ -146,5 +147,10 @@ MBT_API uint16_t mbt_peer_port(struct mbt_peer *p);        /* listen port from B
 MBT_API void mbt_peer_set_our_listen_port(struct mbt_peer *p, uint16_t port);
 MBT_API enum mbt_peer_source mbt_peer_source(struct mbt_peer *p);
 MBT_API const char *mbt_peer_source_str(enum mbt_peer_source source);
+
+/* Register a one-shot callback for when the peer's send buffer drains.
+ * No-op for TCP (kernel-buffered). */
+MBT_API void mbt_peer_set_writecb(struct mbt_peer *p,
+                                   mbt_conn_write_cb cb, void *arg);
 
 #endif
