@@ -2,8 +2,10 @@
 /*
  * Comprehensive uTP test suite.
  *
- * Uses TX hooks to bypass real UDP: packets are delivered directly via
- * mbt_utp_recv(), making tests deterministic with no real network I/O.
+ * Runs over real loopback UDP (the same sendto/recvfrom + event-loop path as
+ * production). Faults (loss, duplication, reorder) are injected on the receive
+ * path via mbt_utp_ctx_set_rx_hook, installed on whichever context receives the
+ * traffic being faulted.
  */
 
 #include <assert.h>
@@ -19,82 +21,96 @@
 #include "mbt/utp.h"
 #include "mbt/conn.h"
 
-/* packet type nibble (for TX hook filtering) */
 #define PKT_TYPE(buf) (((const uint8_t *)(buf))[0] >> 4)
 #define ST_DATA  0
 
-/* ---- test_pipe: delivers packets directly between two uTP contexts ---- */
+static struct mbt_ev *g_ev;
 
-struct test_pipe {
-	struct mbt_utp_ctx  *peer;         /* deliver packets to this ctx */
-	struct sockaddr_in   src_addr;     /* pretend source address */
+/* ---- rx fault injector ---- */
 
-	/* fault injection */
-	int  drop_nth;        /* drop every Nth DATA packet (0 = none) */
-	int  pkt_data_count;  /* count of DATA packets seen */
-	int  duplicate;       /* deliver each packet twice */
+struct rx_fault {
+	struct mbt_utp_ctx *ctx;   /* ctx this hook is installed on */
 
-	/* reorder: buffer one, deliver after next */
-	int     reorder;
-	uint8_t pending[20 + 1450]; /* UTP_HEADER_SIZE + UTP_MAX_PACKET_SIZE */
-	size_t  pending_len;
+	int drop_nth;        /* drop every Nth DATA datagram (0 = none) */
+	int data_count;      /* DATA datagrams seen */
+	int duplicate;       /* deliver each DATA datagram twice */
+
+	int reorder;         /* swap adjacent DATA: hold one, release after next */
+	uint8_t pend[20 + 1500];
+	size_t  pend_len;
+	struct sockaddr_storage pend_src;
+	socklen_t pend_srclen;
+	struct mbt_ev_timer *flush_timer;  /* releases a stranded held packet */
+
+	int reinjecting;     /* guard so re-injected datagrams pass through */
 };
 
-static int
-pipe_hook(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
-          const struct sockaddr *dst, socklen_t dstlen, void *arg)
+static void
+rx_reorder_flush_cb(struct mbt_ev_timer *t, void *arg)
 {
-	(void)ctx; (void)dst; (void)dstlen;
-	struct test_pipe *p = arg;
-	uint8_t type = PKT_TYPE(buf);
+	struct rx_fault *f = arg;
+	f->flush_timer = NULL;
+	mbt_ev_timer_free(t);
+	if (f->pend_len) {
+		f->reinjecting = 1;
+		mbt_utp_recv(f->ctx, f->pend, f->pend_len,
+		             (struct sockaddr *)&f->pend_src, f->pend_srclen);
+		f->reinjecting = 0;
+		f->pend_len = 0;
+	}
+}
 
-	if (p->drop_nth && type == ST_DATA) {
-		p->pkt_data_count++;
-		if (p->pkt_data_count % p->drop_nth == 0)
+static int
+rx_hook(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
+        const struct sockaddr *src, socklen_t srclen, void *arg)
+{
+	struct rx_fault *f = arg;
+	uint8_t type = (len >= 20) ? PKT_TYPE(buf) : 0xff;
+
+	if (f->reinjecting)
+		return 1;
+
+	if (f->drop_nth && type == ST_DATA) {
+		f->data_count++;
+		if (f->data_count % f->drop_nth == 0)
 			return 0; /* drop */
 	}
 
-	if (p->reorder && type == ST_DATA) {
-		if (!p->pending_len) {
-			memcpy(p->pending, buf, len);
-			p->pending_len = len;
-			return 0; /* buffer, don't deliver yet */
-		} else {
-			/* deliver current first (reversed order), then pending */
-			mbt_utp_recv(p->peer, buf, len,
-			             (struct sockaddr *)&p->src_addr, sizeof(p->src_addr));
-			if (p->duplicate)
-				mbt_utp_recv(p->peer, buf, len,
-				             (struct sockaddr *)&p->src_addr, sizeof(p->src_addr));
-			mbt_utp_recv(p->peer, p->pending, p->pending_len,
-			             (struct sockaddr *)&p->src_addr, sizeof(p->src_addr));
-			p->pending_len = 0;
-			return 0;
+	if (f->reorder && type == ST_DATA && len <= sizeof(f->pend)) {
+		if (!f->pend_len) {
+			memcpy(f->pend, buf, len);
+			f->pend_len = len;
+			memcpy(&f->pend_src, src, srclen);
+			f->pend_srclen = srclen;
+			/* release even if no "next" arrives (e.g. single/last pkt) */
+			if (!f->flush_timer)
+				mbt_ev_timer_new(g_ev, &f->flush_timer, 0,
+				                 rx_reorder_flush_cb, f);
+			return 0; /* hold */
 		}
+		/* deliver this one, then the held one (reversed). */
+		if (f->flush_timer) {
+			mbt_ev_timer_free(f->flush_timer);
+			f->flush_timer = NULL;
+		}
+		if (f->duplicate)
+			mbt_utp_recv(ctx, buf, len, src, srclen);
+		f->reinjecting = 1;
+		mbt_utp_recv(ctx, f->pend, f->pend_len,
+		             (struct sockaddr *)&f->pend_src, f->pend_srclen);
+		f->reinjecting = 0;
+		f->pend_len = 0;
+		return 1; /* the current datagram is delivered normally by caller */
 	}
 
-	mbt_utp_recv(p->peer, buf, len,
-	             (struct sockaddr *)&p->src_addr, sizeof(p->src_addr));
-	if (p->duplicate)
-		mbt_utp_recv(p->peer, buf, len,
-		             (struct sockaddr *)&p->src_addr, sizeof(p->src_addr));
-	return 0;
-}
-
-/* Flush any pending buffered packet in a reorder pipe */
-static void
-pipe_flush(struct test_pipe *p)
-{
-	if (p->pending_len) {
-		mbt_utp_recv(p->peer, p->pending, p->pending_len,
-		             (struct sockaddr *)&p->src_addr, sizeof(p->src_addr));
-		p->pending_len = 0;
+	if (f->duplicate && type == ST_DATA) {
+		f->reinjecting = 1;
+		mbt_utp_recv(ctx, buf, len, src, srclen);
+		f->reinjecting = 0;
 	}
+
+	return 1;
 }
-
-/* ---- common test scaffolding ---- */
-
-static struct mbt_ev *g_ev;
 
 static void
 make_loopback_addr(struct sockaddr_in *a, uint16_t port)
@@ -193,16 +209,9 @@ test_basic(void)
 	rv = mbt_utp_ctx_new(&client_ctx, g_ev, 0, NULL, NULL);
 	assert(rv == 0);
 	uint16_t client_port = mbt_utp_ctx_port(client_ctx);
+	(void)client_port;
 
-	/* Install cross-connected TX hooks */
-	struct test_pipe c2s = {0}, s2c = {0};
-	make_loopback_addr(&c2s.src_addr, client_port);
-	c2s.peer = server_ctx;
-	make_loopback_addr(&s2c.src_addr, server_port);
-	s2c.peer = client_ctx;
-
-	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
-	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+	/* real loopback UDP, no fault injection */
 
 	struct sockaddr_in dst;
 	make_loopback_addr(&dst, server_port);
@@ -315,15 +324,9 @@ test_large(void)
 
 	uint16_t sp = mbt_utp_ctx_port(server_ctx);
 	uint16_t cp = mbt_utp_ctx_port(client_ctx);
+	(void)cp;
 
-	struct test_pipe c2s = {0}, s2c = {0};
-	make_loopback_addr(&c2s.src_addr, cp);
-	c2s.peer = server_ctx;
-	make_loopback_addr(&s2c.src_addr, sp);
-	s2c.peer = client_ctx;
-
-	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
-	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+	/* real loopback UDP, no fault injection */
 
 	struct sockaddr_in dst;
 	make_loopback_addr(&dst, sp);
@@ -410,17 +413,13 @@ test_duplicate(void)
 
 	uint16_t sp = mbt_utp_ctx_port(server_ctx);
 	uint16_t cp = mbt_utp_ctx_port(client_ctx);
+	(void)cp;
 
-	struct test_pipe c2s = {0}, s2c = {0};
-	make_loopback_addr(&c2s.src_addr, cp);
-	c2s.peer      = server_ctx;
-	c2s.duplicate = 1;   /* duplicate all client->server packets */
-	make_loopback_addr(&s2c.src_addr, sp);
-	s2c.peer      = client_ctx;
-	s2c.duplicate = 1;
-
-	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
-	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+	struct rx_fault sf = {0}, cf = {0};
+	sf.ctx = server_ctx; sf.duplicate = 1;  /* dup c2s arriving at server */
+	cf.ctx = client_ctx; cf.duplicate = 1;  /* dup s2c arriving at client */
+	mbt_utp_ctx_set_rx_hook(server_ctx, rx_hook, &sf);
+	mbt_utp_ctx_set_rx_hook(client_ctx, rx_hook, &cf);
 
 	struct sockaddr_in dst;
 	make_loopback_addr(&dst, sp);
@@ -519,16 +518,11 @@ test_loss(void)
 
 	uint16_t sp = mbt_utp_ctx_port(server_ctx);
 	uint16_t cp = mbt_utp_ctx_port(client_ctx);
+	(void)cp;
 
-	struct test_pipe c2s = {0}, s2c = {0};
-	make_loopback_addr(&c2s.src_addr, cp);
-	c2s.peer     = server_ctx;
-	c2s.drop_nth = 4;   /* drop every 4th DATA packet */
-	make_loopback_addr(&s2c.src_addr, sp);
-	s2c.peer = client_ctx;
-
-	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
-	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+	struct rx_fault sf = {0};
+	sf.ctx = server_ctx; sf.drop_nth = 4;  /* drop every 4th DATA at server */
+	mbt_utp_ctx_set_rx_hook(server_ctx, rx_hook, &sf);
 
 	struct sockaddr_in dst;
 	make_loopback_addr(&dst, sp);
@@ -544,8 +538,6 @@ test_loss(void)
 	mbt_ev_timer_new(g_ev, &to, 5000000, timeout_cb, NULL);
 
 	mbt_ev_run(g_ev);
-
-	pipe_flush(&c2s);
 
 	mbt_ev_timer_free(to);
 
@@ -619,16 +611,11 @@ test_out_of_order(void)
 
 	uint16_t sp = mbt_utp_ctx_port(server_ctx);
 	uint16_t cp = mbt_utp_ctx_port(client_ctx);
+	(void)cp;
 
-	struct test_pipe c2s = {0}, s2c = {0};
-	make_loopback_addr(&c2s.src_addr, cp);
-	c2s.peer    = server_ctx;
-	c2s.reorder = 1;   /* swap pairs of DATA packets */
-	make_loopback_addr(&s2c.src_addr, sp);
-	s2c.peer = client_ctx;
-
-	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
-	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+	struct rx_fault sf = {0};
+	sf.ctx = server_ctx; sf.reorder = 1;  /* swap adjacent DATA at server */
+	mbt_utp_ctx_set_rx_hook(server_ctx, rx_hook, &sf);
 
 	struct sockaddr_in dst;
 	make_loopback_addr(&dst, sp);
@@ -644,10 +631,8 @@ test_out_of_order(void)
 
 	mbt_ev_run(g_ev);
 
-	/* Flush any pending reordered packet */
-	pipe_flush(&c2s);
-
 	mbt_ev_timer_free(to);
+	if (sf.flush_timer) mbt_ev_timer_free(sf.flush_timer);
 
 	assert(ooo_server_received == PAYLOAD_LEN);
 	assert(memcmp(ooo_server_buf, PAYLOAD, PAYLOAD_LEN) == 0);
@@ -732,15 +717,9 @@ test_fin(void)
 
 	uint16_t sp = mbt_utp_ctx_port(server_ctx);
 	uint16_t cp = mbt_utp_ctx_port(client_ctx);
+	(void)cp;
 
-	struct test_pipe c2s = {0}, s2c = {0};
-	make_loopback_addr(&c2s.src_addr, cp);
-	c2s.peer = server_ctx;
-	make_loopback_addr(&s2c.src_addr, sp);
-	s2c.peer = client_ctx;
-
-	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
-	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+	/* real loopback UDP, no fault injection */
 
 	struct sockaddr_in dst;
 	make_loopback_addr(&dst, sp);
@@ -883,15 +862,9 @@ test_flow_control(void)
 
 	uint16_t sp = mbt_utp_ctx_port(server_ctx);
 	uint16_t cp = mbt_utp_ctx_port(client_ctx);
+	(void)cp;
 
-	struct test_pipe c2s = {0}, s2c = {0};
-	make_loopback_addr(&c2s.src_addr, cp);
-	c2s.peer = server_ctx;
-	make_loopback_addr(&s2c.src_addr, sp);
-	s2c.peer = client_ctx;
-
-	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
-	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+	/* real loopback UDP, no fault injection */
 
 	struct sockaddr_in dst;
 	make_loopback_addr(&dst, sp);

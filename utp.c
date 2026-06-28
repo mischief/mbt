@@ -232,9 +232,12 @@ struct mbt_utp_ctx {
 	mbt_utp_accept_cb accept_cb;
 	void             *accept_arg;
 
-	int (*tx_hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
-	               const struct sockaddr *dst, socklen_t dstlen, void *arg);
-	void *tx_hook_arg;
+	/* Test-only receive fault injection. Consulted for each datagram handed
+	 * to mbt_utp_recv: return 0 to drop it, nonzero to deliver. Lets tests
+	 * model loss/reorder over real UDP without faking the send path. */
+	int (*rx_hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
+	               const struct sockaddr *src, socklen_t srclen, void *arg);
+	void *rx_hook_arg;
 
 	struct utp_sock_list buckets[UTP_CONN_HASH_SIZE];
 };
@@ -438,6 +441,7 @@ utp_conn_set_watermark(struct mbt_conn *c, size_t low)
 
 static int utp_flush(struct mbt_utp_sock *s);
 static int utp_send_ack(struct mbt_utp_sock *s);
+static int utp_do_sendto(struct mbt_utp_sock *s, const void *buf, size_t len);
 
 static size_t
 utp_conn_available(struct mbt_conn *c)
@@ -581,17 +585,7 @@ utp_conn_free(struct mbt_conn *c)
 		h->seq_nr            = htons(s->seq_nr);
 		h->ack_nr            = htons(s->ack_nr);
 
-		int fd = (s->peer_addr.ss_family == AF_INET6)
-		       ? s->ctx->listener.fd6 : s->ctx->listener.fd4;
-		if (s->ctx->tx_hook) {
-			int r = s->ctx->tx_hook(s->ctx, buf, UTP_HEADER_SIZE,
-			    (struct sockaddr *)&s->peer_addr, s->peer_addrlen,
-			    s->ctx->tx_hook_arg);
-			if (r == 0) goto arm_timer;
-		}
-		sendto(fd, buf, UTP_HEADER_SIZE, 0,
-		       (struct sockaddr *)&s->peer_addr, s->peer_addrlen);
-arm_timer:
+		utp_do_sendto(s, buf, UTP_HEADER_SIZE);
 		s->state = UTP_CS_FIN_SENT;
 		if (!s->destroy_timer)
 			mbt_ev_timer_new(s->ctx->ev, &s->destroy_timer,
@@ -734,12 +728,7 @@ utp_do_sendto(struct mbt_utp_sock *s, const void *buf, size_t len)
 {
 	struct mbt_utp_ctx *ctx = s->ctx;
 
-	if (ctx->tx_hook) {
-		int r = ctx->tx_hook(ctx, buf, len,
-		    (struct sockaddr *)&s->peer_addr, s->peer_addrlen,
-		    ctx->tx_hook_arg);
-		if (r == 0) return 0;
-	}
+	utp_trace_pkt("tx", buf, len);
 
 	int fd = (s->peer_addr.ss_family == AF_INET6)
 	       ? ctx->listener.fd6 : ctx->listener.fd4;
@@ -1457,13 +1446,13 @@ mbt_utp_ctx_fd(struct mbt_utp_ctx *ctx)
 }
 
 void
-mbt_utp_ctx_set_tx_hook(struct mbt_utp_ctx *ctx,
+mbt_utp_ctx_set_rx_hook(struct mbt_utp_ctx *ctx,
     int (*hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
-                const struct sockaddr *dst, socklen_t dstlen, void *arg),
+                const struct sockaddr *src, socklen_t srclen, void *arg),
     void *arg)
 {
-	ctx->tx_hook     = hook;
-	ctx->tx_hook_arg = arg;
+	ctx->rx_hook     = hook;
+	ctx->rx_hook_arg = arg;
 }
 
 int
@@ -1471,6 +1460,13 @@ mbt_utp_recv(struct mbt_utp_ctx *ctx,
              const void *buf, size_t len,
              const struct sockaddr *src, socklen_t srclen)
 {
+	utp_trace_pkt("rx", buf, len);
+
+	/* Test-only receive fault injection: 0 = drop this datagram. */
+	if (ctx->rx_hook &&
+	    ctx->rx_hook(ctx, buf, len, src, srclen, ctx->rx_hook_arg) == 0)
+		return 0;
+
 	if (len < UTP_HEADER_SIZE)
 		return -1;
 

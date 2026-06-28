@@ -148,11 +148,8 @@ utp_test = executable('utp_test', 'utp_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('utp', utp_test, timeout: 30, suite: 'utp')
 
-# robustness tests: large transfers under deep reorder / tail loss. these still
-# fail -- the window/SACK/reorder unification (utp.md items 1, 1b) is in, but the
-# congestion window does not ramp under heavy reorder (utp.md items 2, 9 / cwnd),
-# so the transfer crawls and times out. marked should_fail until that lands; when
-# it passes, meson will flag this entry and the marker comes off.
+# robustness tests: large one-way transfers over real loopback UDP under deep
+# reorder and tail loss, injected via the rx hook (see utp_robust_test.c).
 utp_robust_test = executable('utp_robust_test', 'utp_robust_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('utp_robust', utp_robust_test, timeout: 30, suite: 'utp', should_fail: true)
+test('utp_robust', utp_robust_test, timeout: 60, suite: 'utp')

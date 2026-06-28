@@ -63,14 +63,14 @@ MBT_API int mbt_utp_connect(struct mbt_utp_ctx *ctx,
                               void *arg);
 
 /*
- * Install a TX hook on the ctx.  The hook is called for every outbound UDP
- * datagram before it is handed to sendto().  If the hook returns 0 the real
- * sendto() is suppressed; any other return value lets the datagram through.
- * Used by tests to deliver packets directly via mbt_utp_recv().
+ * Install an RX hook on the ctx.  The hook is called for every datagram passed
+ * to mbt_utp_recv(), before it is processed.  If the hook returns 0 the
+ * datagram is dropped; any other return value lets it through.  Used by tests
+ * to inject loss/reorder on the receive path while running over real UDP.
  */
-MBT_API void mbt_utp_ctx_set_tx_hook(struct mbt_utp_ctx *ctx,
+MBT_API void mbt_utp_ctx_set_rx_hook(struct mbt_utp_ctx *ctx,
     int (*hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
-                const struct sockaddr *dst, socklen_t dstlen, void *arg),
+                const struct sockaddr *src, socklen_t srclen, void *arg),
     void *arg);
 
 #endif
