@@ -1290,6 +1290,24 @@ mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after)
 }
 
 int
+mbt_session_add_tracker(struct mbt_session *s, struct mbt_torrent *t, const char *url)
+{
+	struct session_torrent *st;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (st->torrent != t) continue;
+		if (st->tracker_count >= 16) return -ENOSPC;
+		/* Skip if already present */
+		for (int i = 0; i < st->tracker_count; i++)
+			if (strcmp(st->trackers[i], url) == 0) return 0;
+		char *u = strdup(url);
+		if (!u) return -ENOMEM;
+		st->trackers[st->tracker_count++] = u;
+		return 0;
+	}
+	return -ENOENT;
+}
+
+int
 mbt_session_torrent_tracker_count(struct mbt_session *s, struct mbt_torrent *t)
 {
 	struct session_torrent *st;

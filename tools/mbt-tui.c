@@ -545,6 +545,14 @@ main(int argc, char *argv[])
 	mbt_session_enable_dht(session);
 	mbt_session_enable_lsd(session);
 
+	static const char *fallback_trackers[] = {
+		"udp://tracker.opentrackr.org:1337/announce",
+		"udp://open.demonii.com:1337/announce",
+		"udp://tracker.openbittorrent.com:6969/announce",
+		"udp://exodus.desync.com:6969/announce",
+		"udp://tracker.torrent.eu.org:451/announce",
+	};
+
 	/* Add any args as torrents (.torrent, magnet, or raw infohash) */
 	for (int i = 0; i < argc; i++) {
 		int rv = mbt_session_add_torrent_file(session, argv[i], NULL);
@@ -555,6 +563,10 @@ main(int argc, char *argv[])
 			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", argv[i]);
 			mbt_session_add_magnet(session, mag, NULL);
 		}
+		struct mbt_torrent *ft = mbt_session_torrent_first(session);
+		if (ft)
+			for (size_t fi = 0; fi < sizeof(fallback_trackers)/sizeof(*fallback_trackers); fi++)
+				mbt_session_add_tracker(session, ft, fallback_trackers[fi]);
 	}
 
 	/* Watch stdin for input */
