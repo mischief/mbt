@@ -303,3 +303,27 @@ mbt_sockaddr_split(const struct sockaddr_storage *sa,
 		*port = ntohs(s4->sin_port);
 	}
 }
+
+int
+mbt_sockaddr_build(const char *addr, uint16_t port,
+                   struct sockaddr_storage *out, socklen_t *outlen)
+{
+	struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)out;
+	struct sockaddr_in  *s4 = (struct sockaddr_in  *)out;
+
+	memset(out, 0, sizeof(*out));
+
+	if (inet_pton(AF_INET6, addr, &s6->sin6_addr) == 1) {
+		s6->sin6_family = AF_INET6;
+		s6->sin6_port   = htons(port);
+		*outlen = sizeof(*s6);
+		return 0;
+	}
+	if (inet_pton(AF_INET, addr, &s4->sin_addr) == 1) {
+		s4->sin_family = AF_INET;
+		s4->sin_port   = htons(port);
+		*outlen = sizeof(*s4);
+		return 0;
+	}
+	return -EINVAL;
+}

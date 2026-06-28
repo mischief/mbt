@@ -1604,21 +1604,10 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 
 	/* Use uTP if peer advertised support (PEX flags bit 0x04) and ctx is available */
 	if ((flags & 0x04) && s->utp_ctx) {
-		struct sockaddr_storage dst = {0};
+		struct sockaddr_storage dst;
 		socklen_t dstlen;
-		struct sockaddr_in  *sin  = (struct sockaddr_in  *)&dst;
-		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&dst;
-		if (inet_pton(AF_INET6, addr, &sin6->sin6_addr) == 1) {
-			sin6->sin6_family = AF_INET6;
-			sin6->sin6_port   = htons(port);
-			dstlen = sizeof(*sin6);
-		} else if (inet_pton(AF_INET, addr, &sin->sin_addr) == 1) {
-			sin->sin_family = AF_INET;
-			sin->sin_port   = htons(port);
-			dstlen = sizeof(*sin);
-		} else {
+		if (mbt_sockaddr_build(addr, port, &dst, &dstlen) < 0)
 			return -EINVAL;
-		}
 
 		struct pending_utp_connect *puc = calloc(1, sizeof(*puc));
 		if (!puc)

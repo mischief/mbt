@@ -52,4 +52,9 @@ const char *mbt_sockaddr_str(const struct sockaddr_storage *sa,
 void mbt_sockaddr_split(const struct sockaddr_storage *sa,
                         char *addr, size_t addrlen, uint16_t *port);
 
+/* Build a sockaddr_storage from a numeric addr string and port.
+ * Returns 0 on success, -EINVAL if addr is not a valid IPv4/IPv6 address. */
+int mbt_sockaddr_build(const char *addr, uint16_t port,
+                       struct sockaddr_storage *out, socklen_t *outlen);
+
 #endif
