@@ -310,9 +310,10 @@ utp_trace_pkt(const char *dir, const void *buf, size_t len)
 	}
 	const struct utp_hdr *h = buf;
 	mbt_log_trace(MBT_LOG_UTP,
-	    "%s %-5s seq=%u ack=%u wnd=%u ext=%u len=%zu",
-	    dir, utp_type_str(h->type_ver >> 4), ntohs(h->seq_nr),
-	    ntohs(h->ack_nr), ntohl(h->wnd_size), h->extension, len);
+	    "%s %-5s cid=%u seq=%u ack=%u wnd=%u ext=%u len=%zu",
+	    dir, utp_type_str(h->type_ver >> 4), ntohs(h->conn_id),
+	    ntohs(h->seq_nr), ntohs(h->ack_nr), ntohl(h->wnd_size),
+	    h->extension, len);
 }
 
 static struct mbt_utp_sock *
@@ -987,12 +988,25 @@ utp_resend_entry(struct mbt_utp_sock *s, struct utp_send_entry *e)
 static void
 utp_retransmit(struct mbt_utp_sock *s)
 {
+	/*
+	 * Resend only the OLDEST unacked packet (the hole at send_una), not the
+	 * whole unacked window. send_una is the cumulative-ack boundary, so it is
+	 * the first gap by definition. Resending the entire window on every loss
+	 * episode amplifies enormously under load (each episode replays thousands
+	 * of packets), which collapses throughput; standard fast retransmit sends
+	 * one segment and lets the ack clock drive the rest. Further holes are
+	 * picked up by subsequent acks/SACKs and the rto.
+	 */
 	for (uint16_t seq = s->send_una;
 	     (int16_t)(seq - s->seq_nr) < 0;
 	     seq++) {
 		struct utp_send_entry *e = &s->send_queue[seq & s->queue_mask];
-		if (e->valid && e->seq_nr == seq && !e->sacked)
+		if (!e->valid || e->seq_nr != seq)
+			continue;
+		if (!e->sacked) {
 			utp_resend_entry(s, e);
+			return;   /* one packet per loss event */
+		}
 	}
 }
 
