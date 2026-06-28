@@ -73,7 +73,7 @@ struct pending_req {
 };
 
 struct torrent_peer {
-	SLIST_ENTRY(torrent_peer) entry;
+	TAILQ_ENTRY(torrent_peer) entry;
 	SLIST_HEAD(, piece_info) active_pieces; /* pieces currently assigned to this peer */
 	int active_count;      /* length of active_pieces */
 	struct mbt_peer *peer;
@@ -139,7 +139,7 @@ struct mbt_torrent {
 
 
 	/* Peers */
-	SLIST_HEAD(, torrent_peer) peers;
+	TAILQ_HEAD(, torrent_peer) peers;
 	int peer_count;
 	int peers_with_avail; /* peers that have sent a bitfield or HAVE_ALL */
 
@@ -353,7 +353,7 @@ verify_complete(struct mbt_torrent *t)
 		mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
 		             t->have_count, t->piece_count);
 		struct torrent_peer *tp;
-		SLIST_FOREACH(tp, &t->peers, entry) {
+		TAILQ_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures >= 10 || !tp->peer) continue;
 			for (uint32_t i = 0; i < t->piece_count; i++)
 				if (mbt_bitmap_isset(t->have, i) > 0)
@@ -363,7 +363,7 @@ verify_complete(struct mbt_torrent *t)
 	if (t->have_count == t->piece_count) {
 		mbt_log_info(MBT_LOG_TORRENT, "all pieces verified, nothing to download");
 		struct torrent_peer *np;
-		SLIST_FOREACH(np, &t->peers, entry)
+		TAILQ_FOREACH(np, &t->peers, entry)
 			if (np->peer && np->failures < 10)
 				mbt_peer_send_interested(np->peer, 0);
 		bucket_free(t);
@@ -372,7 +372,7 @@ verify_complete(struct mbt_torrent *t)
 	} else {
 		/* Drive connected peers now that we know what we have */
 		struct torrent_peer *tp;
-		SLIST_FOREACH(tp, &t->peers, entry)
+		TAILQ_FOREACH(tp, &t->peers, entry)
 			if (!mbt_peer_choked(tp->peer))
 				torrent_drive_peer(t, tp);
 	}
@@ -483,7 +483,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	/* Drive all unchoked peers if we freed up pieces */
 	if (reset_count > 0) {
 		struct torrent_peer *tp;
-		SLIST_FOREACH(tp, &t->peers, entry) {
+		TAILQ_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures < 10 && !mbt_peer_choked(tp->peer))
 				torrent_drive_peer(t, tp);
 		}
@@ -497,7 +497,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		 * to avoid SLIST corruption from synchronous on_error removal) */
 		struct mbt_peer *idle_drop[16];
 		int idle_drop_n = 0;
-		SLIST_FOREACH(tp, &t->peers, entry) {
+		TAILQ_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
 			struct mbt_bitmap *idle_bf = mbt_peer_bitfield(tp->peer);
@@ -514,7 +514,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		for (int i = 0; i < idle_drop_n; i++)
 			mbt_peer_disconnect(idle_drop[i]);
 
-		SLIST_FOREACH(tp, &t->peers, entry) {
+		TAILQ_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
 			if ((tp->outstanding > 0 || mbt_peer_choked(tp->peer)) &&
@@ -547,7 +547,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 				 * Driving peers with outstanding requests causes picker -1
 				 * with outstanding==0 mid-loop, falsely triggering endgame. */
 				struct torrent_peer *rtp;
-				SLIST_FOREACH(rtp, &t->peers, entry) {
+				TAILQ_FOREACH(rtp, &t->peers, entry) {
 					if (rtp != tp && rtp->peer && rtp->failures < 10 &&
 					    !mbt_peer_choked(rtp->peer) && !rtp->snubbed &&
 					    rtp->outstanding == 0)
@@ -561,7 +561,7 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	 * requests keep going out even when no piece completions trigger it. */
 	if (t->endgame && t->have_count < t->piece_count) {
 		struct torrent_peer *tp;
-		SLIST_FOREACH(tp, &t->peers, entry) {
+		TAILQ_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures < 10 && tp->peer &&
 			    !mbt_peer_choked(tp->peer) && !tp->snubbed &&
 			    tp->outstanding == 0)
@@ -597,7 +597,7 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 	uint8_t added[50 * 6]; /* max 50 peers per BEP 11 */
 	int count = 0;
 	struct torrent_peer *tp;
-	for (struct torrent_peer *tp = SLIST_FIRST(&t->peers); tp && count < 50; tp = SLIST_NEXT(tp, entry)) {
+	for (struct torrent_peer *tp = TAILQ_FIRST(&t->peers); tp && count < 50; tp = TAILQ_NEXT(tp, entry)) {
 		if (!tp->peer) continue;
 		const char *addr = mbt_peer_addr(tp->peer);
 		uint16_t port = mbt_peer_port(tp->peer);
@@ -633,7 +633,7 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 	 * extension header. For simplicity, build per-peer: */
 	free(pex_msg);
 
-	SLIST_FOREACH(tp, &t->peers, entry) {
+	TAILQ_FOREACH(tp, &t->peers, entry) {
 		if (!tp->peer) continue;
 		uint8_t remote_pex_id = mbt_peer_ut_pex_id(tp->peer);
 		if (!remote_pex_id) continue;
@@ -666,7 +666,7 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 	struct torrent_peer *tp;
 	struct torrent_peer *ranked[128];
 	int n = 0;
-	for (tp = SLIST_FIRST(&t->peers); tp && n < 128; tp = SLIST_NEXT(tp, entry))
+	for (tp = TAILQ_FIRST(&t->peers); tp && n < 128; tp = TAILQ_NEXT(tp, entry))
 		if (tp->peer && tp->peer_interested)
 			ranked[n++] = tp;
 
@@ -711,7 +711,7 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 	}
 
 	/* Reset counters for next interval */
-	SLIST_FOREACH(tp, &t->peers, entry) {
+	TAILQ_FOREACH(tp, &t->peers, entry) {
 		tp->bytes_from = 0;
 		tp->bytes_to = 0;
 		/* Decay failures every 3rd round (30s) */
@@ -802,7 +802,7 @@ on_choke(struct mbt_peer *p, int choked, void *arg)
 			piece_info_free_one(t, cpi);
 		tp->outstanding = 0;
 		/* Drive other unchoked peers to pick up freed pieces */
-		SLIST_FOREACH(op, &t->peers, entry)
+		TAILQ_FOREACH(op, &t->peers, entry)
 			if (op != tp && !mbt_peer_choked(op->peer))
 				torrent_drive_peer(t, op);
 	}
@@ -937,7 +937,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	 * don't waste upload re-sending it. */
 	if (t->endgame) {
 		struct torrent_peer *ctp;
-		SLIST_FOREACH(ctp, &t->peers, entry) {
+		TAILQ_FOREACH(ctp, &t->peers, entry) {
 			if (ctp == tp || !ctp->peer || ctp->failures >= 10)
 				continue;
 			mbt_peer_send_cancel(ctp->peer, piece, offset, (uint32_t)len);
@@ -980,7 +980,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			}
 			/* Piece is now PENDING again — drive all peers to pick it up */
 			struct torrent_peer *rtp;
-			SLIST_FOREACH(rtp, &t->peers, entry) {
+			TAILQ_FOREACH(rtp, &t->peers, entry) {
 				if (rtp->peer && rtp->failures < 10 && !mbt_peer_choked(rtp->peer))
 					torrent_drive_peer(t, rtp);
 			}
@@ -1003,7 +1003,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			             tp->outstanding, tp->reqq_window);
 
 			/* Broadcast HAVE to all connected peers */
-			SLIST_FOREACH(hp, &t->peers, entry)
+			TAILQ_FOREACH(hp, &t->peers, entry)
 				mbt_peer_send_have(hp->peer, piece);
 
 			if (t->cb.on_piece_complete)
@@ -1013,7 +1013,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			if (t->have_count == t->piece_count) {
 				/* Tell all peers we're no longer interested */
 				struct torrent_peer *np;
-				SLIST_FOREACH(np, &t->peers, entry) {
+				TAILQ_FOREACH(np, &t->peers, entry) {
 					if (np->peer && np->failures < 10)
 						mbt_peer_send_interested(np->peer, 0);
 				}
@@ -1029,7 +1029,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 				torrent_drive_peer(t, tp);
 			} else {
 				struct torrent_peer *otp;
-				SLIST_FOREACH(otp, &t->peers, entry) {
+				TAILQ_FOREACH(otp, &t->peers, entry) {
 					if (otp->peer && otp->failures < 10 && !mbt_peer_choked(otp->peer))
 						torrent_drive_peer(t, otp);
 				}
@@ -1126,7 +1126,7 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 		/* Drive all peers now that we have metadata */
 		struct torrent_peer *tp;
 		int npeers = 0;
-		SLIST_FOREACH(tp, &t->peers, entry) {
+		TAILQ_FOREACH(tp, &t->peers, entry) {
 			npeers++;
 			/* Update piece_count — applies deferred HAVE_ALL */
 			mbt_peer_set_piece_count(tp->peer, t->piece_count);
@@ -1292,7 +1292,7 @@ on_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, 
 		piece_info_free_one(t, pi);
 		if (tp->outstanding > 0) tp->outstanding--;
 		/* Try to re-request from someone else */
-		SLIST_FOREACH(op, &t->peers, entry) {
+		TAILQ_FOREACH(op, &t->peers, entry) {
 			if (op != tp && !mbt_peer_choked(op->peer))
 				torrent_drive_peer(t, op);
 		}
@@ -1334,7 +1334,7 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	/* Drive only idle peers to pick up released pieces */
 	{
 		struct torrent_peer *rtp;
-		SLIST_FOREACH(rtp, &t->peers, entry) {
+		TAILQ_FOREACH(rtp, &t->peers, entry) {
 			if (rtp != tp && rtp->peer && rtp->failures < 10 &&
 			    !mbt_peer_choked(rtp->peer) && !rtp->snubbed &&
 			    rtp->outstanding == 0)
@@ -1343,7 +1343,7 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	}
 
 	/* Remove peer from list */
-	SLIST_REMOVE(&t->peers, tp, torrent_peer, entry);
+	TAILQ_REMOVE(&t->peers, tp, entry);
 
 	/* Don't free tp->peer here — we may be inside its callback chain.
 	 * The peer is already CLOSED and will not deliver more callbacks.
@@ -1390,7 +1390,7 @@ static void
 torrent_drive_all_peers(struct mbt_torrent *t)
 {
 	struct torrent_peer *tp;
-	SLIST_FOREACH(tp, &t->peers, entry)
+	TAILQ_FOREACH(tp, &t->peers, entry)
 		torrent_drive_peer(t, tp);
 }
 
@@ -1527,7 +1527,7 @@ torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg)
 	t->ratelimit_timer = NULL;
 
 	struct torrent_peer *tp;
-	SLIST_FOREACH(tp, &t->peers, entry) {
+	TAILQ_FOREACH(tp, &t->peers, entry) {
 		if (tp->failures < 10 && tp->peer && !mbt_peer_choked(tp->peer))
 			torrent_drive_peer(t, tp);
 	}
@@ -1569,6 +1569,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->timers = cfg->timers;
 
 	mbt_peerdb_init(&t->peerdb);
+	TAILQ_INIT(&t->peers);
 
 	/* Start timeout scanner */
 	uint64_t timeout_interval = t->timers.request_timeout > 0
@@ -1589,9 +1590,9 @@ mbt_torrent_free(struct mbt_torrent *t)
 		return;
 
 	/* Free peers */
-	while (!SLIST_EMPTY(&t->peers)) {
-		struct torrent_peer *tp = SLIST_FIRST(&t->peers);
-		SLIST_REMOVE_HEAD(&t->peers, entry);
+	while (!TAILQ_EMPTY(&t->peers)) {
+		struct torrent_peer *tp = TAILQ_FIRST(&t->peers);
+		TAILQ_REMOVE(&t->peers, tp, entry);
 		mbt_peer_free(tp->peer);
 		free(tp);
 	}
@@ -1843,7 +1844,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 	tp->torrent = t;
 	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
-	SLIST_INSERT_HEAD(&t->peers, tp, entry);
+	TAILQ_INSERT_HEAD(&t->peers, tp, entry);
 	t->peer_count++;
 
 	return 0;
@@ -1875,7 +1876,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 	tp->torrent = t;
 	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
-	SLIST_INSERT_HEAD(&t->peers, tp, entry);
+	TAILQ_INSERT_HEAD(&t->peers, tp, entry);
 	t->peer_count++;
 
 	return 0;
@@ -1932,7 +1933,7 @@ mbt_torrent_state(struct mbt_torrent *t)
 
 	/* Check if any unchoked peer has a piece we need */
 	struct torrent_peer *tp;
-	SLIST_FOREACH(tp, &t->peers, entry) {
+	TAILQ_FOREACH(tp, &t->peers, entry) {
 		if (tp->failures >= 10 || !tp->peer) continue;
 		if (mbt_peer_choked(tp->peer)) continue;
 		struct mbt_bitmap *bf = mbt_peer_bitfield(tp->peer);
@@ -1974,7 +1975,7 @@ mbt_torrent_bytes_downloaded(struct mbt_torrent *t)
 {
 	uint64_t total = 0;
 	struct torrent_peer *tp;
-	SLIST_FOREACH(tp, &t->peers, entry)
+	TAILQ_FOREACH(tp, &t->peers, entry)
 		total += tp->total_down;
 	return total;
 }
@@ -1988,8 +1989,8 @@ mbt_torrent_peer_count(struct mbt_torrent *t)
 struct mbt_peer *
 mbt_torrent_peer_at(struct mbt_torrent *t, int idx)
 {
-	struct torrent_peer *tp = SLIST_FIRST(&t->peers);
-	for (int i = 0; tp && i < idx; i++) tp = SLIST_NEXT(tp, entry);
+	struct torrent_peer *tp = TAILQ_FIRST(&t->peers);
+	for (int i = 0; tp && i < idx; i++) tp = TAILQ_NEXT(tp, entry);
 	return tp ? tp->peer : NULL;
 }
 int
@@ -2106,7 +2107,7 @@ mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *ou
 {
 	struct torrent_peer *tp;
 	int i = 0;
-	SLIST_FOREACH(tp, &t->peers, entry) {
+	TAILQ_FOREACH(tp, &t->peers, entry) {
 		if (tp->failures >= 10 || !tp->peer) continue;
 		if (i == idx) {
 			out->addr = mbt_peer_addr(tp->peer);
