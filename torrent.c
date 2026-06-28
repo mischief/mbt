@@ -670,21 +670,36 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 		if (tp->peer && tp->peer_interested)
 			ranked[n++] = tp;
 
-	/* Sort by bytes_from (descending) — reward uploaders */
+	/*
+	 * Rank unchoke candidates. bep 3: while downloading, reward peers that
+	 * upload to us (bytes_from); once we have the complete file we have no
+	 * download rate, so rank by how much we upload to them (bytes_to)
+	 * instead. without this a seed sees bytes_from==0 for everyone, the sort
+	 * is a no-op, and it chokes needy leechers arbitrarily -- starving the
+	 * stragglers that still need its pieces.
+	 */
+	int complete = (t->have_count == t->piece_count);
 	for (int i = 0; i < n - 1; i++)
-		for (int j = i + 1; j < n; j++)
-			if (ranked[j]->bytes_from > ranked[i]->bytes_from) {
+		for (int j = i + 1; j < n; j++) {
+			uint64_t kj = complete ? ranked[j]->bytes_to : ranked[j]->bytes_from;
+			uint64_t ki = complete ? ranked[i]->bytes_to : ranked[i]->bytes_from;
+			if (kj > ki) {
 				struct torrent_peer *tmp = ranked[i];
 				ranked[i] = ranked[j]; ranked[j] = tmp;
 			}
+		}
 
-	/* Unchoke top UNCHOKE_SLOTS */
+	/* Optimistic unchoke (bep 3): one peer unchoked regardless of rank,
+	 * rotating every 3rd round (~30s). It MUST be chosen at random among the
+	 * interested peers outside the top slots -- a fixed rank position would
+	 * permanently starve every lower-ranked peer (the bug this replaces). */
+	int opt_idx = -1;
+	if (n > UNCHOKE_SLOTS && (t->choke_round % 3 == 0))
+		opt_idx = UNCHOKE_SLOTS + (int)mbt_random_uniform((uint32_t)(n - UNCHOKE_SLOTS));
+
+	/* Unchoke top UNCHOKE_SLOTS plus the optimistic pick */
 	for (int i = 0; i < n; i++) {
-		int should_unchoke = (i < UNCHOKE_SLOTS);
-
-		/* Optimistic unchoke: every 3rd round (30s), pick one random from the rest */
-		if (!should_unchoke && (t->choke_round % 3 == 0) && i == UNCHOKE_SLOTS)
-			should_unchoke = 1;
+		int should_unchoke = (i < UNCHOKE_SLOTS) || (i == opt_idx);
 
 		if (should_unchoke && ranked[i]->am_choking) {
 			mbt_peer_send_choke(ranked[i]->peer, 0);
