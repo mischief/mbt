@@ -2047,15 +2047,19 @@ mbt_picker_rarest_bucket(struct mbt_torrent *t, void *peer, void *ctx)
 	if (mbt_torrent_have_count(t) == 0)
 		return mbt_picker_random(t, peer, ctx);
 
+	int skip_have = 0, skip_peer = 0, skip_full = 0, total = 0;
 	for (int b = 0; b < t->avail_buckets_n; b++) {
 		struct piece_entry *e;
 		LIST_FOREACH(e, &t->avail_buckets[b], bucket_entry) {
 			uint32_t piece = (uint32_t)(e - t->piece_entries);
-			if (mbt_torrent_has_piece(t, piece)) continue;
-			if (mbt_bitmap_isset(peer_bits, piece) <= 0) continue;
-			if (mbt_torrent_piece_fully_requested(t, piece)) continue;
+			total++;
+			if (mbt_torrent_has_piece(t, piece)) { skip_have++; continue; }
+			if (mbt_bitmap_isset(peer_bits, piece) <= 0) { skip_peer++; continue; }
+			if (mbt_torrent_piece_fully_requested(t, piece)) { skip_full++; continue; }
 			return (int)piece;
 		}
 	}
+	mbt_log_debug(MBT_LOG_TORRENT, "picker -1: total=%d skip_have=%d skip_peer=%d skip_full=%d",
+	              total, skip_have, skip_peer, skip_full);
 	return -1;
 }
