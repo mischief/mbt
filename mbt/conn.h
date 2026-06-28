@@ -13,6 +13,8 @@ struct mbt_ev;
 
 typedef void (*mbt_conn_read_cb)(struct mbt_conn *c, void *arg);
 typedef void (*mbt_conn_event_cb)(struct mbt_conn *c, int err, void *arg);
+/* fired once when send buffer drains after a -ENOBUFS write */
+typedef void (*mbt_conn_write_cb)(struct mbt_conn *c, void *arg);
 
 /* err=0 means EOF, err<0 means -errno */
 
@@ -23,6 +25,9 @@ struct mbt_conn_ops {
 	ssize_t (*write)(struct mbt_conn *c, const void *buf, size_t len);
 	void (*set_callbacks)(struct mbt_conn *c, mbt_conn_read_cb readcb,
 	                      mbt_conn_event_cb eventcb, void *arg);
+	/* Optional: register one-shot writecb for when send buffer drains.
+	 * NULL pointer = transport always succeeds (e.g. TCP with kernel buf). */
+	void (*set_writecb)(struct mbt_conn *c, mbt_conn_write_cb cb, void *arg);
 	int (*peer_addr)(struct mbt_conn *c, char *buf, size_t buflen, uint16_t *port);
 	void (*free)(struct mbt_conn *c);
 };
@@ -69,6 +74,13 @@ static inline ssize_t
 mbt_conn_write(struct mbt_conn *c, const void *buf, size_t len)
 {
 	return c->ops->write(c, buf, len);
+}
+
+static inline void
+mbt_conn_set_writecb(struct mbt_conn *c, mbt_conn_write_cb cb, void *arg)
+{
+	if (c->ops->set_writecb)
+		c->ops->set_writecb(c, cb, arg);
 }
 
 static inline void
