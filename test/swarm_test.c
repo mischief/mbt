@@ -59,6 +59,7 @@ int main(int argc, char *argv[])
 	int use_tracker = 0;
 	int disable_tcp = 0;
 	int disable_utp = 0;
+	int choke_interval = 0;  /* 0 = library default (10s) */
 
 	static struct option longopts[] = {
 		{"seeders",     required_argument, NULL, 's'},
@@ -70,6 +71,7 @@ int main(int argc, char *argv[])
 		{"disable-utp", no_argument,       NULL, 'U'},
 		{"debug",       no_argument,       NULL, 'd'},
 		{"trace",       no_argument,       NULL, 'R'},  /* trace level, all components */
+		{"choke-interval", required_argument, NULL, 'C'},  /* seconds; 0=default */
 		{"help",        no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
@@ -87,13 +89,14 @@ int main(int argc, char *argv[])
 		case 'U': disable_utp = 1; break;
 		case 'd': debug = 1; break;
 		case 'R': trace = 1; break;
+		case 'C': choke_interval = atoi(optarg); break;
 		case 'h':
 		default:
 			fprintf(stderr,
 			        "usage: swarm_test [--seeders N] [--leechers M] [--pieces P]\n"
 			        "                  [--piece-size KiB] [--tracker]\n"
 			        "                  [--disable-tcp] [--disable-utp]\n"
-			        "                  [--debug] [--trace]\n");
+			        "                  [--debug] [--trace] [--choke-interval S]\n");
 			return ch == 'h' ? 0 : 1;
 		}
 	}
@@ -172,7 +175,7 @@ int main(int argc, char *argv[])
 		struct mbt_session_config cfg = {
 			.ev = ev, .default_storage = mbt_storage_memory_storage(smem[i]), .listen_port = 0,
 			.max_peers = num_leechers + num_seeders,
-			.timers = { .tracker_interval = 2, .request_timeout = 2 },
+			.timers = { .tracker_interval = 2, .request_timeout = 2, .choke_interval = choke_interval },
 			.disable_tcp = disable_tcp,
 			.disable_utp = disable_utp,
 		};
@@ -197,7 +200,7 @@ int main(int argc, char *argv[])
 		lmem[i] = mbt_storage_memory_new();
 		struct mbt_session_config cfg = {
 			.ev = ev, .default_storage = mbt_storage_memory_storage(lmem[i]), .listen_port = 0,
-			.timers = { .tracker_interval = 2, .request_timeout = 2 },
+			.timers = { .tracker_interval = 2, .request_timeout = 2, .choke_interval = choke_interval },
 			.disable_tcp = disable_tcp,
 			.disable_utp = disable_utp,
 		};
