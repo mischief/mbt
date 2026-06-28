@@ -73,4 +73,13 @@ MBT_API void mbt_utp_ctx_set_rx_hook(struct mbt_utp_ctx *ctx,
                 const struct sockaddr *src, socklen_t srclen, void *arg),
     void *arg);
 
+/*
+ * Set the in-flight window (in packets) for sockets created on this ctx. 0
+ * means library default. The value is clamped to [UTP_WINDOW_MIN,
+ * UTP_WINDOW_MAX] and rounded up to a power of two per socket. The window sizes
+ * the send/recv queues, SACK width and advertised window, so it is the single
+ * memory-vs-throughput knob. Set before sockets are created.
+ */
+MBT_API void mbt_utp_ctx_set_window(struct mbt_utp_ctx *ctx, uint32_t pkts);
+
 #endif

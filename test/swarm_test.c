@@ -60,6 +60,7 @@ int main(int argc, char *argv[])
 	int disable_tcp = 0;
 	int disable_utp = 0;
 	int choke_interval = 0;  /* 0 = library default (10s) */
+	int utp_window = 0;      /* 0 = library default (32 pkts) */
 
 	static struct option longopts[] = {
 		{"seeders",     required_argument, NULL, 's'},
@@ -72,6 +73,7 @@ int main(int argc, char *argv[])
 		{"debug",       no_argument,       NULL, 'd'},
 		{"trace",       no_argument,       NULL, 'R'},  /* trace level, all components */
 		{"choke-interval", required_argument, NULL, 'C'},  /* seconds; 0=default */
+		{"utp-window", required_argument, NULL, 'W'},  /* packets; 0=default */
 		{"help",        no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
@@ -90,13 +92,15 @@ int main(int argc, char *argv[])
 		case 'd': debug = 1; break;
 		case 'R': trace = 1; break;
 		case 'C': choke_interval = atoi(optarg); break;
+		case 'W': utp_window = atoi(optarg); break;
 		case 'h':
 		default:
 			fprintf(stderr,
 			        "usage: swarm_test [--seeders N] [--leechers M] [--pieces P]\n"
 			        "                  [--piece-size KiB] [--tracker]\n"
 			        "                  [--disable-tcp] [--disable-utp]\n"
-			        "                  [--debug] [--trace] [--choke-interval S]\n");
+			        "                  [--debug] [--trace] [--choke-interval S]\n"
+			        "                  [--utp-window PKTS]\n");
 			return ch == 'h' ? 0 : 1;
 		}
 	}
@@ -175,11 +179,14 @@ int main(int argc, char *argv[])
 		struct mbt_session_config cfg = {
 			.ev = ev, .default_storage = mbt_storage_memory_storage(smem[i]), .listen_port = 0,
 			.max_peers = num_leechers + num_seeders,
-			.timers = { .tracker_interval = 2, .request_timeout = 2, .choke_interval = choke_interval },
+			.timers = { .tracker_interval = 2, .request_timeout = 2, .choke_interval = choke_interval }, .utp_window_pkts = utp_window,
 			.disable_tcp = disable_tcp,
 			.disable_utp = disable_utp,
 		};
-		mbt_session_new(&seeders[i], &cfg);
+		if (mbt_session_new(&seeders[i], &cfg) < 0) {
+			fprintf(stderr, "swarm_test: seeder session_new failed (bad config?)\n");
+			return 1;
+		}
 		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len, NULL);
 	}
 
@@ -200,11 +207,14 @@ int main(int argc, char *argv[])
 		lmem[i] = mbt_storage_memory_new();
 		struct mbt_session_config cfg = {
 			.ev = ev, .default_storage = mbt_storage_memory_storage(lmem[i]), .listen_port = 0,
-			.timers = { .tracker_interval = 2, .request_timeout = 2, .choke_interval = choke_interval },
+			.timers = { .tracker_interval = 2, .request_timeout = 2, .choke_interval = choke_interval }, .utp_window_pkts = utp_window,
 			.disable_tcp = disable_tcp,
 			.disable_utp = disable_utp,
 		};
-		mbt_session_new(&leechers[i], &cfg);
+		if (mbt_session_new(&leechers[i], &cfg) < 0) {
+			fprintf(stderr, "swarm_test: leecher session_new failed (bad config?)\n");
+			return 1;
+		}
 
 		char magnet[8192];
 		if (use_tracker)

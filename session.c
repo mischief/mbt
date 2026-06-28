@@ -115,6 +115,7 @@ struct mbt_session {
 	int min_peers_before_download;
 	int reqq;
 	int max_pipeline;
+	uint32_t utp_window_pkts;  /* validated uTP window (packets); 0 = default */
 	mbt_http_fn http;
 	void *http_arg;
 	uint8_t peer_id[20];
@@ -720,6 +721,8 @@ session_listen(struct mbt_session *s)
 			mbt_log_warn(MBT_LOG_SESSION, "uTP listen failed: %s", strerror(-rv));
 			s->utp_ctx = NULL;
 		} else {
+			if (s->utp_window_pkts)
+				mbt_utp_ctx_set_window(s->utp_ctx, s->utp_window_pkts);
 			if (s->disable_tcp)
 				s->listen_port = mbt_utp_ctx_port(s->utp_ctx);
 			mbt_log_info(MBT_LOG_SESSION, "uTP listening on port %hu",
@@ -740,6 +743,23 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s = calloc(1, sizeof(*s));
 	if (!s)
 		return -ENOMEM;
+
+	/*
+	 * Validate the uTP window here, at the synchronous config boundary --
+	 * once a uTP socket exists there is no clean way to unwind a bad size
+	 * back to the caller. 0 = default; otherwise it must be in [8, 1024]
+	 * (UTP_WINDOW_MIN/MAX). uTP also clamps defensively per socket, but
+	 * rejecting up front surfaces a typo immediately. Done before any
+	 * sub-allocation so the error path is just free(s).
+	 */
+	if (cfg->utp_window_pkts != 0 &&
+	    (cfg->utp_window_pkts < 8 || cfg->utp_window_pkts > 1024)) {
+		mbt_log_warn(MBT_LOG_SESSION,
+		    "invalid utp_window_pkts=%u (must be 0 or 8..1024)",
+		    cfg->utp_window_pkts);
+		free(s);
+		return -EINVAL;
+	}
 
 	s->ev = cfg->ev;
 	s->default_storage = cfg->default_storage;
@@ -772,6 +792,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->min_peers_before_download = cfg->min_peers_before_download;
 	s->reqq = cfg->reqq ? cfg->reqq : 500;
 	s->max_pipeline = cfg->max_pipeline;
+	s->utp_window_pkts = cfg->utp_window_pkts;
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
 

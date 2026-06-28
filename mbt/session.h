@@ -58,6 +58,11 @@ struct mbt_session_config {
 
 	uint64_t upload_rate;    /* bytes/sec, 0 = unlimited */
 	uint64_t download_rate;  /* bytes/sec, 0 = unlimited */
+
+	/* uTP in-flight window in packets (0 = library default 32). Clamped to
+	 * [8, 1024] and rounded up to a power of two. The single uTP
+	 * memory-vs-throughput knob. */
+	uint32_t utp_window_pkts;
 };
 
 /* Session lifecycle */

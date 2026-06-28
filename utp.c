@@ -1480,6 +1480,14 @@ mbt_utp_ctx_set_rx_hook(struct mbt_utp_ctx *ctx,
 	ctx->rx_hook_arg = arg;
 }
 
+void
+mbt_utp_ctx_set_window(struct mbt_utp_ctx *ctx, uint32_t pkts)
+{
+	/* Stored raw; utp_resolve_window clamps to [MIN,MAX] and rounds to a
+	 * power of two when each socket is created. 0 == library default. */
+	ctx->window_pkts = pkts;
+}
+
 int
 mbt_utp_recv(struct mbt_utp_ctx *ctx,
              const void *buf, size_t len,
