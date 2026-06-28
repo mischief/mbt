@@ -413,7 +413,7 @@ mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *ar
 
 	switch(be->type){
 	case BE_LIST:
-		[[fallthrough]];
+		/* falls through */
 	case BE_DICTIONARY:
 		TAILQ_FOREACH(inner, &be->listhead, next){
 			mbt_be_walk(inner, cb, arg);

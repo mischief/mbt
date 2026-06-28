@@ -1,4 +1,4 @@
-project('mbt', 'c', version: '0.1', default_options: ['c_std=c23', 'warning_level=3', 'werror=true'], license: 'ISC', meson_version: '>=1.1')
+project('mbt', 'c', version: '0.1', default_options: ['c_std=c17', 'warning_level=3', 'werror=true'], license: 'ISC', meson_version: '>=1.1')
 
 add_project_arguments('-D_DEFAULT_SOURCE', '-D_GNU_SOURCE', '-fno-omit-frame-pointer', language: 'c')
 
