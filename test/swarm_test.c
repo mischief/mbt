@@ -69,11 +69,13 @@ int main(int argc, char *argv[])
 		{"disable-tcp", no_argument,       NULL, 'T'},
 		{"disable-utp", no_argument,       NULL, 'U'},
 		{"debug",       no_argument,       NULL, 'd'},
+		{"trace",       no_argument,       NULL, 'R'},  /* uTP wire trace only */
 		{"help",        no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 	int ch;
 	int debug = 0;
+	int trace = 0;
 	while ((ch = getopt_long(argc, argv, "s:l:p:b:tTUdh", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's': num_seeders = atoi(optarg); break;
@@ -84,12 +86,14 @@ int main(int argc, char *argv[])
 		case 'T': disable_tcp = 1; break;
 		case 'U': disable_utp = 1; break;
 		case 'd': debug = 1; break;
+		case 'R': trace = 1; break;
 		case 'h':
 		default:
 			fprintf(stderr,
 			        "usage: swarm_test [--seeders N] [--leechers M] [--pieces P]\n"
 			        "                  [--piece-size KiB] [--tracker]\n"
-			        "                  [--disable-tcp] [--disable-utp]\n");
+			        "                  [--disable-tcp] [--disable-utp]\n"
+			        "                  [--debug] [--trace]\n");
 			return ch == 'h' ? 0 : 1;
 		}
 	}
@@ -99,10 +103,12 @@ int main(int argc, char *argv[])
 	}
 
 	target_completions = num_leechers;
-	if (debug) {
+	if (debug || trace) {
 		mbt_log_set(mbt_log_stderr, NULL);
-		mbt_log_set_debug(MBT_LOG_ALL);
-		mbt_log_set_trace(MBT_LOG_UTP);
+		if (debug)
+			mbt_log_set_debug(MBT_LOG_ALL);
+		if (trace)
+			mbt_log_set_trace(MBT_LOG_UTP);  /* per-packet wire trace */
 	}
 	int piece_len = piece_kib * 1024;
 	int total_len = piece_len * num_pieces;
