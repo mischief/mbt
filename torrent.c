@@ -453,8 +453,24 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	uint64_t deadline = (uint64_t)t->timers.request_timeout * 1000000;
 	int reset_count = 0;
 
-	if (t->piece_count == 0)
+	if (t->piece_count == 0) {
+		/* Metadata phase: we don't have the info dict yet. Re-request the
+		 * still-missing ut_metadata pieces (windowed) from a peer that
+		 * advertised a metadata size, until metadata_recv is complete. Peers
+		 * cap outstanding metadata requests, so this periodic re-drive is what
+		 * actually completes the fetch. */
+		if (t->metadata_len > 0 && t->metadata_have < t->metadata_len) {
+			struct torrent_peer *mtp;
+			TAILQ_FOREACH(mtp, &t->peers, entry) {
+				if (mtp->peer && mtp->failures < 10 &&
+				    mbt_peer_metadata_size(mtp->peer) > 0) {
+					torrent_request_metadata(t, mtp);
+					break;
+				}
+			}
+		}
 		goto reschedule;
+	}
 
 	for (int _b = 0; _b < PIECE_TABLE_BUCKETS; _b++) {
 		struct piece_info *pi, *_npi;
@@ -1111,6 +1127,15 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 			mbt_bitmap_set(t->metadata_recv, piece);
 	}
 
+	/* Still incomplete: immediately request the next window from this peer so
+	 * the fetch pipelines at network speed instead of waiting for the timeout
+	 * scanner. (The scanner remains the backstop / re-drive on stall.) */
+	if (t->metadata_have < t->metadata_len) {
+		struct torrent_peer *tp = find_torrent_peer(t, p);
+		if (tp)
+			torrent_request_metadata(t, tp);
+	}
+
 	/* All metadata received? */
 	if (t->metadata_have >= t->metadata_len) {
 		/* Verify SHA1 matches infohash */
@@ -1568,11 +1593,23 @@ torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg)
 static void
 torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp)
 {
-	mbt_log_debug(MBT_LOG_TORRENT, "requesting %d metadata pieces", t->metadata_pieces);
-	for (int i = 0; i < t->metadata_pieces; i++) {
-		int rv = mbt_peer_send_metadata_request(tp->peer, i);
-		mbt_log_debug(MBT_LOG_TORRENT, "metadata request piece %d: rv=%d", i, rv);
+	/*
+	 * Request only the metadata pieces we don't yet have, capped to a small
+	 * in-flight window. Peers (e.g. transmission) limit outstanding
+	 * ut_metadata requests and silently drop the excess, so blasting all
+	 * pieces at once stalls after the first few. metadata_recv is the source
+	 * of truth; this is re-driven from the timeout scanner until complete.
+	 */
+	enum { METADATA_REQ_WINDOW = 4 };
+	int sent = 0;
+	for (int i = 0; i < t->metadata_pieces && sent < METADATA_REQ_WINDOW; i++) {
+		if (t->metadata_recv && mbt_bitmap_isset(t->metadata_recv, i) > 0)
+			continue; /* already have this piece */
+		if (mbt_peer_send_metadata_request(tp->peer, i) == 0)
+			sent++;
 	}
+	mbt_log_debug(MBT_LOG_TORRENT, "metadata: requested %d piece(s) (have %zu/%zu bytes)",
+	              sent, t->metadata_have, t->metadata_len);
 }
 
 /* --- Public API --- */
