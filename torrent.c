@@ -188,6 +188,7 @@ static void torrent_peer_writecb(struct mbt_conn *c, void *arg);
 static void torrent_drive_all_peers(struct mbt_torrent *t);
 static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
+static void bucket_reinsert(struct mbt_torrent *t, uint32_t piece);
 
 static size_t
 piece_length_for(struct mbt_torrent *t, uint32_t piece)
@@ -242,6 +243,7 @@ piece_release(struct piece_info *pi)
 static void
 piece_info_free_one(struct mbt_torrent *t, struct piece_info *pi)
 {
+	uint32_t piece = pi->piece;
 	if (pi->owner)
 		piece_release(pi);
 	SLIST_REMOVE(&t->piece_table[pi->piece % PIECE_TABLE_BUCKETS],
@@ -249,6 +251,15 @@ piece_info_free_one(struct mbt_torrent *t, struct piece_info *pi)
 	free(pi->data);
 	if (pi->blocks) mbt_bitmap_unref(pi->blocks);
 	free(pi);
+
+	/* A piece leaves the active table either because we verified it (the
+	 * caller sets t->have then removes it from the bucket) or because its
+	 * requests were abandoned (choke/timeout/hash-fail) and it must become
+	 * pickable again. bucket_reinsert no-ops when we already have the piece
+	 * or it is still in a bucket, so this is correct for both cases and stops
+	 * a needed piece from falling out of BOTH the picker bucket and the table
+	 * -- which deadlocked completion in endgame. */
+	bucket_reinsert(t, piece);
 }
 
 /* --- Bucket queue helpers --- */
