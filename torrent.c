@@ -559,7 +559,9 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	}
 
 reschedule:
-	mbt_ev_timer_mod(timer, 5 * 1000000ULL); /* check every 5s */
+	mbt_ev_timer_mod(timer, t->timers.request_timeout > 0
+	    ? (uint64_t)t->timers.request_timeout * 1000000ULL
+	    : 5 * 1000000ULL);
 }
 
 /* --- Peer callbacks --- */
@@ -1554,7 +1556,10 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	mbt_peerdb_init(&t->peerdb);
 
 	/* Start timeout scanner */
-	mbt_ev_timer_new(t->ev, &t->timeout_timer, 5 * 1000000ULL, torrent_timeout_cb, t);
+	uint64_t timeout_interval = t->timers.request_timeout > 0
+	    ? (uint64_t)t->timers.request_timeout * 1000000ULL
+	    : 5 * 1000000ULL;
+	mbt_ev_timer_new(t->ev, &t->timeout_timer, timeout_interval, torrent_timeout_cb, t);
 	mbt_ev_timer_new(t->ev, &t->choke_timer, (uint64_t)t->timers.choke_interval * 1000000ULL, torrent_choke_cb, t);
 	mbt_ev_timer_new(t->ev, &t->pex_timer, (uint64_t)t->timers.pex_interval * 1000000ULL, torrent_pex_cb, t);
 
