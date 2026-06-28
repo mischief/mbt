@@ -178,6 +178,7 @@ conn_sd_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *por
 }
 
 static const struct mbt_conn_ops conn_sd_ops = {
+	.name          = "tcp",
 	.set_watermark = conn_sd_set_watermark,
 	.available     = conn_sd_available,
 	.read          = conn_sd_read,

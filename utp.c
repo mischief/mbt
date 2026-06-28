@@ -664,6 +664,7 @@ utp_conn_set_writecb(struct mbt_conn *c, mbt_conn_write_cb cb, void *arg)
 }
 
 static const struct mbt_conn_ops utp_conn_ops = {
+	.name          = "utp",
 	.set_watermark = utp_conn_set_watermark,
 	.available     = utp_conn_available,
 	.read          = utp_conn_read,

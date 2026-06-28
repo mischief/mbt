@@ -970,6 +970,12 @@ mbt_peer_conn_port(struct mbt_peer *p)
 	return p->conn_port;
 }
 
+const char *
+mbt_peer_transport_name(struct mbt_peer *p)
+{
+	return p && p->conn ? mbt_conn_transport_name(p->conn) : "?";
+}
+
 void
 mbt_peer_set_writecb(struct mbt_peer *p, mbt_conn_write_cb cb, void *arg)
 {

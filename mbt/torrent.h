@@ -122,6 +122,7 @@ struct mbt_peer_stats {
 	int choked;       /* we are choked by them */
 	int interested;   /* we are interested */
 	int snubbed;
+	int utp;          /* nonzero if this peer is over uTP */
 	int outstanding;  /* in-flight requests */
 	int done_pct;     /* % of pieces this peer has (0-100) */
 	int hash_failures;

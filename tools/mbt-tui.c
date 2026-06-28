@@ -260,6 +260,7 @@ draw_detail(void)
 			if (ps.choked) flags[fi++] = 'C';
 			if (ps.interested) flags[fi++] = 'I';
 			if (ps.snubbed) flags[fi++] = 'S';
+			if (ps.utp) flags[fi++] = 'u';
 			flags[fi] = 0;
 			char endpoint[64];
 			if (strchr(ps.addr, ':'))

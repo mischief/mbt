@@ -155,6 +155,7 @@ conn_lev_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *po
 }
 
 static const struct mbt_conn_ops conn_lev_ops = {
+	.name          = "tcp",
 	.set_watermark = conn_lev_set_watermark,
 	.available     = conn_lev_available,
 	.read          = conn_lev_read,

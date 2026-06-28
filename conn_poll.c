@@ -158,6 +158,7 @@ conn_poll_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *p
 }
 
 static const struct mbt_conn_ops conn_poll_ops = {
+	.name          = "tcp",
 	.set_watermark = conn_poll_set_watermark,
 	.available     = conn_poll_available,
 	.read          = conn_poll_read,

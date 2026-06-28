@@ -20,6 +20,7 @@ typedef void (*mbt_conn_write_cb)(struct mbt_conn *c, void *arg);
 /* err=0 means EOF, err<0 means -errno */
 
 struct mbt_conn_ops {
+	const char *name;   /* short transport name, e.g. "tcp", "utp" */
 	void (*set_watermark)(struct mbt_conn *c, size_t low);
 	size_t (*available)(struct mbt_conn *c);
 	ssize_t (*read)(struct mbt_conn *c, void *buf, size_t len);
@@ -60,6 +61,12 @@ MBT_API int mbt_conn_peer_addr(struct mbt_conn *c, char *buf, size_t buflen,
                                 uint16_t *port);
 
 /* Inline convenience wrappers */
+static inline const char *
+mbt_conn_transport_name(struct mbt_conn *c)
+{
+	return c && c->ops && c->ops->name ? c->ops->name : "?";
+}
+
 static inline void
 mbt_conn_set_watermark(struct mbt_conn *c, size_t low)
 {
