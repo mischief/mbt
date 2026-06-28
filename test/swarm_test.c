@@ -57,32 +57,45 @@ int main(int argc, char *argv[])
 	int num_pieces = 8;
 	int piece_kib = 16;
 	int use_tracker = 0;
+	int disable_tcp = 0;
+	int disable_utp = 0;
 
 	static struct option longopts[] = {
-		{"seeders", required_argument, NULL, 's'},
-		{"leechers", required_argument, NULL, 'l'},
-		{"pieces", required_argument, NULL, 'p'},
-		{"piece-size", required_argument, NULL, 'b'},
-		{"tracker", no_argument, NULL, 't'},
-		{"debug", no_argument, NULL, 'd'},
-		{"help", no_argument, NULL, 'h'},
+		{"seeders",     required_argument, NULL, 's'},
+		{"leechers",    required_argument, NULL, 'l'},
+		{"pieces",      required_argument, NULL, 'p'},
+		{"piece-size",  required_argument, NULL, 'b'},
+		{"tracker",     no_argument,       NULL, 't'},
+		{"disable-tcp", no_argument,       NULL, 'T'},
+		{"disable-utp", no_argument,       NULL, 'U'},
+		{"debug",       no_argument,       NULL, 'd'},
+		{"help",        no_argument,       NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
 	int ch;
 	int debug = 0;
-	while ((ch = getopt_long(argc, argv, "s:l:p:b:tdh", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "s:l:p:b:tTUdh", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's': num_seeders = atoi(optarg); break;
 		case 'l': num_leechers = atoi(optarg); break;
 		case 'p': num_pieces = atoi(optarg); break;
 		case 'b': piece_kib = atoi(optarg); break;
 		case 't': use_tracker = 1; break;
+		case 'T': disable_tcp = 1; break;
+		case 'U': disable_utp = 1; break;
 		case 'd': debug = 1; break;
 		case 'h':
 		default:
-			fprintf(stderr, "usage: swarm_test [--seeders N] [--leechers M] [--pieces P] [--piece-size KiB] [--tracker]\n");
+			fprintf(stderr,
+			        "usage: swarm_test [--seeders N] [--leechers M] [--pieces P]\n"
+			        "                  [--piece-size KiB] [--tracker]\n"
+			        "                  [--disable-tcp] [--disable-utp]\n");
 			return ch == 'h' ? 0 : 1;
 		}
+	}
+	if (disable_tcp && disable_utp) {
+		fprintf(stderr, "swarm_test: --disable-tcp and --disable-utp are mutually exclusive\n");
+		return 1;
 	}
 
 	target_completions = num_leechers;
@@ -152,7 +165,9 @@ int main(int argc, char *argv[])
 		struct mbt_session_config cfg = {
 			.ev = ev, .default_storage = mbt_storage_memory_storage(smem[i]), .listen_port = 0,
 			.max_peers = num_leechers + num_seeders,
-			.timers = { .tracker_interval = 2 },
+			.timers = { .tracker_interval = 2, .request_timeout = 2 },
+			.disable_tcp = disable_tcp,
+			.disable_utp = disable_utp,
 		};
 		mbt_session_new(&seeders[i], &cfg);
 		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len, NULL);
@@ -175,7 +190,9 @@ int main(int argc, char *argv[])
 		lmem[i] = mbt_storage_memory_new();
 		struct mbt_session_config cfg = {
 			.ev = ev, .default_storage = mbt_storage_memory_storage(lmem[i]), .listen_port = 0,
-			.timers = { .tracker_interval = 2 },
+			.timers = { .tracker_interval = 2, .request_timeout = 2 },
+			.disable_tcp = disable_tcp,
+			.disable_utp = disable_utp,
 		};
 		mbt_session_new(&leechers[i], &cfg);
 
@@ -193,9 +210,10 @@ int main(int argc, char *argv[])
 		mbt_torrent_set_callbacks(t, &cb, NULL);
 	}
 
-	fprintf(stderr, "swarm: %d seeders, %d leechers, %d pieces (%d KB, %d KiB/piece)%s\n",
+	fprintf(stderr, "swarm: %d seeders, %d leechers, %d pieces (%d KB, %d KiB/piece)%s [%s]\n",
 	        num_seeders, num_leechers, num_pieces, total_len / 1024, piece_kib,
-	        use_tracker ? " [tracker]" : " [direct]");
+	        use_tracker ? " [tracker]" : " [direct]",
+	        disable_tcp ? "utp-only" : disable_utp ? "tcp-only" : "mixed");
 
 	struct mbt_ev_timer *to;
 	mbt_ev_timer_new(ev, &to, 60 * 1000000ULL, timeout_cb, NULL);

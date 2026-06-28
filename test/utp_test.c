@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -767,6 +768,161 @@ test_fin(void)
 	printf("PASS fin\n"); fflush(stdout);
 }
 
+/* ---- test_flow_control: transfer 2x rbuf capacity with a slow reader ----
+ *
+ * The receiver defers draining its rbuf to a timer, letting it fill up.
+ * This exercises the flow-control path: sender must pause when peer_wnd=0
+ * and resume only after the receiver sends a window update on drain.
+ * Without the fix (fake-ACKing dropped packets), data is silently lost
+ * and the transfer stalls permanently.
+ */
+
+#define FC_TOTAL  (128 * 1024)   /* 2x RBUF_CAP */
+
+static struct mbt_conn *fc_server_conn;
+static uint8_t fc_server_buf[FC_TOTAL];
+static int fc_server_received;
+
+static void fc_drain_cb(struct mbt_ev_timer *t, void *arg);
+
+static void
+fc_server_readcb(struct mbt_conn *c, void *arg)
+{
+	(void)arg;
+	/* Defer the drain: let rbuf stay full so the sender hits peer_wnd=0 */
+	struct mbt_ev_timer *dt = NULL;
+	mbt_ev_timer_new(g_ev, &dt, 0, fc_drain_cb, c);
+	(void)dt;
+}
+
+static void
+fc_drain_cb(struct mbt_ev_timer *t, void *arg)
+{
+	struct mbt_conn *c = arg;
+	mbt_ev_timer_free(t);
+
+	uint8_t tmp[4096];
+	ssize_t n;
+	while ((n = mbt_conn_read(c, tmp, sizeof(tmp))) > 0) {
+		memcpy(fc_server_buf + fc_server_received, tmp, (size_t)n);
+		fc_server_received += (int)n;
+	}
+	if (fc_server_received >= FC_TOTAL)
+		mbt_ev_stop(g_ev);
+}
+
+static void
+fc_server_accept(struct mbt_utp_ctx *ctx, struct mbt_conn *conn,
+                 const struct sockaddr *addr, socklen_t addrlen, void *arg)
+{
+	(void)ctx; (void)addr; (void)addrlen; (void)arg;
+	fc_server_conn = conn;
+	mbt_conn_set_callbacks(conn, fc_server_readcb, NULL, NULL);
+	mbt_conn_set_watermark(conn, 1);
+}
+
+struct fc_client_state {
+	uint8_t *data;
+	size_t   off;
+};
+
+static void fc_client_writecb(struct mbt_conn *c, void *arg);
+
+static void
+fc_client_send(struct mbt_conn *c, struct fc_client_state *st)
+{
+	while (st->off < FC_TOTAL) {
+		size_t want = FC_TOTAL - st->off;
+		if (want > 16 * 1024) want = 16 * 1024;
+		ssize_t n = mbt_conn_write(c, st->data + st->off, want);
+		if (n == -ENOBUFS) {
+			mbt_conn_set_writecb(c, fc_client_writecb, st);
+			return;
+		}
+		if (n <= 0) { mbt_ev_stop(g_ev); return; }
+		st->off += (size_t)n;
+	}
+}
+
+static void
+fc_client_writecb(struct mbt_conn *c, void *arg)
+{
+	fc_client_send(c, arg);
+}
+
+static void
+fc_client_eventcb(struct mbt_conn *c, int err, void *arg)
+{
+	if (err < 0) { mbt_ev_stop(g_ev); return; }
+	fc_client_send(c, arg);
+}
+
+static void
+test_flow_control(void)
+{
+	printf("test_flow_control\n"); fflush(stdout);
+
+	fc_server_conn     = NULL;
+	fc_server_received = 0;
+	memset(fc_server_buf, 0, sizeof(fc_server_buf));
+
+	uint8_t *send_data = malloc(FC_TOTAL);
+	for (int i = 0; i < FC_TOTAL; i++)
+		send_data[i] = (uint8_t)(i * 11 + 3);
+
+	struct fc_client_state fc_st = { .data = send_data, .off = 0 };
+
+	int rv = mbt_ev_new_default(&g_ev);
+	assert(rv == 0);
+
+	struct mbt_utp_ctx *server_ctx = NULL, *client_ctx = NULL;
+	rv = mbt_utp_ctx_new(&server_ctx, g_ev, 0, fc_server_accept, NULL);
+	assert(rv == 0);
+	rv = mbt_utp_ctx_new(&client_ctx, g_ev, 0, NULL, NULL);
+	assert(rv == 0);
+
+	uint16_t sp = mbt_utp_ctx_port(server_ctx);
+	uint16_t cp = mbt_utp_ctx_port(client_ctx);
+
+	struct test_pipe c2s = {0}, s2c = {0};
+	make_loopback_addr(&c2s.src_addr, cp);
+	c2s.peer = server_ctx;
+	make_loopback_addr(&s2c.src_addr, sp);
+	s2c.peer = client_ctx;
+
+	mbt_utp_ctx_set_tx_hook(client_ctx, pipe_hook, &c2s);
+	mbt_utp_ctx_set_tx_hook(server_ctx, pipe_hook, &s2c);
+
+	struct sockaddr_in dst;
+	make_loopback_addr(&dst, sp);
+
+	struct mbt_conn *client_conn = NULL;
+	rv = mbt_utp_connect(client_ctx, &client_conn,
+	                     (struct sockaddr *)&dst, sizeof(dst),
+	                     NULL, fc_client_eventcb, &fc_st);
+	assert(rv == 0);
+
+	/* Allow time for RTO retransmits if needed */
+	struct mbt_ev_timer *to = NULL;
+	mbt_ev_timer_new(g_ev, &to, 10000000, timeout_cb, NULL);
+
+	mbt_ev_run(g_ev);
+
+	mbt_ev_timer_free(to);
+
+	assert(fc_server_received == FC_TOTAL);
+	assert(memcmp(fc_server_buf, send_data, FC_TOTAL) == 0);
+
+	mbt_conn_free(client_conn);
+	if (fc_server_conn) mbt_conn_free(fc_server_conn);
+	mbt_utp_ctx_free(client_ctx);
+	mbt_utp_ctx_free(server_ctx);
+	mbt_ev_destroy(g_ev);
+	free(send_data);
+
+	printf("PASS flow_control\n"); fflush(stdout);
+}
+
 /* ---- main ---- */
 
 int
@@ -778,6 +934,7 @@ main(void)
 	test_loss();
 	test_out_of_order();
 	test_fin();
+	test_flow_control();
 
 	printf("all utp tests passed\n");
 	return 0;

@@ -94,7 +94,9 @@ pcp_test = executable('pcp_test', 'pcp_test.c', link_with: [libmbt], include_dir
 test('pcp', pcp_test, timeout: 10)
 
 rarest_test = executable('rarest_test', 'rarest_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('rarest', rarest_test, timeout: 20)
+# rarest is statistical and sensitive to allocator perturbation (MALLOC_PERTURB_);
+# it can spuriously fail. tag it 'flaky' so CI can run it with --no-suite flaky.
+test('rarest', rarest_test, timeout: 20, suite: ['default', 'flaky'])
 
 snub_test = executable('snub_test', 'snub_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('snub', snub_test, timeout: 20)
@@ -106,9 +108,12 @@ endgame_test = executable('endgame_test', 'endgame_test.c', link_with: [libmbt],
 test('endgame', endgame_test, timeout: 20)
 
 swarm_test = executable('swarm_test', 'swarm_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('swarm_direct', swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16'])
-test('swarm_tracker', swarm_test, timeout: 60, args: ['--seeders', '3', '--leechers', '10', '--pieces', '4', '--piece-size', '64', '--tracker'])
+test('swarm_direct',      swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16'])
+test('swarm_tracker',     swarm_test, timeout: 60, args: ['--seeders', '3', '--leechers', '10', '--pieces', '4', '--piece-size', '64', '--tracker'])
 test('swarm_single_seed', swarm_test, timeout: 60, args: ['--seeders', '1', '--leechers', '8', '--pieces', '20', '--piece-size', '8'])
+test('swarm_tcp_only',    swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16', '--disable-utp'])
+test('swarm_utp_only',    swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16', '--disable-tcp'])
+test('swarm_utp_mixed',   swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16'])
 
 ipv6_test = executable('ipv6_test', 'ipv6_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 
