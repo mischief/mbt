@@ -8,6 +8,7 @@
 static mbt_log_fn log_cb = NULL;
 static void *log_arg = NULL;
 static uint32_t debug_mask = 0;
+static uint32_t trace_mask = 0;
 
 void
 mbt_log_set(mbt_log_fn fn, void *arg)
@@ -23,6 +24,12 @@ mbt_log_set_debug(uint32_t component_mask)
 }
 
 void
+mbt_log_set_trace(uint32_t component_mask)
+{
+	trace_mask = component_mask;
+}
+
+void
 mbt_log_emit(enum mbt_log_level level, enum mbt_log_component comp,
              const char *fmt, ...)
 {
@@ -31,8 +38,10 @@ mbt_log_emit(enum mbt_log_level level, enum mbt_log_component comp,
 	if (!log_cb)
 		return;
 
-	/* Gate debug messages by component mask */
+	/* Gate debug/trace messages by their component masks */
 	if (level == MBT_LOG_DEBUG && !(debug_mask & comp))
+		return;
+	if (level == MBT_LOG_TRACE && !(trace_mask & comp))
 		return;
 
 	va_start(ap, fmt);
@@ -50,6 +59,7 @@ level_str(enum mbt_log_level level)
 	case MBT_LOG_WARN:  return "warn";
 	case MBT_LOG_INFO:  return "info";
 	case MBT_LOG_DEBUG: return "debug";
+	case MBT_LOG_TRACE: return "trace";
 	}
 	return "?";
 }
@@ -68,6 +78,7 @@ comp_str(enum mbt_log_component comp)
 	case MBT_LOG_PICKER:  return "picker";
 	case MBT_LOG_TRACKER: return "tracker";
 	case MBT_LOG_TRACKERD: return "trackerd";
+	case MBT_LOG_UTP:     return "utp";
 	default: break;
 	}
 	return "mbt";
@@ -89,6 +100,7 @@ mbt_log_level_str(enum mbt_log_level level)
 {
 	switch (level) {
 	case MBT_LOG_DEBUG: return "debug";
+	case MBT_LOG_TRACE: return "trace";
 	case MBT_LOG_INFO:  return "info";
 	case MBT_LOG_WARN:  return "warn";
 	case MBT_LOG_ERROR: return "error";
@@ -110,6 +122,7 @@ mbt_log_component_str(enum mbt_log_component comp)
 	case MBT_LOG_PICKER:   return "picker";
 	case MBT_LOG_TRACKER:  return "tracker";
 	case MBT_LOG_TRACKERD: return "trackerd";
+	case MBT_LOG_UTP:      return "utp";
 	default: return "?";
 	}
 }

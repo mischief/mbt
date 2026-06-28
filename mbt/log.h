@@ -12,6 +12,7 @@ enum mbt_log_level {
 	MBT_LOG_WARN,
 	MBT_LOG_INFO,
 	MBT_LOG_DEBUG,
+	MBT_LOG_TRACE,   /* per-packet / very high volume; below DEBUG */
 };
 
 enum mbt_log_component {
@@ -25,6 +26,7 @@ enum mbt_log_component {
 	MBT_LOG_PICKER   = 1 << 7,
 	MBT_LOG_TRACKER  = 1 << 8,  /* tracker client */
 	MBT_LOG_TRACKERD = 1 << 9,  /* tracker server */
+	MBT_LOG_UTP      = 1 << 10, /* uTP transport (BEP 29) */
 
 	MBT_LOG_ALL      = 0x7FFFFFFF,
 };
@@ -37,6 +39,10 @@ MBT_API void mbt_log_set(mbt_log_fn fn, void *arg);
 
 /* Set which components emit DEBUG messages (bitmask). Default: 0 (none). */
 MBT_API void mbt_log_set_debug(uint32_t component_mask);
+
+/* Set which components emit TRACE messages (bitmask). Default: 0 (none).
+ * TRACE is per-packet / very high volume; gate it to one component. */
+MBT_API void mbt_log_set_trace(uint32_t component_mask);
 
 /* Built-in callbacks */
 MBT_API void mbt_log_stderr(enum mbt_log_level level, enum mbt_log_component comp,
@@ -56,5 +62,6 @@ MBT_API void mbt_log_emit(enum mbt_log_level level, enum mbt_log_component comp,
 #define mbt_log_warn(comp, ...)  mbt_log_emit(MBT_LOG_WARN, (comp), __VA_ARGS__)
 #define mbt_log_info(comp, ...)  mbt_log_emit(MBT_LOG_INFO, (comp), __VA_ARGS__)
 #define mbt_log_debug(comp, ...) mbt_log_emit(MBT_LOG_DEBUG, (comp), __VA_ARGS__)
+#define mbt_log_trace(comp, ...) mbt_log_emit(MBT_LOG_TRACE, (comp), __VA_ARGS__)
 
 #endif

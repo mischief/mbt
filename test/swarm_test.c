@@ -102,6 +102,7 @@ int main(int argc, char *argv[])
 	if (debug) {
 		mbt_log_set(mbt_log_stderr, NULL);
 		mbt_log_set_debug(MBT_LOG_ALL);
+		mbt_log_set_trace(MBT_LOG_UTP);
 	}
 	int piece_len = piece_kib * 1024;
 	int total_len = piece_len * num_pieces;
