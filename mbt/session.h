@@ -41,6 +41,8 @@ struct mbt_session_config {
 	void *picker_ctx;
 
 	uint16_t listen_port;  /* 0 = don't listen for incoming */
+	int disable_tcp;       /* don't accept/dial TCP peers */
+	int disable_utp;       /* don't start uTP context, don't dial uTP peers */
 	int max_peers;         /* max peers per torrent (0 = default 30) */
 	int max_pieces_per_peer; /* active pieces per peer (0 = default 4) */
 	int min_peers_before_download; /* hold off requesting until this many peers connected (0 = off) */

@@ -107,6 +107,8 @@ struct mbt_session {
 	void *picker_ctx;
 
 	uint16_t listen_port;
+	int disable_tcp;
+	int disable_utp;
 	struct mbt_timers timers;
 	int max_peers;
 	int max_pieces_per_peer;
@@ -703,22 +705,28 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 static int
 session_listen(struct mbt_session *s)
 {
-	int rv = mbt_listen_tcp(&s->listener, s->ev, s->listen_port, listen_accept_cb, s);
-	if (rv < 0) return rv;
-	s->listen_port = s->listener.port; /* update with actual bound port */
-
-	/* uTP on the same port number (UDP) */
-	rv = mbt_utp_ctx_new(&s->utp_ctx, s->ev, s->listen_port,
-	                     utp_accept_cb, s);
-	if (rv < 0) {
-		mbt_log_warn(MBT_LOG_SESSION, "uTP listen failed: %s", strerror(-rv));
-		s->utp_ctx = NULL; /* non-fatal: TCP still works */
-	} else {
-		mbt_log_info(MBT_LOG_SESSION, "uTP listening on port %hu",
-		             mbt_utp_ctx_port(s->utp_ctx));
+	if (!s->disable_tcp) {
+		int rv = mbt_listen_tcp(&s->listener, s->ev, s->listen_port,
+		                        listen_accept_cb, s);
+		if (rv < 0) return rv;
+		s->listen_port = s->listener.port;
+		mbt_log_info(MBT_LOG_SESSION, "TCP listening on port %hu", s->listen_port);
 	}
 
-	mbt_log_info(MBT_LOG_SESSION, "listening on port %hu", s->listen_port);
+	if (!s->disable_utp) {
+		int rv = mbt_utp_ctx_new(&s->utp_ctx, s->ev, s->listen_port,
+		                         utp_accept_cb, s);
+		if (rv < 0) {
+			mbt_log_warn(MBT_LOG_SESSION, "uTP listen failed: %s", strerror(-rv));
+			s->utp_ctx = NULL;
+		} else {
+			if (s->disable_tcp)
+				s->listen_port = mbt_utp_ctx_port(s->utp_ctx);
+			mbt_log_info(MBT_LOG_SESSION, "uTP listening on port %hu",
+			             mbt_utp_ctx_port(s->utp_ctx));
+		}
+	}
+
 	return 0;
 }
 
@@ -741,6 +749,8 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->picker = cfg->picker;
 	s->picker_ctx = cfg->picker_ctx;
 	s->listen_port = cfg->listen_port;
+	s->disable_tcp = cfg->disable_tcp;
+	s->disable_utp = cfg->disable_utp;
 	s->timers = cfg->timers;
 	if (cfg->upload_rate)
 		mbt_ratelimit_new(&s->upload_limit, cfg->upload_rate, 0);
@@ -810,8 +820,6 @@ mbt_session_free(struct mbt_session *s)
 	if (!s)
 		return;
 
-	if (s->utp_ctx)
-		mbt_utp_ctx_free(s->utp_ctx);
 	mbt_listener_close(&s->listener);
 	if (s->lsd_announce_timer)
 		mbt_ev_timer_free(s->lsd_announce_timer);
@@ -842,7 +850,9 @@ mbt_session_free(struct mbt_session *s)
 		pending_utp_connect_free(puc, 1);
 	}
 
-	/* Free torrents */
+	/* Free torrents before utp_ctx: peers hold uTP conns; peer_free calls
+	 * conn_free which transitions them to FIN_SENT (removing from ctx).
+	 * Then utp_ctx_free sweeps any remaining sockets cleanly. */
 	struct session_torrent *st;
 	while ((st = STAILQ_FIRST(&s->torrents))) {
 		STAILQ_REMOVE_HEAD(&s->torrents, next);
@@ -857,6 +867,10 @@ mbt_session_free(struct mbt_session *s)
 
 	if (s->maintain_timer)
 		mbt_ev_timer_free(s->maintain_timer);
+
+	/* uTP ctx freed after torrents so peer conn_free runs first */
+	if (s->utp_ctx)
+		mbt_utp_ctx_free(s->utp_ctx);
 
 	mbt_ratelimit_free(s->upload_limit);
 	mbt_ratelimit_free(s->download_limit);
@@ -1602,8 +1616,12 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 			return 0;
 	}
 
+	/* When TCP is disabled, treat every peer as uTP-capable */
+	if (s->disable_tcp && s->utp_ctx)
+		flags |= 0x04;
+
 	/* Use uTP if peer advertised support (PEX flags bit 0x04) and ctx is available */
-	if ((flags & 0x04) && s->utp_ctx) {
+	if (!s->disable_utp && (flags & 0x04) && s->utp_ctx) {
 		struct sockaddr_storage dst;
 		socklen_t dstlen;
 		if (mbt_sockaddr_build(addr, port, &dst, &dstlen) < 0)
@@ -1630,6 +1648,9 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 		STAILQ_INSERT_TAIL(&s->pending_utp, puc, next);
 		return 0;
 	}
+
+	if (s->disable_tcp)
+		return 0; /* no TCP and peer has no uTP flag — skip */
 
 	/* Set up non-blocking TCP connect */
 	fd = mbt_connect_tcp(addr, port);
