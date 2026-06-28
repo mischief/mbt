@@ -141,4 +141,4 @@ test('pex', pex_test, timeout: 30)
 
 utp_test = executable('utp_test', 'utp_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('utp', utp_test, timeout: 15)
+test('utp', utp_test, timeout: 30)

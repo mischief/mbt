@@ -132,6 +132,7 @@ bt_src = [
   'net.c',
   'dht.c',
   'sdbuf.c',
+  'conn.c',
   'utp.c',
 ] + ev_src + resolve_src
 

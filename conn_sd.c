@@ -37,7 +37,7 @@ conn_sd_io(sd_event_source *s, int fd, uint32_t revents, void *v)
 	if (revents & EPOLLOUT) {
 		int rv = sdbuf_flush(c->buf, fd);
 		if (rv <= 0) {
-			/* Fully flushed or error — disable EPOLLOUT */
+			/* Fully flushed or error -- disable EPOLLOUT */
 			sd_event_source_set_io_events(s, EPOLLIN);
 		}
 	}
@@ -156,17 +156,8 @@ conn_sd_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
 	c->arg = arg;
 }
 
-static const struct mbt_conn_ops conn_sd_ops = {
-	.set_watermark = conn_sd_set_watermark,
-	.available     = conn_sd_available,
-	.read          = conn_sd_read,
-	.write         = conn_sd_write,
-	.set_callbacks = conn_sd_set_callbacks,
-	.free          = conn_sd_free,
-};
-
-int
-mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
+static int
+conn_sd_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
 {
 	struct conn_sd *c = (struct conn_sd *)conn;
 	struct sockaddr_storage ss;
@@ -185,6 +176,16 @@ mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *po
 
 	return 0;
 }
+
+static const struct mbt_conn_ops conn_sd_ops = {
+	.set_watermark = conn_sd_set_watermark,
+	.available     = conn_sd_available,
+	.read          = conn_sd_read,
+	.write         = conn_sd_write,
+	.set_callbacks = conn_sd_set_callbacks,
+	.peer_addr     = conn_sd_peer_addr,
+	.free          = conn_sd_free,
+};
 
 int
 mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,

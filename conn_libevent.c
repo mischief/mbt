@@ -132,17 +132,8 @@ conn_lev_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
 	c->arg = arg;
 }
 
-static const struct mbt_conn_ops conn_lev_ops = {
-	.set_watermark = conn_lev_set_watermark,
-	.available     = conn_lev_available,
-	.read          = conn_lev_read,
-	.write         = conn_lev_write,
-	.set_callbacks = conn_lev_set_callbacks,
-	.free          = conn_lev_free,
-};
-
-int
-mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
+static int
+conn_lev_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
 {
 	struct conn_lev *c = (struct conn_lev *)conn;
 	int fd = c->fd;
@@ -162,6 +153,16 @@ mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *po
 
 	return 0;
 }
+
+static const struct mbt_conn_ops conn_lev_ops = {
+	.set_watermark = conn_lev_set_watermark,
+	.available     = conn_lev_available,
+	.read          = conn_lev_read,
+	.write         = conn_lev_write,
+	.set_callbacks = conn_lev_set_callbacks,
+	.peer_addr     = conn_lev_peer_addr,
+	.free          = conn_lev_free,
+};
 
 int
 mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,

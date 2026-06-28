@@ -136,17 +136,8 @@ conn_poll_set_callbacks(struct mbt_conn *conn, mbt_conn_read_cb readcb,
 	c->arg = arg;
 }
 
-static const struct mbt_conn_ops conn_poll_ops = {
-	.set_watermark = conn_poll_set_watermark,
-	.available     = conn_poll_available,
-	.read          = conn_poll_read,
-	.write         = conn_poll_write,
-	.set_callbacks = conn_poll_set_callbacks,
-	.free          = conn_poll_free,
-};
-
-int
-mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
+static int
+conn_poll_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *port)
 {
 	struct conn_poll *c = (struct conn_poll *)conn;
 	struct sockaddr_storage ss;
@@ -165,6 +156,16 @@ mbt_conn_peer_addr(struct mbt_conn *conn, char *buf, size_t buflen, uint16_t *po
 
 	return 0;
 }
+
+static const struct mbt_conn_ops conn_poll_ops = {
+	.set_watermark = conn_poll_set_watermark,
+	.available     = conn_poll_available,
+	.read          = conn_poll_read,
+	.write         = conn_poll_write,
+	.set_callbacks = conn_poll_set_callbacks,
+	.peer_addr     = conn_poll_peer_addr,
+	.free          = conn_poll_free,
+};
 
 int
 mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,

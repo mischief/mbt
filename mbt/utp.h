@@ -39,7 +39,7 @@ MBT_API void mbt_utp_ctx_free(struct mbt_utp_ctx *ctx);
 /* UDP port the ctx is bound to */
 MBT_API uint16_t mbt_utp_ctx_port(struct mbt_utp_ctx *ctx);
 
-/* UDP fd — session can hand this to DHT when DHT is enabled on same port */
+/* UDP fd -- session can hand this to DHT when DHT is enabled on same port */
 MBT_API int mbt_utp_ctx_fd(struct mbt_utp_ctx *ctx);
 
 /*
@@ -61,5 +61,16 @@ MBT_API int mbt_utp_connect(struct mbt_utp_ctx *ctx,
                               mbt_conn_read_cb readcb,
                               mbt_conn_event_cb eventcb,
                               void *arg);
+
+/*
+ * Install a TX hook on the ctx.  The hook is called for every outbound UDP
+ * datagram before it is handed to sendto().  If the hook returns 0 the real
+ * sendto() is suppressed; any other return value lets the datagram through.
+ * Used by tests to deliver packets directly via mbt_utp_recv().
+ */
+MBT_API void mbt_utp_ctx_set_tx_hook(struct mbt_utp_ctx *ctx,
+    int (*hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
+                const struct sockaddr *dst, socklen_t dstlen, void *arg),
+    void *arg);
 
 #endif
