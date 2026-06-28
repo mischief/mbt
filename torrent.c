@@ -116,6 +116,7 @@ struct mbt_torrent {
 	size_t metadata_have;  /* bytes received */
 	int metadata_pieces;   /* total metadata pieces expected */
 	struct mbt_bitmap *metadata_recv; /* which pieces have been received */
+	uint64_t metadata_last_progress; /* usec of last metadata_have increase */
 
 	/* Active piece hash table (separate chaining, PIECE_TABLE_BUCKETS buckets) */
 	SLIST_HEAD(piece_bucket, piece_info) piece_table[PIECE_TABLE_BUCKETS];
@@ -454,20 +455,42 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	int reset_count = 0;
 
 	if (t->piece_count == 0) {
-		/* Metadata phase: we don't have the info dict yet. Re-request the
-		 * still-missing ut_metadata pieces (windowed) from a peer that
-		 * advertised a metadata size, until metadata_recv is complete. Peers
-		 * cap outstanding metadata requests, so this periodic re-drive is what
-		 * actually completes the fetch. */
+		/* Metadata phase (MBT_TORRENT_INIT): we don't have the info dict yet.
+		 * Re-request the still-missing ut_metadata pieces (windowed) from a
+		 * metadata-capable peer; peers cap outstanding requests so this
+		 * periodic re-drive is what completes the fetch.
+		 *
+		 * If metadata has made no progress for snub_timeout, the source is
+		 * wedged: drop metadata-capable peers (penalize so they aren't
+		 * immediately re-dialed) so the maintainer can try a different source. */
 		if (t->metadata_len > 0 && t->metadata_have < t->metadata_len) {
+			uint64_t stall = (uint64_t)t->timers.snub_timeout * 1000000;
+			int stalled = t->metadata_last_progress &&
+			              now - t->metadata_last_progress >= stall;
+			struct mbt_peer *drop[16]; int ndrop = 0;
 			struct torrent_peer *mtp;
+			int driven = 0;
 			TAILQ_FOREACH(mtp, &t->peers, entry) {
-				if (mtp->peer && mtp->failures < 10 &&
-				    mbt_peer_metadata_size(mtp->peer) > 0) {
+				if (!mtp->peer || mtp->failures >= 10) continue;
+				if (mbt_peer_metadata_size(mtp->peer) == 0) continue;
+				if (stalled && ndrop < 16) {
+					mbt_log_debug(MBT_LOG_TORRENT,
+					    "%s:%hu: dropping metadata peer (no progress for %ds)",
+					    mbt_peer_addr(mtp->peer), mbt_peer_conn_port(mtp->peer),
+					    t->timers.snub_timeout);
+					mtp->failures += 5;
+					drop[ndrop++] = mtp->peer;
+				} else if (!driven) {
 					torrent_request_metadata(t, mtp);
-					break;
+					driven = 1;
 				}
 			}
+			for (int i = 0; i < ndrop; i++)
+				mbt_peer_disconnect(drop[i]);
+			/* reset the progress clock so a freshly-dialed source gets a full
+			 * window before we judge it */
+			if (stalled)
+				t->metadata_last_progress = now;
 		}
 		goto reschedule;
 	}
@@ -789,6 +812,7 @@ on_active(struct mbt_peer *p, void *arg)
 			t->metadata = calloc(1, t->metadata_len);
 			t->metadata_pieces = (t->metadata_len + METADATA_BLOCK_SIZE - 1) / METADATA_BLOCK_SIZE;
 			mbt_bitmap_new_bits(&t->metadata_recv, t->metadata_pieces);
+			t->metadata_last_progress = now_usec(); /* start the stall clock */
 		}
 		torrent_request_metadata(t, tp);
 	}
@@ -1123,6 +1147,7 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 	if (!t->metadata_recv || !mbt_bitmap_isset(t->metadata_recv, piece)) {
 		memcpy(t->metadata + offset, data, copy_len);
 		t->metadata_have += copy_len;
+		t->metadata_last_progress = now_usec();
 		if (t->metadata_recv)
 			mbt_bitmap_set(t->metadata_recv, piece);
 	}
