@@ -49,7 +49,9 @@ resume_test = executable('resume_test', 'resume_test.c', link_with: [libmbt], in
 test('resume', resume_test)
 
 e2e_test = executable('e2e_test', 'e2e_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('e2e', e2e_test, timeout: 15)
+test('e2e', e2e_test, timeout: 15, env: {'MBT_E2E_TRANSPORT': 'both'})
+test('e2e_utp', e2e_test, timeout: 15, env: {'MBT_E2E_TRANSPORT': 'utp'})
+test('e2e_tcp', e2e_test, timeout: 15, env: {'MBT_E2E_TRANSPORT': 'tcp'})
 
 storage_file_test = executable('storage_file_test', 'storage_file_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('storage_file', storage_file_test)

@@ -100,6 +100,13 @@ main(void)
 	uint8_t test_data[TOTAL_LEN];
 	fill_test_data(test_data, TOTAL_LEN);
 
+	/* Transport under test: MBT_E2E_TRANSPORT = both (default) | utp | tcp */
+	int dis_tcp = 0, dis_utp = 0;
+	const char *xport = getenv("MBT_E2E_TRANSPORT");
+	if (xport && strcmp(xport, "utp") == 0) dis_tcp = 1;
+	else if (xport && strcmp(xport, "tcp") == 0) dis_utp = 1;
+	fprintf(stderr, "e2e_test: transport=%s\n", xport ? xport : "both");
+
 	/* Shared event loop */
 	mbt_log_set(mbt_log_stderr, NULL);
 	mbt_log_set_debug(MBT_LOG_ALL);
@@ -123,6 +130,8 @@ main(void)
 		.ev = ev,
 		.default_storage = mbt_storage_memory_storage(mem1),
 		.listen_port = 0,
+		.disable_tcp = dis_tcp,
+		.disable_utp = dis_utp,
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1);
@@ -144,6 +153,8 @@ main(void)
 		.ev = ev,
 		.default_storage = mbt_storage_memory_storage(mem2),
 		.listen_port = 0,
+		.disable_tcp = dis_tcp,
+		.disable_utp = dis_utp,
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2);
