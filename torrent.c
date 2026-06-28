@@ -139,7 +139,7 @@ struct mbt_torrent {
 
 
 	/* Peers */
-	TAILQ_HEAD(, torrent_peer) peers;
+	TAILQ_HEAD(peer_tailq, torrent_peer) peers;
 	int peer_count;
 	int peers_with_avail; /* peers that have sent a bitfield or HAVE_ALL */
 
@@ -931,6 +931,29 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	tp->bytes_from += len;
 	tp->total_down += len;
 	pi->last_activity = now_usec();
+
+	/*
+	 * Nudge this peer one slot toward the head if it has now out-delivered
+	 * its predecessor this interval. The multi-peer re-drive passes iterate
+	 * t->peers in order and the first peer gets first pick of new pieces, so
+	 * keeping better-delivering peers near the head biases new assignments
+	 * toward proven peers without a full sort (O(1) per block). bytes_from is
+	 * the recent (per-choke-interval) rate; the order persists across the
+	 * uniform reset since only the counters are zeroed, not the list.
+	 */
+	{
+		struct torrent_peer *prev = TAILQ_PREV(tp, peer_tailq, entry);
+		if (prev && tp->bytes_from > prev->bytes_from) {
+			mbt_log_trace(MBT_LOG_TORRENT,
+			    "peer reorder: %s:%hu (%llu) ahead of %s:%hu (%llu)",
+			    mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer),
+			    (unsigned long long)tp->bytes_from,
+			    mbt_peer_addr(prev->peer), mbt_peer_conn_port(prev->peer),
+			    (unsigned long long)prev->bytes_from);
+			TAILQ_REMOVE(&t->peers, tp, entry);
+			TAILQ_INSERT_BEFORE(prev, tp, entry);
+		}
+	}
 
 	/* Endgame: this block was duplicate-requested across peers. Cancel it
 	 * from everyone else now that it has arrived (bep 3 End Game), so they
@@ -1844,7 +1867,10 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 	tp->torrent = t;
 	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
-	TAILQ_INSERT_HEAD(&t->peers, tp, entry);
+	/* New peers start at the tail: they are choked and unproven. They earn
+	 * their way toward the head (where the unchoked, actively-delivering peers
+	 * sit) via the bytes_from reorder on each block received. */
+	TAILQ_INSERT_TAIL(&t->peers, tp, entry);
 	t->peer_count++;
 
 	return 0;
@@ -1876,7 +1902,10 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 	tp->torrent = t;
 	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
-	TAILQ_INSERT_HEAD(&t->peers, tp, entry);
+	/* New peers start at the tail: they are choked and unproven. They earn
+	 * their way toward the head (where the unchoked, actively-delivering peers
+	 * sit) via the bytes_from reorder on each block received. */
+	TAILQ_INSERT_TAIL(&t->peers, tp, entry);
 	t->peer_count++;
 
 	return 0;
