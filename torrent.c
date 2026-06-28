@@ -761,9 +761,12 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 			mbt_peer_send_choke(tp->peer, 1);
 			tp->am_choking = 1;
 		}
-		/* Disconnect seed-to-seed: neither side interested */
+		/* Disconnect seed-to-seed: we are a complete seed and they're not
+		 * interested. Guard piece_count>0: with no metadata yet both counts
+		 * are 0, and 0==0 would wrongly flag us as a seed and drop peers that
+		 * are merely still handshaking (or from whom we still need metadata). */
 		if (tp->peer && tp->failures < 10 && !tp->peer_interested &&
-		    t->have_count == t->piece_count) {
+		    t->piece_count > 0 && t->have_count == t->piece_count) {
 			mbt_peer_disconnect(tp->peer);
 			tp->failures += 5;
 		}
