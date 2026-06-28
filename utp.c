@@ -149,7 +149,9 @@ struct mbt_utp_sock {
 
 	mbt_conn_read_cb   readcb;
 	mbt_conn_event_cb  eventcb;
+	mbt_conn_write_cb  writecb;
 	void              *cb_arg;
+	void              *write_arg;
 
 	struct mbt_ev_timer *rto_timer;
 	struct mbt_ev_timer *destroy_timer;
@@ -303,6 +305,9 @@ utp_conn_set_watermark(struct mbt_conn *c, size_t low)
 	utp_schedule_readcb(s);
 }
 
+static int utp_flush(struct mbt_utp_sock *s);
+static int utp_send_ack(struct mbt_utp_sock *s);
+
 static size_t
 utp_conn_available(struct mbt_conn *c)
 {
@@ -326,10 +331,25 @@ utp_conn_read(struct mbt_conn *c, void *buf, size_t len)
 		done += chunk;
 	}
 	s->rbuf_rd += (uint32_t)len;
+	/* Advertise the newly freed window space to the peer */
+	utp_send_ack(s);
 	return (ssize_t)len;
 }
 
-static int utp_flush(struct mbt_utp_sock *s);
+/* Copy len bytes into sbuf at monotonic offset wr (caller advances sbuf_wr). */
+static void
+sbuf_copy_in(struct mbt_utp_sock *s, uint32_t wr, const void *src, size_t len)
+{
+	const uint8_t *p = src;
+	size_t done = 0;
+	while (done < len) {
+		size_t idx = (wr + done) & (SBUF_CAP - 1);
+		size_t chunk = SBUF_CAP - idx;
+		if (chunk > len - done) chunk = len - done;
+		memcpy(s->sbuf + idx, p + done, chunk);
+		done += chunk;
+	}
+}
 
 static ssize_t
 utp_conn_write(struct mbt_conn *c, const void *buf, size_t len)
@@ -338,20 +358,40 @@ utp_conn_write(struct mbt_conn *c, const void *buf, size_t len)
 	if (s->state != UTP_CS_CONNECTED)
 		return -ENOTCONN;
 	uint32_t space = SBUF_CAP - (s->sbuf_wr - s->sbuf_una);
-	if (len > space) len = space;
-	if (!len) return 0;
-	const uint8_t *src = buf;
-	size_t done = 0;
-	while (done < len) {
-		size_t idx = (s->sbuf_wr + done) & (SBUF_CAP - 1);
-		size_t chunk = SBUF_CAP - idx;
-		if (chunk > len - done) chunk = len - done;
-		memcpy(s->sbuf + idx, src + done, chunk);
-		done += chunk;
-	}
+	if (len > space) return -ENOBUFS;
+	sbuf_copy_in(s, s->sbuf_wr, buf, len);
 	s->sbuf_wr += (uint32_t)len;
 	utp_flush(s);
 	return (ssize_t)len;
+}
+
+/*
+ * Gather-write: accept the whole vector or none of it. Lets the peer layer
+ * frame a message (length prefix + header + payload) as separate iovecs
+ * without concatenating them into a heap buffer first.
+ */
+static ssize_t
+utp_conn_writev(struct mbt_conn *c, const struct iovec *iov, int iovcnt)
+{
+	struct mbt_utp_sock *s = (struct mbt_utp_sock *)c;
+	if (s->state != UTP_CS_CONNECTED)
+		return -ENOTCONN;
+
+	size_t total = 0;
+	for (int i = 0; i < iovcnt; i++)
+		total += iov[i].iov_len;
+
+	uint32_t space = SBUF_CAP - (s->sbuf_wr - s->sbuf_una);
+	if (total > space) return -ENOBUFS;
+
+	uint32_t wr = s->sbuf_wr;
+	for (int i = 0; i < iovcnt; i++) {
+		sbuf_copy_in(s, wr, iov[i].iov_base, iov[i].iov_len);
+		wr += (uint32_t)iov[i].iov_len;
+	}
+	s->sbuf_wr += (uint32_t)total;
+	utp_flush(s);
+	return (ssize_t)total;
 }
 
 static void utp_destroy_cb(struct mbt_ev_timer *t, void *arg);
@@ -474,12 +514,22 @@ utp_conn_peer_addr(struct mbt_conn *c, char *buf, size_t buflen, uint16_t *port)
 	return 0;
 }
 
+static void
+utp_conn_set_writecb(struct mbt_conn *c, mbt_conn_write_cb cb, void *arg)
+{
+	struct mbt_utp_sock *s = (struct mbt_utp_sock *)c;
+	s->writecb   = cb;
+	s->write_arg = arg;
+}
+
 static const struct mbt_conn_ops utp_conn_ops = {
 	.set_watermark = utp_conn_set_watermark,
 	.available     = utp_conn_available,
 	.read          = utp_conn_read,
 	.write         = utp_conn_write,
+	.writev        = utp_conn_writev,
 	.set_callbacks = utp_conn_set_callbacks,
+	.set_writecb   = utp_conn_set_writecb,
 	.peer_addr     = utp_conn_peer_addr,
 	.free          = utp_conn_free,
 };
@@ -885,6 +935,7 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 	}
 
 	/* Advance send_una */
+	uint32_t old_una = s->sbuf_una;
 	while ((int16_t)(s->send_una - s->seq_nr) < 0) {
 		struct utp_send_entry *e = &s->send_queue[s->send_una & SEND_QUEUE_MASK];
 		if (!e->valid || e->seq_nr != s->send_una || !e->sacked)
@@ -892,6 +943,13 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 		s->sbuf_una = e->sbuf_off + e->len;
 		e->valid = 0;
 		s->send_una++;
+	}
+	if (s->writecb && s->sbuf_una != old_una) {
+		mbt_conn_write_cb cb = s->writecb;
+		void *arg = s->write_arg;
+		s->writecb   = NULL;
+		s->write_arg = NULL;
+		cb(&s->conn, arg);
 	}
 
 	/* Fast retransmit: sacked packets ahead of new send_una */
@@ -966,12 +1024,13 @@ utp_handle_syn(struct mbt_utp_ctx *ctx,
 		ctx->accept_cb(ctx, &s->conn, src, srclen, ctx->accept_arg);
 }
 
-/* Deliver data to rbuf and cascade recv_queue */
-static void
+/* Deliver data to rbuf; returns 0 on success, -1 if rbuf full (don't ACK). */
+static int
 utp_deliver_data(struct mbt_utp_sock *s, const void *data, size_t len, uint16_t seq)
 {
-	if (len > rbuf_space(s)) return;  /* rbuf full, drop */
+	if (len > rbuf_space(s)) return -1;
 	rbuf_produce(s, data, len);
+	return 0;
 }
 
 static void
@@ -996,8 +1055,12 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	}
 
 	if (pkt_seq == (uint16_t)(s->ack_nr + 1)) {
-		/* In-order: deliver */
-		utp_deliver_data(s, payload, plen, pkt_seq);
+		/* In-order: deliver — only advance ack_nr if data was stored */
+		if (utp_deliver_data(s, payload, plen, pkt_seq) < 0) {
+			/* rbuf full; ACK with current ack_nr so peer sees wnd=0 */
+			utp_send_ack(s);
+			return;
+		}
 		s->ack_nr++;
 
 		/* Cascade from recv_queue */
@@ -1006,7 +1069,8 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 			struct utp_recv_entry *e = &s->recv_queue[next & RECV_QUEUE_MASK];
 			if (!e->valid || e->seq_nr != next)
 				break;
-			utp_deliver_data(s, e->data, e->len, next);
+			if (utp_deliver_data(s, e->data, e->len, next) < 0)
+				break;
 			e->valid = 0;
 			s->ack_nr++;
 		}
