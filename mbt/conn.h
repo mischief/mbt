@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 
 struct mbt_conn;
 struct mbt_ev;
@@ -23,6 +24,13 @@ struct mbt_conn_ops {
 	size_t (*available)(struct mbt_conn *c);
 	ssize_t (*read)(struct mbt_conn *c, void *buf, size_t len);
 	ssize_t (*write)(struct mbt_conn *c, const void *buf, size_t len);
+	/* Optional: gather-write iovcnt buffers as one logical message.
+	 * Must be all-or-nothing for transports that can report -ENOBUFS
+	 * (e.g. uTP): either the whole vector is accepted or none of it is.
+	 * NULL pointer = fall back to per-iovec write() in the wrapper, which
+	 * is safe only for transports whose write() never partially fails
+	 * (e.g. TCP, which buffers any remainder). */
+	ssize_t (*writev)(struct mbt_conn *c, const struct iovec *iov, int iovcnt);
 	void (*set_callbacks)(struct mbt_conn *c, mbt_conn_read_cb readcb,
 	                      mbt_conn_event_cb eventcb, void *arg);
 	/* Optional: register one-shot writecb for when send buffer drains.
@@ -74,6 +82,30 @@ static inline ssize_t
 mbt_conn_write(struct mbt_conn *c, const void *buf, size_t len)
 {
 	return c->ops->write(c, buf, len);
+}
+
+/*
+ * Gather-write a vector of buffers as one logical message. Returns the
+ * total bytes accepted on success, or a negative -errno. If the transport
+ * provides a native writev it is all-or-nothing (see mbt_conn_ops.writev);
+ * otherwise we fall back to writing each iovec in turn, which is only
+ * correct for transports whose write() cannot partially fail.
+ */
+static inline ssize_t
+mbt_conn_writev(struct mbt_conn *c, const struct iovec *iov, int iovcnt)
+{
+	if (c->ops->writev)
+		return c->ops->writev(c, iov, iovcnt);
+	ssize_t total = 0;
+	for (int i = 0; i < iovcnt; i++) {
+		if (iov[i].iov_len == 0)
+			continue;
+		ssize_t n = c->ops->write(c, iov[i].iov_base, iov[i].iov_len);
+		if (n < 0)
+			return n;
+		total += n;
+	}
+	return total;
 }
 
 static inline void
