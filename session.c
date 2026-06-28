@@ -55,6 +55,7 @@ struct session_torrent {
 	int announce_interval;
 	time_t last_dht_lookup;
 	time_t last_dht_announce;
+	int started_announced;   /* sent event=started on first announce */
 	int completed_announced; /* sent event=completed to tracker */
 	int emergency_reannounce; /* fired one early reannounce due to dry peerdb */
 	STAILQ_ENTRY(session_torrent) next;
@@ -988,7 +989,8 @@ session_do_announce(struct mbt_session *s, struct session_torrent *st)
 
 	struct mbt_torrent *t = st->torrent;
 	uint64_t left = 0;
-	int event = MBT_TRACKER_EVENT_NONE;
+	int event = st->started_announced ? MBT_TRACKER_EVENT_NONE : MBT_TRACKER_EVENT_STARTED;
+	if (!st->started_announced) st->started_announced = 1;
 
 	if (t && mbt_torrent_piece_count(t) > 0) {
 		uint64_t total = (uint64_t)mbt_torrent_piece_length(t) * mbt_torrent_piece_count(t);
