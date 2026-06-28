@@ -434,13 +434,30 @@ pending_utp_connect_event(struct mbt_conn *c, int err, void *v)
 	STAILQ_REMOVE(&s->pending_utp, pc, pending_utp_connect, next);
 
 	if (err < 0) {
-		mbt_log_warn(MBT_LOG_SESSION, "uTP connect to %s:%hu failed: %s",
+		mbt_log_debug(MBT_LOG_SESSION, "uTP connect to %s:%hu failed: %s (will try TCP)",
 		             pc->addr, pc->port, strerror(-err));
+		/* Speculative uTP attempt failed -- record uTP_NO so we never retry
+		 * uTP for this peer, and requeue KNOWN so the maintainer re-dials it
+		 * over TCP. */
+		struct mbt_peer_entry *pe = mbt_peerdb_find(mbt_torrent_peerdb(pc->torrent),
+		                                            pc->addr, pc->port);
+		if (pe) {
+			pe->utp_cap = MBT_UTP_NO;
+			pe->state = MBT_PEERDB_KNOWN;
+		}
 		pending_utp_connect_free(pc, 1);
 		return;
 	}
 
 	mbt_log_debug(MBT_LOG_SESSION, "uTP connected to %s:%hu", pc->addr, pc->port);
+
+	/* uTP works for this peer -- remember it. */
+	{
+		struct mbt_peer_entry *pe = mbt_peerdb_find(mbt_torrent_peerdb(pc->torrent),
+		                                            pc->addr, pc->port);
+		if (pe)
+			pe->utp_cap = MBT_UTP_YES;
+	}
 
 	struct mbt_conn *conn = pc->conn;
 	struct mbt_torrent *torrent = pc->torrent;
@@ -1678,12 +1695,16 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 			return 0;
 	}
 
-	/* When TCP is disabled, treat every peer as uTP-capable */
-	if (s->disable_tcp && s->utp_ctx)
-		flags |= 0x04;
-
-	/* Use uTP if peer advertised support (PEX flags bit 0x04) and ctx is available */
-	if (!s->disable_utp && (flags & 0x04) && s->utp_ctx) {
+	/*
+	 * Transport choice. We try uTP first for any peer that is not known to be
+	 * uTP-incapable: the peerdb's learned utp_cap is YES (PEX 0x04 or a past
+	 * success) or UNKNOWN (DHT/tracker/LSD -- the wire gives no hint, so we
+	 * speculatively try uTP and fall back to TCP on failure). Only utp_cap==NO
+	 * (a prior uTP attempt failed) forces TCP. --disable-utp forces TCP too.
+	 */
+	struct mbt_peer_entry *pe = mbt_peerdb_find(mbt_torrent_peerdb(st->torrent), addr, port);
+	int utp_no = pe && pe->utp_cap == MBT_UTP_NO;
+	if (!s->disable_utp && !utp_no && s->utp_ctx) {
 		struct sockaddr_storage dst;
 		socklen_t dstlen;
 		if (mbt_sockaddr_build(addr, port, &dst, &dstlen) < 0)
@@ -1698,7 +1719,8 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 		snprintf(puc->addr, sizeof(puc->addr), "%s", addr);
 		puc->port = port;
 
-		mbt_log_debug(MBT_LOG_SESSION, "uTP connecting to %s:%hu", addr, port);
+		mbt_log_debug(MBT_LOG_SESSION, "uTP connecting to %s:%hu (cap=%d)",
+		              addr, port, pe ? pe->utp_cap : MBT_UTP_UNKNOWN);
 
 		int rv2 = mbt_utp_connect(s->utp_ctx, &puc->conn,
 		                          (struct sockaddr *)&dst, dstlen,

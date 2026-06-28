@@ -1294,8 +1294,13 @@ on_pex(struct mbt_peer *p, const char *addr, uint16_t port, uint8_t flags, void 
 	if (t->is_private) return; /* BEP 27: no PEX for private torrents */
 	if (port == 0) return;    /* port 0 is invalid */
 	struct mbt_peer_entry *pe = mbt_peerdb_insert(&t->peerdb, addr, port, MBT_SOURCE_PEX);
-	if (pe)
+	if (pe) {
 		pe->flags = flags;
+		/* added.f bit MBT_PEX_UTP = peer supports uTP. Seed our learned
+		 * capability to YES, but never upgrade a peer we've proven uTP_NO on. */
+		if ((flags & MBT_PEX_UTP) && pe->utp_cap != MBT_UTP_NO)
+			pe->utp_cap = MBT_UTP_YES;
+	}
 	mbt_log_debug(MBT_LOG_TORRENT, "PEX: %s:%hu flags=0x%02x", addr, port, flags);
 }
 

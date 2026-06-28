@@ -18,13 +18,24 @@ enum mbt_peerdb_state {
 
 #include "peer_source.h"
 
+/* Learned transport capability for a peer -- internal state, NOT a wire value.
+ * Distinct from the PEX added.f flags byte (which carries protocol-defined bits
+ * like 0x04 = supports uTP). We seed YES from that bit but track tried/failed
+ * here so we never overload the protocol flags. */
+enum mbt_utp_cap {
+	MBT_UTP_UNKNOWN = 0,  /* not yet determined (DHT/tracker/LSD peers) */
+	MBT_UTP_YES,          /* believed/known uTP-capable (PEX 0x04 or a success) */
+	MBT_UTP_NO,           /* a uTP attempt failed; use TCP */
+};
+
 struct mbt_peer_entry {
 	char addr[INET6_ADDRSTRLEN];
 	uint16_t port;
 
 	enum mbt_peerdb_state state;
 	int source;              /* mbt_peer_source — how we first found this peer */
-	uint8_t flags;           /* PEX flags: 0x04 = supports uTP */
+	uint8_t flags;           /* PEX added.f wire flags: 0x04 = supports uTP */
+	uint8_t utp_cap;         /* enum mbt_utp_cap — learned transport capability */
 	int failures;            /* consecutive failure count */
 	uint64_t last_seen;      /* last time reported by tracker/DHT/PEX (usec) */
 	uint64_t last_attempt;   /* last time we tried connecting (usec) */

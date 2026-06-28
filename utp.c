@@ -70,6 +70,12 @@
 #define UTP_WINDOW_MAX       1024
 #define UTP_WINDOW_DEFAULT   32
 /*
+ * Cap SYN retransmits while connecting. A peer that does not speak uTP never
+ * answers the SYN; without a cap we would resend it forever and never report
+ * the connect failure (so a uTP-first dial could not fall back to TCP). With
+ * the RTO backoff this is a few seconds before we give up. */
+#define UTP_SYN_MAX_RETRANSMITS 4
+/*
  * Initial congestion window. One packet (the old value) means the pipe cannot
  * fill enough to get ack feedback flowing under any delay/reorder, and
  * max_window only grows on acks -- so cwnd stays at one packet and throughput
@@ -163,6 +169,7 @@ struct mbt_utp_sock {
 	int          dup_acks;      /* consecutive dup acks */
 	uint16_t     last_loss_una; /* send_una at last loss response */
 	int          loss_acted;    /* responded to loss at last_loss_una */
+	uint8_t      syn_retransmits; /* SYN resends while SYN_SENT (connect timeout) */
 
 	/* recv sequence */
 	uint16_t     ack_nr;        /* last in-order seq received */
@@ -613,6 +620,12 @@ utp_conn_free(struct mbt_conn *c)
 		/* Already waiting; nothing to do -- destroy_timer will free */
 		return;
 	}
+
+	/* A deferred reap is already scheduled (e.g. connect timeout fired from
+	 * inside the rto callback); let the destroy timer free it to avoid a
+	 * reentrant free of an in-flight timer. */
+	if (s->destroy_timer)
+		return;
 
 	/* Remove from ctx hash table if still registered */
 	if (s->ctx)
@@ -1078,6 +1091,22 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 	struct mbt_utp_sock *s = arg;
 
 	if (s->state == UTP_CS_SYN_SENT) {
+		/* Give up if the peer never answers our SYN (likely not uTP). Fire a
+		 * connect failure so the caller can fall back to TCP. */
+		if (s->syn_retransmits >= UTP_SYN_MAX_RETRANSMITS) {
+			/* Defer the actual free to the destroy timer: we are inside the
+			 * rto timer callback, and tearing the socket down here (via the
+			 * caller's mbt_conn_free in eventcb) would free this very timer
+			 * mid-callback. */
+			s->state = UTP_CS_DESTROY;
+			if (!s->destroy_timer)
+				mbt_ev_timer_new(s->ctx->ev, &s->destroy_timer, 0,
+				                 utp_destroy_cb, s);
+			if (s->eventcb)
+				s->eventcb(&s->conn, -ETIMEDOUT, s->cb_arg);
+			return;
+		}
+		s->syn_retransmits++;
 		/* retransmit SYN */
 		uint8_t buf[UTP_HEADER_SIZE];
 		struct utp_hdr *h = (struct utp_hdr *)buf;
