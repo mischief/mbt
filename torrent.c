@@ -67,11 +67,18 @@ struct piece_entry {
 };
 
 /* Per-peer entry in the torrent's peer list */
+struct pending_req {
+	TAILQ_ENTRY(pending_req) entry;
+	uint32_t piece, offset, length;
+};
+
 struct torrent_peer {
 	SLIST_ENTRY(torrent_peer) entry;
 	SLIST_HEAD(, piece_info) active_pieces; /* pieces currently assigned to this peer */
 	int active_count;      /* length of active_pieces */
 	struct mbt_peer *peer;
+	struct mbt_torrent *torrent;           /* owning torrent (for writecb) */
+	TAILQ_HEAD(, pending_req) pending_sends; /* deferred piece sends */
 	int outstanding;       /* in-flight requests */
 	int reqq_window;       /* dynamic pipeline target, grows on delivery */
 	int hash_failures;     /* consecutive hash failures from this peer */
@@ -177,6 +184,7 @@ static const uint8_t *piece_hash(struct mbt_torrent *t, uint32_t i) {
 }
 
 static void torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp);
+static void torrent_peer_writecb(struct mbt_conn *c, void *arg);
 static void torrent_drive_all_peers(struct mbt_torrent *t);
 static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
@@ -408,6 +416,11 @@ torrent_deferred_peer_free(struct mbt_ev_timer *timer, void *v)
 	mbt_ev_timer_free(timer);
 	if (tp->peer)
 		mbt_peer_free(tp->peer);
+	while (!TAILQ_EMPTY(&tp->pending_sends)) {
+		struct pending_req *pr = TAILQ_FIRST(&tp->pending_sends);
+		TAILQ_REMOVE(&tp->pending_sends, pr, entry);
+		free(pr);
+	}
 	free(tp);
 }
 
@@ -1102,6 +1115,50 @@ on_interest(struct mbt_peer *p, int interested, void *arg)
 }
 
 static void
+torrent_peer_writecb(struct mbt_conn *c, void *arg)
+{
+	(void)c;
+	struct torrent_peer *tp = arg;
+	struct mbt_torrent *t = tp->torrent;
+
+	while (!TAILQ_EMPTY(&tp->pending_sends)) {
+		struct pending_req *pr = TAILQ_FIRST(&tp->pending_sends);
+
+		uint32_t plen = t->piece_length;
+		if (pr->piece == t->piece_count - 1) {
+			uint32_t rem = t->total_length % t->piece_length;
+			if (rem) plen = rem;
+		}
+		uint8_t *buf = malloc(plen);
+		if (!buf)
+			break;
+		int rv = t->storage.ops->read_piece(t->storage.ctx, pr->piece, buf, plen);
+		if (rv < 0) {
+			free(buf);
+			TAILQ_REMOVE(&tp->pending_sends, pr, entry);
+			free(pr);
+			continue;
+		}
+
+		int sv = mbt_peer_send_piece(tp->peer, pr->piece, pr->offset,
+		                             buf + pr->offset, pr->length);
+		free(buf);
+		if (sv == -ENOBUFS) {
+			/* Still full — re-arm and leave entry at head */
+			mbt_peer_set_writecb(tp->peer, torrent_peer_writecb, tp);
+			return;
+		}
+		TAILQ_REMOVE(&tp->pending_sends, pr, entry);
+		if (sv == 0) {
+			tp->bytes_to += pr->length;
+			tp->total_up += pr->length;
+			tp->last_sent = time(NULL);
+		}
+		free(pr);
+	}
+}
+
+static void
 on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, void *arg)
 {
 	struct mbt_torrent *t = arg;
@@ -1145,13 +1202,26 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	mbt_ratelimit_consume(t->upload_limit, length);
 	mbt_ratelimit_consume(mbt_session_get_upload_limit(t->session), length);
 
-	mbt_peer_send_piece(p, piece, offset, buf + offset, length);
-	if (tp) {
+	int sv = mbt_peer_send_piece(p, piece, offset, buf + offset, length);
+	free(buf);
+	if (sv == -ENOBUFS && tp) {
+		struct pending_req *pr = malloc(sizeof(*pr));
+		if (pr) {
+			pr->piece  = piece;
+			pr->offset = offset;
+			pr->length = length;
+			int was_empty = TAILQ_EMPTY(&tp->pending_sends);
+			TAILQ_INSERT_TAIL(&tp->pending_sends, pr, entry);
+			if (was_empty)
+				mbt_peer_set_writecb(p, torrent_peer_writecb, tp);
+		}
+		return;
+	}
+	if (sv == 0 && tp) {
 		tp->bytes_to += length;
 		tp->total_up += length;
 		tp->last_sent = time(NULL);
 	}
-	free(buf);
 }
 
 static void
@@ -1734,6 +1804,7 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 	tp = calloc(1, sizeof(*tp));
 	if (!tp)
 		return -ENOMEM;
+	TAILQ_INIT(&tp->pending_sends);
 
 	rv = mbt_peer_new(&peer, t->ev, conn, t->ih, t->peer_id,
 	                  t->piece_count, source, &torrent_peer_cbs, t);
@@ -1748,7 +1819,8 @@ mbt_torrent_add_peer(struct mbt_torrent *t, struct mbt_conn *conn, enum mbt_peer
 	if (mbt_session_listen_port(t->session) > 0)
 		mbt_peer_set_our_listen_port(peer, mbt_session_listen_port(t->session));
 
-	tp->peer = peer;
+	tp->peer    = peer;
+	tp->torrent = t;
 	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
 	SLIST_INSERT_HEAD(&t->peers, tp, entry);
@@ -1768,6 +1840,7 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 	tp = calloc(1, sizeof(*tp));
 	if (!tp)
 		return -ENOMEM;
+	TAILQ_INIT(&tp->pending_sends);
 
 	rv = mbt_peer_new_incoming(&peer, t->ev, conn, t->ih, t->peer_id,
 	                           t->piece_count, MBT_SOURCE_INCOMING, ext, their_id,
@@ -1778,7 +1851,8 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 		return rv;
 	}
 
-	tp->peer = peer;
+	tp->peer    = peer;
+	tp->torrent = t;
 	mbt_peer_set_user(peer, tp);
 	tp->last_recv = time(NULL);
 	SLIST_INSERT_HEAD(&t->peers, tp, entry);
