@@ -67,7 +67,22 @@
 #define UTP_WINDOW_MIN       8        /* packets; also covers bep 29 cong. floor */
 #define UTP_WINDOW_MAX       1024
 #define UTP_WINDOW_DEFAULT   32
-#define UTP_INIT_CWND        UTP_MSS  /* initial congestion window: one packet */
+/*
+ * Initial congestion window. One packet (the old value) means the pipe cannot
+ * fill enough to get ack feedback flowing under any delay/reorder, and
+ * max_window only grows on acks -- so cwnd stays at one packet and throughput
+ * crawls. Start at an RFC 6928 style IW10 (10 packets), capped at sock setup to
+ * the configured window.
+ */
+#define UTP_INIT_CWND_PKTS   10
+#define UTP_INIT_CWND        (UTP_INIT_CWND_PKTS * UTP_MSS)
+/*
+ * Congestion window floor: one full MSS. max_window must never drop below this
+ * -- a sub-MSS window forces the sender to emit tiny fragmented packets and
+ * throughput collapses to a crawl. (UTP_MIN_PACKET_SIZE, 150, is a wire packet
+ * floor, not a congestion floor; do not use it to clamp max_window.)
+ */
+#define UTP_MIN_WINDOW       UTP_MSS
 
 /*
  * rbuf/sbuf floor, independent of the window.
@@ -144,6 +159,8 @@ struct mbt_utp_sock {
 	uint16_t     seq_nr;        /* next seq to assign */
 	uint16_t     send_una;      /* oldest unacked seq */
 	int          dup_acks;      /* consecutive dup acks */
+	uint16_t     last_loss_una; /* send_una at last loss response */
+	int          loss_acted;    /* responded to loss at last_loss_una */
 
 	/* recv sequence */
 	uint16_t     ack_nr;        /* last in-order seq received */
@@ -195,6 +212,7 @@ struct mbt_utp_sock {
 	struct mbt_ev_timer *destroy_timer;
 	struct mbt_ev_timer *readcb_timer; /* deferred readcb notification */
 	struct mbt_ev_timer *fin_timer;    /* deferred eventcb(0) after FIN before accept_cb */
+	struct mbt_ev_timer *rtx_timer;    /* deferred fast-retransmit (breaks send->ack->rtx reentrancy) */
 
 	int          got_fin;   /* FIN received before eventcb was installed */
 	int          in_hash;   /* 1 if inserted into ctx->buckets */
@@ -259,6 +277,39 @@ utp_resolve_window(uint32_t requested)
 	if (requested < UTP_WINDOW_MIN) requested = UTP_WINDOW_MIN;
 	if (requested > UTP_WINDOW_MAX) requested = UTP_WINDOW_MAX;
 	return utp_pow2_ceil(requested);
+}
+
+static const char *
+utp_type_str(uint8_t type)
+{
+	switch (type) {
+	case ST_DATA:  return "DATA";
+	case ST_FIN:   return "FIN";
+	case ST_STATE: return "STATE";
+	case ST_RESET: return "RESET";
+	case ST_SYN:   return "SYN";
+	default:       return "?";
+	}
+}
+
+/*
+ * Trace one datagram at the wire boundary (sendto/recvfrom). dir is "tx"/"rx".
+ * Decodes the fixed header rather than dumping hex: type, seq, ack, advertised
+ * window, whether an extension (SACK) is attached, and the datagram size.
+ * Cheap to call -- the format args are only evaluated when UTP trace is on.
+ */
+static void
+utp_trace_pkt(const char *dir, const void *buf, size_t len)
+{
+	if (len < UTP_HEADER_SIZE) {
+		mbt_log_trace(MBT_LOG_UTP, "%s runt len=%zu", dir, len);
+		return;
+	}
+	const struct utp_hdr *h = buf;
+	mbt_log_trace(MBT_LOG_UTP,
+	    "%s %-5s seq=%u ack=%u wnd=%u ext=%u len=%zu",
+	    dir, utp_type_str(h->type_ver >> 4), ntohs(h->seq_nr),
+	    ntohs(h->ack_nr), ntohl(h->wnd_size), h->extension, len);
 }
 
 static struct mbt_utp_sock *
@@ -496,6 +547,10 @@ utp_sock_real_free(struct mbt_utp_sock *s)
 		mbt_ev_timer_free(s->fin_timer);
 		s->fin_timer = NULL;
 	}
+	if (s->rtx_timer) {
+		mbt_ev_timer_free(s->rtx_timer);
+		s->rtx_timer = NULL;
+	}
 	free(s->rbuf);
 	free(s->sbuf);
 	free(s->send_queue);
@@ -629,8 +684,6 @@ utp_sock_new(struct mbt_utp_ctx *ctx,
 	s->readcb     = readcb;
 	s->eventcb    = eventcb;
 	s->cb_arg     = arg;
-	s->max_window = UTP_INIT_CWND;
-	s->peer_wnd   = UTP_INIT_CWND;
 	s->timeout_ms = UTP_INIT_TIMEOUT_MS;
 	s->rbuf_watermark = 1;
 
@@ -639,6 +692,13 @@ utp_sock_new(struct mbt_utp_ctx *ctx,
 	s->queue_mask  = s->window_pkts - 1;
 	/* SACK bitmask must cover the whole window; bep 29 wants 4-byte units. */
 	s->sack_bytes  = ((s->window_pkts + 31) / 32) * 4;
+
+	/* Initial cwnd, capped to the window we can actually track. */
+	{
+		uint32_t win_bytes = s->window_pkts * UTP_MSS;
+		s->max_window = UTP_INIT_CWND < win_bytes ? UTP_INIT_CWND : win_bytes;
+		s->peer_wnd   = s->max_window;
+	}
 	/* rings hold at least one window of packets AND one whole message
 	 * (UTP_RING_MIN), so a small window never deadlocks the message reader. */
 	{
@@ -874,6 +934,15 @@ utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us)
 	int32_t our_delay  = (int32_t)(their_delay_us - s->base_delay_us);
 	if (our_delay < 0) our_delay = 0;
 	int32_t off_target = UTP_CCONTROL_TARGET - our_delay;
+	/*
+	 * Bound off_target to +/- one target. our_delay is derived from peer
+	 * timestamps and can be wildly large (clock skew, jitter, a stale or
+	 * bogus sample), which would otherwise produce a huge negative gain and
+	 * collapse the window in a single update. LEDBAT only needs the sign and
+	 * a bounded magnitude here. (utp.md item 9.)
+	 */
+	if (off_target < -UTP_CCONTROL_TARGET) off_target = -UTP_CCONTROL_TARGET;
+	if (off_target >  UTP_CCONTROL_TARGET) off_target =  UTP_CCONTROL_TARGET;
 
 	if (!s->max_window) return;
 
@@ -883,7 +952,7 @@ utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us)
 	            * ((double)in_flight / s->max_window);
 
 	int32_t nw = (int32_t)s->max_window + (int32_t)gain;
-	s->max_window = nw < UTP_MIN_PACKET_SIZE ? UTP_MIN_PACKET_SIZE : (uint32_t)nw;
+	s->max_window = nw < (int32_t)UTP_MIN_WINDOW ? UTP_MIN_WINDOW : (uint32_t)nw;
 }
 
 /* ---- retransmit timer ---- */
@@ -938,6 +1007,56 @@ utp_retransmit(struct mbt_utp_sock *s)
 	}
 }
 
+static void utp_rtx_cb(struct mbt_ev_timer *t, void *arg);
+
+/*
+ * Loss-episode gate. Pure reordering routinely SACKs several packets ahead of a
+ * gap that is not actually lost; without gating, each such ack would halve the
+ * window and trigger a retransmit, collapsing throughput under reorder (utp.md
+ * item 2). Respond to loss at most once per episode: an episode is identified by
+ * the current send_una, and loss_acted is cleared whenever send_una advances
+ * (the advance loop). Returns 1 (and halves max_window once) the first time loss
+ * is detected for a given send_una, 0 thereafter.
+ */
+static int
+utp_enter_loss(struct mbt_utp_sock *s)
+{
+	if (s->loss_acted && s->last_loss_una == s->send_una)
+		return 0;
+	s->last_loss_una = s->send_una;
+	s->loss_acted = 1;
+	s->max_window /= 2;
+	if (s->max_window < UTP_MIN_WINDOW)
+		s->max_window = UTP_MIN_WINDOW;
+	return 1;
+}
+
+/*
+ * Schedule a fast-retransmit on a 0ms timer instead of calling utp_retransmit
+ * directly from ack processing. ack processing can run synchronously inside a
+ * send (a TX hook, or any path where the peer is on the same loop), so resending
+ * inline would recurse send -> ack -> resend -> ack -> ... and blow the stack.
+ * deferring runs it on a fresh stack; the "already armed" guard also coalesces a
+ * burst of triggers into a single retransmit pass per loop turn.
+ */
+static void
+utp_schedule_retransmit(struct mbt_utp_sock *s)
+{
+	if (s->rtx_timer)
+		return;
+	mbt_ev_timer_new(s->ctx->ev, &s->rtx_timer, 0, utp_rtx_cb, s);
+}
+
+static void
+utp_rtx_cb(struct mbt_ev_timer *t, void *arg)
+{
+	struct mbt_utp_sock *s = arg;
+	s->rtx_timer = NULL;
+	mbt_ev_timer_free(t);
+	if (s->state == UTP_CS_CONNECTED && s->send_una != s->seq_nr)
+		utp_retransmit(s);
+}
+
 static void
 utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 {
@@ -965,8 +1084,8 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 	    s->send_una != s->seq_nr) {
 		/* Halve window on loss. */
 		s->max_window /= 2;
-		if (s->max_window < UTP_MIN_PACKET_SIZE)
-			s->max_window = UTP_MIN_PACKET_SIZE;
+		if (s->max_window < UTP_MIN_WINDOW)
+			s->max_window = UTP_MIN_WINDOW;
 
 		/*
 		 * Retransmit the unacked window in place (utp_retransmit resends
@@ -992,11 +1111,8 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 	/* Dup-ack detection */
 	if (peer_ack_nr == (uint16_t)(s->send_una - 1)) {
 		s->dup_acks++;
-		if (s->dup_acks >= UTP_REORDER_THRESH) {
-			s->max_window = s->max_window / 2;
-			if (s->max_window < UTP_MIN_PACKET_SIZE)
-				s->max_window = UTP_MIN_PACKET_SIZE;
-			utp_retransmit(s);
+		if (s->dup_acks >= UTP_REORDER_THRESH && utp_enter_loss(s)) {
+			utp_schedule_retransmit(s);
 			utp_arm_rto(s);
 		}
 		return;
@@ -1048,6 +1164,8 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 		s->sbuf_una = e->sbuf_off + e->len;
 		e->valid = 0;
 		s->send_una++;
+		/* forward progress -> a new loss episode may be detected */
+		s->loss_acted = 0;
 	}
 	if (s->writecb && s->sbuf_una != old_una) {
 		mbt_conn_write_cb cb = s->writecb;
@@ -1066,11 +1184,8 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 		if (e->valid && e->seq_nr == seq && e->sacked)
 			sacked_ahead++;
 	}
-	if (sacked_ahead >= UTP_REORDER_THRESH) {
-		s->max_window = s->max_window / 2;
-		if (s->max_window < UTP_MIN_PACKET_SIZE)
-			s->max_window = UTP_MIN_PACKET_SIZE;
-		utp_retransmit(s);
+	if (sacked_ahead >= UTP_REORDER_THRESH && utp_enter_loss(s)) {
+		utp_schedule_retransmit(s);
 		utp_arm_rto(s);
 	}
 
@@ -1147,9 +1262,8 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	s->reply_micro = utp_now_us32() - ntohl(h->timestamp_us);
 	s->peer_wnd    = ntohl(h->wnd_size);
 
-	mbt_log_trace(MBT_LOG_UTP,
-	    "rx DATA seq=%u ack_nr=%u plen=%zu peer_wnd=%u",
-	    pkt_seq, s->ack_nr, plen, s->peer_wnd);
+	mbt_log_trace(MBT_LOG_UTP, "  data seq=%u vs ack_nr=%u plen=%zu",
+	    pkt_seq, s->ack_nr, plen);
 
 	/* Process ACK embedded in data packet */
 	uint32_t their_delay = ntohl(h->timestamp_diff_us);
