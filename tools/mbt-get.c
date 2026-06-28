@@ -173,13 +173,16 @@ on_signal(int sig)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-dqDPSL] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "usage: %s [-dRqDPSLTU] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] <file.torrent | magnet:?...>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
+	fprintf(stderr, "  -R            enable trace logging (all components, very verbose)\n");
 	fprintf(stderr, "  -q            suppress progress output\n");
 	fprintf(stderr, "  -D            enable DHT\n");
 	fprintf(stderr, "  -L            disable LSD (Local Service Discovery)\n");
 	fprintf(stderr, "  -P            enable PCP port mapping\n");
 	fprintf(stderr, "  -S            seed after download completes\n");
+	fprintf(stderr, "  -T            disable TCP (uTP only)\n");
+	fprintf(stderr, "  -U            disable uTP (TCP only)\n");
 	fprintf(stderr, "  -l port       listen port (default: random)\n");
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
@@ -194,6 +197,9 @@ main(int argc, char *argv[])
 	int rv, ch;
 	const char *download_dir = ".";
 	int debug = 0;
+	int trace = 0;
+	int disable_tcp = 0;
+	int disable_utp = 0;
 	int no_lsd = 0;
 	int use_dht = 0;
 	int use_pcp = 0;
@@ -202,10 +208,19 @@ main(int argc, char *argv[])
 	uint64_t dl_rate = 0;
 	mbt_picker_fn picker = mbt_picker_rarest;
 
-	while ((ch = getopt(argc, argv, "dhqDPSLl:o:p:r:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "dhqDPSLRTUl:o:p:r:s:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
+			break;
+		case 'R':
+			trace = 1;
+			break;
+		case 'T':
+			disable_tcp = 1;
+			break;
+		case 'U':
+			disable_utp = 1;
 			break;
 		case 'q':
 			no_progress = 1;
@@ -266,6 +281,8 @@ main(int argc, char *argv[])
 	mbt_log_set(mbt_log_stderr, NULL);
 	if (debug)
 		mbt_log_set_debug(MBT_LOG_SESSION | MBT_LOG_TORRENT | MBT_LOG_PEER | MBT_LOG_DHT);
+	if (trace)
+		mbt_log_set_trace(MBT_LOG_ALL);
 
 	struct mbt_session_config cfg = {0};
 	rv = mbt_ev_new_default(&cfg.ev);
@@ -278,6 +295,8 @@ main(int argc, char *argv[])
 	cfg.http = curl_http_fn;
 	cfg.enable_pcp = use_pcp;
 	cfg.download_rate = dl_rate;
+	cfg.disable_tcp = disable_tcp;
+	cfg.disable_utp = disable_utp;
 	if (max_peers)
 		cfg.max_peers = max_peers;
 
