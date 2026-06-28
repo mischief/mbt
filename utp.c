@@ -34,8 +34,14 @@
 #define UTP_VERSION          1
 #define UTP_HEADER_SIZE      20
 #define UTP_MIN_PACKET_SIZE  150
-#define UTP_MAX_PACKET_SIZE  1450
-#define UTP_INIT_CWND        UTP_MAX_PACKET_SIZE
+/*
+ * UTP_MSS: payload bytes per packet. 1400 is conservative enough to avoid IP
+ * fragmentation under IPv6 (40 B) + UDP (8) + uTP (20) header overhead AND one
+ * layer of encapsulation (PPPoE -8, VLAN -4, light tunnels). fragmentation
+ * defeats LEDBAT's delay signal, so we stay well under the common 1500 MTU.
+ */
+#define UTP_MSS              1400
+#define UTP_MAX_PACKET_SIZE  UTP_MSS   /* wire payload cap == MSS */
 #define UTP_INIT_TIMEOUT_MS  1000
 #define UTP_CCONTROL_TARGET  100000   /* us target one-way delay */
 #define UTP_MAX_CWND_INC     3000     /* bytes/RTT max window increase */
@@ -45,13 +51,38 @@
 #define UTP_CONN_HASH_SIZE   (1 << UTP_CONN_HASH_BITS)
 #define UTP_FIN_WAIT_MS      4000
 
-/* ring buffer capacities -- must be powers of 2 */
-#define SBUF_CAP        (64 * 1024)
-#define RBUF_CAP        (64 * 1024)
-#define SEND_QUEUE_SIZE  64           /* power of 2 */
-#define RECV_QUEUE_SIZE  64           /* power of 2 */
-#define SEND_QUEUE_MASK  (SEND_QUEUE_SIZE - 1)
-#define RECV_QUEUE_MASK  (RECV_QUEUE_SIZE - 1)
+/*
+ * Window source of truth.
+ *
+ * One parameter -- the in-flight window in packets -- drives the send queue,
+ * the reorder queue, the SACK bitmask width, and the advertised receive window.
+ * They MUST agree: if any of them is smaller than what we advertise, a packet
+ * can land outside the SACK/reorder range, become un-ackable, and deadlock the
+ * stream (see utp.md item 1). Deriving all four from window_pkts makes that
+ * impossible by construction.
+ *
+ * window_pkts is a per-socket value resolved from session config, rounded up to
+ * a power of two (queues are masked-indexed), and clamped to [MIN, MAX].
+ */
+#define UTP_WINDOW_MIN       8        /* packets; also covers bep 29 cong. floor */
+#define UTP_WINDOW_MAX       1024
+#define UTP_WINDOW_DEFAULT   32
+#define UTP_INIT_CWND        UTP_MSS  /* initial congestion window: one packet */
+
+/*
+ * rbuf/sbuf floor, independent of the window.
+ *
+ * The peer layer reads whole messages: it sets a read watermark of the full
+ * message length, the largest being a piece block (4 len + 1 id + 4 index +
+ * 4 begin + 16384 block = 16397 B). If a ring cannot hold one whole message the
+ * reader is never woken, the ring never drains, the advertised window pins at 0
+ * and the stream deadlocks. So the rings have a fixed floor >= the largest
+ * message, decoupled from the window: a small window saves on the per-packet
+ * queues but the rings stay large enough to never deadlock the message reader.
+ */
+#define UTP_MAX_MSG          (4 + 1 + 4 + 4 + (16 * 1024))   /* 16397 */
+#define UTP_RING_MIN         (64 * 1024)                     /* pow2, >= UTP_MAX_MSG */
+_Static_assert(UTP_RING_MIN >= UTP_MAX_MSG, "ring floor must hold a full message");
 
 /* ---- packet types (high nibble of type_ver) ---- */
 #define ST_DATA   0
@@ -132,6 +163,13 @@ struct mbt_utp_sock {
 	struct sockaddr_storage peer_addr;
 	socklen_t               peer_addrlen;
 
+	/* window source of truth (resolved at sock creation) */
+	uint32_t  window_pkts;      /* in-flight window, packets (power of 2) */
+	uint32_t  queue_mask;       /* window_pkts - 1; indexes send/recv queues */
+	uint32_t  ring_cap;         /* rbuf/sbuf capacity in bytes (power of 2) */
+	uint32_t  ring_mask;        /* ring_cap - 1 */
+	uint32_t  sack_bytes;       /* SACK bitmask width covering the window */
+
 	/* recv ring buffer */
 	uint8_t  *rbuf;
 	uint32_t  rbuf_rd;          /* total bytes consumed by app (monotonic) */
@@ -144,8 +182,8 @@ struct mbt_utp_sock {
 	uint32_t  sbuf_snd;         /* total bytes sent (monotonic) */
 	uint32_t  sbuf_wr;          /* total bytes written by app (monotonic) */
 
-	struct utp_send_entry  *send_queue;   /* [SEND_QUEUE_SIZE] */
-	struct utp_recv_entry  *recv_queue;   /* [RECV_QUEUE_SIZE] */
+	struct utp_send_entry  *send_queue;   /* [window_pkts] */
+	struct utp_recv_entry  *recv_queue;   /* [window_pkts] */
 
 	mbt_conn_read_cb   readcb;
 	mbt_conn_event_cb  eventcb;
@@ -171,6 +209,8 @@ struct mbt_utp_ctx {
 	struct mbt_ev      *ev;
 	struct mbt_listener listener;
 
+	uint32_t          window_pkts;   /* resolved window for sockets on this ctx */
+
 	mbt_utp_accept_cb accept_cb;
 	void             *accept_arg;
 
@@ -195,6 +235,30 @@ static uint32_t
 utp_now_us32(void)
 {
 	return (uint32_t)(utp_now_us() & 0xFFFFFFFF);
+}
+
+/* round v up to a power of two */
+static uint32_t
+utp_pow2_ceil(uint32_t v)
+{
+	uint32_t p = 1;
+	while (p < v) p <<= 1;
+	return p;
+}
+
+/*
+ * Resolve a caller-requested window (in packets) to the value we will actually
+ * use: 0 means "library default", otherwise clamp to [MIN, MAX] and round up to
+ * a power of two so the send/recv queues can be mask-indexed.
+ */
+static uint32_t
+utp_resolve_window(uint32_t requested)
+{
+	if (requested == 0)
+		requested = UTP_WINDOW_DEFAULT;
+	if (requested < UTP_WINDOW_MIN) requested = UTP_WINDOW_MIN;
+	if (requested > UTP_WINDOW_MAX) requested = UTP_WINDOW_MAX;
+	return utp_pow2_ceil(requested);
 }
 
 static struct mbt_utp_sock *
@@ -236,7 +300,23 @@ rbuf_available(struct mbt_utp_sock *s)
 static size_t
 rbuf_space(struct mbt_utp_sock *s)
 {
-	return RBUF_CAP - rbuf_available(s);
+	return s->ring_cap - rbuf_available(s);
+}
+
+/*
+ * Advertised receive window. Must never exceed what we can both buffer (rbuf
+ * free space) AND reorder/SACK (one window of packets): if the peer is allowed
+ * more in flight than the reorder buffer or SACK bitmask can represent, a
+ * packet can land outside the window, become un-ackable, and deadlock the
+ * stream (utp.md item 1). Capping here keeps the peer's in-flight <= window_pkts
+ * by construction.
+ */
+static uint32_t
+utp_adv_wnd(struct mbt_utp_sock *s)
+{
+	uint32_t by_rbuf    = (uint32_t)rbuf_space(s);
+	uint32_t by_reorder = s->window_pkts * UTP_MSS;
+	return by_rbuf < by_reorder ? by_rbuf : by_reorder;
 }
 
 /* Copy len bytes into rbuf starting at monotonic offset rbuf_wr */
@@ -246,8 +326,8 @@ rbuf_produce(struct mbt_utp_sock *s, const void *data, size_t len)
 	const uint8_t *src = data;
 	size_t done = 0;
 	while (done < len) {
-		size_t idx = (s->rbuf_wr + done) & (RBUF_CAP - 1);
-		size_t chunk = RBUF_CAP - idx;
+		size_t idx = (s->rbuf_wr + done) & s->ring_mask;
+		size_t chunk = s->ring_cap - idx;
 		if (chunk > len - done) chunk = len - done;
 		memcpy(s->rbuf + idx, src + done, chunk);
 		done += chunk;
@@ -324,8 +404,8 @@ utp_conn_read(struct mbt_conn *c, void *buf, size_t len)
 	uint8_t *dst = buf;
 	size_t done = 0;
 	while (done < len) {
-		size_t idx = (s->rbuf_rd + done) & (RBUF_CAP - 1);
-		size_t chunk = RBUF_CAP - idx;
+		size_t idx = (s->rbuf_rd + done) & s->ring_mask;
+		size_t chunk = s->ring_cap - idx;
 		if (chunk > len - done) chunk = len - done;
 		memcpy(dst + done, s->rbuf + idx, chunk);
 		done += chunk;
@@ -343,8 +423,8 @@ sbuf_copy_in(struct mbt_utp_sock *s, uint32_t wr, const void *src, size_t len)
 	const uint8_t *p = src;
 	size_t done = 0;
 	while (done < len) {
-		size_t idx = (wr + done) & (SBUF_CAP - 1);
-		size_t chunk = SBUF_CAP - idx;
+		size_t idx = (wr + done) & s->ring_mask;
+		size_t chunk = s->ring_cap - idx;
 		if (chunk > len - done) chunk = len - done;
 		memcpy(s->sbuf + idx, p + done, chunk);
 		done += chunk;
@@ -357,7 +437,7 @@ utp_conn_write(struct mbt_conn *c, const void *buf, size_t len)
 	struct mbt_utp_sock *s = (struct mbt_utp_sock *)c;
 	if (s->state != UTP_CS_CONNECTED)
 		return -ENOTCONN;
-	uint32_t space = SBUF_CAP - (s->sbuf_wr - s->sbuf_una);
+	uint32_t space = s->ring_cap - (s->sbuf_wr - s->sbuf_una);
 	if (len > space) return -ENOBUFS;
 	sbuf_copy_in(s, s->sbuf_wr, buf, len);
 	s->sbuf_wr += (uint32_t)len;
@@ -381,7 +461,7 @@ utp_conn_writev(struct mbt_conn *c, const struct iovec *iov, int iovcnt)
 	for (int i = 0; i < iovcnt; i++)
 		total += iov[i].iov_len;
 
-	uint32_t space = SBUF_CAP - (s->sbuf_wr - s->sbuf_una);
+	uint32_t space = s->ring_cap - (s->sbuf_wr - s->sbuf_una);
 	if (total > space) return -ENOBUFS;
 
 	uint32_t wr = s->sbuf_wr;
@@ -554,13 +634,27 @@ utp_sock_new(struct mbt_utp_ctx *ctx,
 	s->timeout_ms = UTP_INIT_TIMEOUT_MS;
 	s->rbuf_watermark = 1;
 
+	/* Window source of truth: everything derives from window_pkts. */
+	s->window_pkts = utp_resolve_window(ctx ? ctx->window_pkts : 0);
+	s->queue_mask  = s->window_pkts - 1;
+	/* SACK bitmask must cover the whole window; bep 29 wants 4-byte units. */
+	s->sack_bytes  = ((s->window_pkts + 31) / 32) * 4;
+	/* rings hold at least one window of packets AND one whole message
+	 * (UTP_RING_MIN), so a small window never deadlocks the message reader. */
+	{
+		uint32_t want = s->window_pkts * UTP_MSS;
+		if (want < UTP_RING_MIN) want = UTP_RING_MIN;
+		s->ring_cap  = utp_pow2_ceil(want);
+		s->ring_mask = s->ring_cap - 1;
+	}
+
 	memcpy(&s->peer_addr, addr, addrlen);
 	s->peer_addrlen = addrlen;
 
-	s->rbuf       = malloc(RBUF_CAP);
-	s->sbuf       = malloc(SBUF_CAP);
-	s->send_queue = calloc(SEND_QUEUE_SIZE, sizeof(*s->send_queue));
-	s->recv_queue = calloc(RECV_QUEUE_SIZE, sizeof(*s->recv_queue));
+	s->rbuf       = malloc(s->ring_cap);
+	s->sbuf       = malloc(s->ring_cap);
+	s->send_queue = calloc(s->window_pkts, sizeof(*s->send_queue));
+	s->recv_queue = calloc(s->window_pkts, sizeof(*s->recv_queue));
 	if (!s->rbuf || !s->sbuf || !s->send_queue || !s->recv_queue) {
 		free(s->rbuf);
 		free(s->sbuf);
@@ -595,37 +689,40 @@ utp_do_sendto(struct mbt_utp_sock *s, const void *buf, size_t len)
 	return n < 0 ? -errno : 0;
 }
 
-/* Build SACK extension for recv_queue gaps */
+/* Build SACK extension covering the whole window. bit i = recv_queue holds
+ * ack_nr+2+i. Width is s->sack_bytes (4-byte units per bep 29), sized so every
+ * in-window out-of-order packet is representable -- without this the sender
+ * cannot learn about holes beyond the first 32 packets and the stream can
+ * deadlock (utp.md item 1). */
 static size_t
 utp_build_sack(struct mbt_utp_sock *s, uint8_t *ext_buf, size_t ext_cap)
 {
-	/* bits: bit i = recv_queue has ack_nr+2+i */
-	uint8_t bits[4] = {0, 0, 0, 0};
+	size_t nbits = s->sack_bytes * 8;
+	if (ext_cap < 2 + s->sack_bytes) return 0;
+
+	uint8_t *bits = ext_buf + 2;
+	memset(bits, 0, s->sack_bytes);
 	int any = 0;
-	for (int i = 0; i < 32; i++) {
+	for (size_t i = 0; i < nbits; i++) {
 		uint16_t seq = (uint16_t)(s->ack_nr + 2 + i);
-		struct utp_recv_entry *e = &s->recv_queue[seq & RECV_QUEUE_MASK];
+		struct utp_recv_entry *e = &s->recv_queue[seq & s->queue_mask];
 		if (e->valid && e->seq_nr == seq) {
 			bits[i / 8] |= (uint8_t)(1 << (i % 8));
 			any = 1;
 		}
 	}
 	if (!any) return 0;
-	if (ext_cap < 6) return 0;
-	ext_buf[0] = 0;    /* next extension = none */
-	ext_buf[1] = 4;    /* length of bitmask */
-	ext_buf[2] = bits[0];
-	ext_buf[3] = bits[1];
-	ext_buf[4] = bits[2];
-	ext_buf[5] = bits[3];
-	return 6;
+	ext_buf[0] = 0;                      /* next extension = none */
+	ext_buf[1] = (uint8_t)s->sack_bytes; /* bitmask length */
+	return 2 + s->sack_bytes;
 }
 
 static int
 utp_send_ack(struct mbt_utp_sock *s)
 {
-	uint8_t buf[UTP_HEADER_SIZE + 6];
-	uint8_t ext_buf[6];
+	/* ext = 2 header bytes + bitmask; bitmask <= UTP_WINDOW_MAX/8 bytes */
+	uint8_t buf[UTP_HEADER_SIZE + 2 + UTP_WINDOW_MAX / 8];
+	uint8_t ext_buf[2 + UTP_WINDOW_MAX / 8];
 	size_t ext_len = utp_build_sack(s, ext_buf, sizeof(ext_buf));
 
 	struct utp_hdr *h = (struct utp_hdr *)buf;
@@ -634,7 +731,7 @@ utp_send_ack(struct mbt_utp_sock *s)
 	h->conn_id           = htons(s->send_conn_id);
 	h->timestamp_us      = htonl(utp_now_us32());
 	h->timestamp_diff_us = htonl(s->reply_micro);
-	h->wnd_size          = htonl((uint32_t)rbuf_space(s));
+	h->wnd_size          = htonl(utp_adv_wnd(s));
 	h->seq_nr            = htons(s->seq_nr);
 	h->ack_nr            = htons(s->ack_nr);
 
@@ -662,7 +759,7 @@ utp_send_data(struct mbt_utp_sock *s, uint16_t seq,
 	h->conn_id           = htons(s->send_conn_id);
 	h->timestamp_us      = htonl(utp_now_us32());
 	h->timestamp_diff_us = htonl(s->reply_micro);
-	h->wnd_size          = htonl((uint32_t)rbuf_space(s));
+	h->wnd_size          = htonl(utp_adv_wnd(s));
 	h->seq_nr            = htons(seq);
 	h->ack_nr            = htons(s->ack_nr);
 
@@ -678,8 +775,8 @@ sbuf_copy_out(struct mbt_utp_sock *s, uint32_t off, void *dst, size_t len)
 	uint8_t *d = dst;
 	size_t done = 0;
 	while (done < len) {
-		size_t idx = (off + done) & (SBUF_CAP - 1);
-		size_t chunk = SBUF_CAP - idx;
+		size_t idx = (off + done) & s->ring_mask;
+		size_t chunk = s->ring_cap - idx;
 		if (chunk > len - done) chunk = len - done;
 		memcpy(d + done, s->sbuf + idx, chunk);
 		done += chunk;
@@ -702,13 +799,22 @@ utp_flush(struct mbt_utp_sock *s)
 		if (window < UTP_MIN_PACKET_SIZE) window = UTP_MIN_PACKET_SIZE;
 
 		uint32_t in_flight = s->sbuf_snd - s->sbuf_una;
-		if (in_flight >= window)
+		if (in_flight >= window) {
+			mbt_log_trace(MBT_LOG_UTP,
+			    "flush stop: window in_flight=%u window=%u maxw=%u peer_wnd=%u pending=%u",
+			    in_flight, window, s->max_window, s->peer_wnd,
+			    s->sbuf_wr - s->sbuf_snd);
 			break;
+		}
 
 		/* Check send queue slot available */
-		struct utp_send_entry *e = &s->send_queue[s->seq_nr & SEND_QUEUE_MASK];
-		if (e->valid)
+		struct utp_send_entry *e = &s->send_queue[s->seq_nr & s->queue_mask];
+		if (e->valid) {
+			mbt_log_trace(MBT_LOG_UTP,
+			    "flush stop: queue full seq_nr=%u send_una=%u",
+			    s->seq_nr, s->send_una);
 			break;  /* queue full */
+		}
 
 		uint32_t avail = s->sbuf_wr - s->sbuf_snd;
 		uint32_t space = window - in_flight;
@@ -801,19 +907,35 @@ utp_disarm_rto(struct mbt_utp_sock *s)
 	}
 }
 
-/* Retransmit the packet at send_una */
+/* Retransmit one packet (no bookkeeping caller-visible side effects). */
 static void
-utp_retransmit(struct mbt_utp_sock *s)
+utp_resend_entry(struct mbt_utp_sock *s, struct utp_send_entry *e)
 {
-	struct utp_send_entry *e = &s->send_queue[s->send_una & SEND_QUEUE_MASK];
-	if (!e->valid || e->seq_nr != s->send_una)
-		return;
-
 	uint8_t payload[UTP_MAX_PACKET_SIZE];
 	sbuf_copy_out(s, e->sbuf_off, payload, e->len);
 	utp_send_data(s, e->seq_nr, payload, e->len);
 	e->retransmits++;
 	e->sent_us = utp_now_us();
+}
+
+/*
+ * Fast retransmit: resend every still-unacked (valid && !sacked) packet in the
+ * window, oldest first. The old code only resent send_una, so a lost packet
+ * that was NOT the oldest unacked (a hole mid/tail-window while send_una keeps
+ * getting re-acked) was never the one retransmitted -> the gap never filled and
+ * the stream deadlocked (utp.md item 1b). Driving retransmit off the actual
+ * unacked set, now visible because SACK covers the whole window, fixes that.
+ */
+static void
+utp_retransmit(struct mbt_utp_sock *s)
+{
+	for (uint16_t seq = s->send_una;
+	     (int16_t)(seq - s->seq_nr) < 0;
+	     seq++) {
+		struct utp_send_entry *e = &s->send_queue[seq & s->queue_mask];
+		if (e->valid && e->seq_nr == seq && !e->sacked)
+			utp_resend_entry(s, e);
+	}
 }
 
 static void
@@ -831,7 +953,7 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 		h->conn_id           = htons(s->recv_conn_id);
 		h->timestamp_us      = htonl(utp_now_us32());
 		h->timestamp_diff_us = 0;
-		h->wnd_size          = htonl((uint32_t)RBUF_CAP);
+		h->wnd_size          = htonl(utp_adv_wnd(s));
 		h->seq_nr            = htons(1);
 		h->ack_nr            = 0;
 		utp_do_sendto(s, buf, UTP_HEADER_SIZE);
@@ -847,33 +969,15 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 			s->max_window = UTP_MIN_PACKET_SIZE;
 
 		/*
-		 * Retransmit the unacked window in place. seq numbers are
-		 * immutable once assigned: the receiver buffers out-of-order
-		 * packets and reports them via SACK, so it assumes a given
-		 * seq always carries the same bytes. The previous code rewound
-		 * seq_nr/sbuf_snd to send_una and re-flushed from scratch,
-		 * which re-segmented the stream against the just-halved window
-		 * and reassigned different byte ranges to already-sent (and
-		 * possibly already-SACKed) seq numbers. That desynced the
-		 * receiver -- a block arrived with the right length but wrong
-		 * bytes, then the next length prefix landed mid-payload. Resend
-		 * each still-unacked entry with its original seq and sbuf_off
-		 * instead, and leave seq_nr, sbuf_snd and the queue intact so
+		 * Retransmit the unacked window in place (utp_retransmit resends
+		 * every valid && !sacked entry with its original seq and
+		 * sbuf_off). seq numbers are immutable once assigned -- the
+		 * receiver buffers out-of-order packets and SACKs them assuming
+		 * a given seq always carries the same bytes -- so we must NOT
+		 * re-segment on resend. seq_nr/sbuf_snd/queue are left intact so
 		 * SACK bookkeeping stays valid.
 		 */
-		for (uint16_t seq = s->send_una;
-		     (int16_t)(seq - s->seq_nr) < 0;
-		     seq++) {
-			struct utp_send_entry *e =
-			    &s->send_queue[seq & SEND_QUEUE_MASK];
-			if (!e->valid || e->seq_nr != seq || e->sacked)
-				continue;
-			uint8_t payload[UTP_MAX_PACKET_SIZE];
-			sbuf_copy_out(s, e->sbuf_off, payload, e->len);
-			utp_send_data(s, e->seq_nr, payload, e->len);
-			e->retransmits++;
-			e->sent_us = utp_now_us();
-		}
+		utp_retransmit(s);
 		utp_arm_rto(s);
 	}
 }
@@ -910,7 +1014,7 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 	for (uint16_t seq = s->send_una;
 	     (int16_t)(seq - (uint16_t)(peer_ack_nr + 1)) < 0;
 	     seq++) {
-		struct utp_send_entry *e = &s->send_queue[seq & SEND_QUEUE_MASK];
+		struct utp_send_entry *e = &s->send_queue[seq & s->queue_mask];
 		if (e->valid && e->seq_nr == seq && !e->sacked) {
 			if (e->retransmits == 0) {
 				int32_t sample = (int32_t)(now - e->sent_us);
@@ -921,13 +1025,14 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 		}
 	}
 
-	/* Process SACK bitmask: bit i -> seq peer_ack_nr+2+i */
-	for (size_t bi = 0; bi < sack_len && bi < 4; bi++) {
+	/* Process SACK bitmask: bit i -> seq peer_ack_nr+2+i. honor the full
+	 * advertised bitmask (sack_len bytes), not a fixed 4. */
+	for (size_t bi = 0; bi < sack_len; bi++) {
 		uint8_t byte = sack_data[bi];
 		for (int bit = 0; bit < 8; bit++) {
 			if (byte & (1 << bit)) {
 				uint16_t seq = (uint16_t)(peer_ack_nr + 2 + bi * 8 + bit);
-				struct utp_send_entry *e = &s->send_queue[seq & SEND_QUEUE_MASK];
+				struct utp_send_entry *e = &s->send_queue[seq & s->queue_mask];
 				if (e->valid && e->seq_nr == seq)
 					e->sacked = 1;
 			}
@@ -937,7 +1042,7 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 	/* Advance send_una */
 	uint32_t old_una = s->sbuf_una;
 	while ((int16_t)(s->send_una - s->seq_nr) < 0) {
-		struct utp_send_entry *e = &s->send_queue[s->send_una & SEND_QUEUE_MASK];
+		struct utp_send_entry *e = &s->send_queue[s->send_una & s->queue_mask];
 		if (!e->valid || e->seq_nr != s->send_una || !e->sacked)
 			break;
 		s->sbuf_una = e->sbuf_off + e->len;
@@ -957,7 +1062,7 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 	for (uint16_t seq = (uint16_t)(s->send_una + 1);
 	     (int16_t)(seq - s->seq_nr) < 0;
 	     seq++) {
-		struct utp_send_entry *e = &s->send_queue[seq & SEND_QUEUE_MASK];
+		struct utp_send_entry *e = &s->send_queue[seq & s->queue_mask];
 		if (e->valid && e->seq_nr == seq && e->sacked)
 			sacked_ahead++;
 	}
@@ -1042,6 +1147,10 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	s->reply_micro = utp_now_us32() - ntohl(h->timestamp_us);
 	s->peer_wnd    = ntohl(h->wnd_size);
 
+	mbt_log_trace(MBT_LOG_UTP,
+	    "rx DATA seq=%u ack_nr=%u plen=%zu peer_wnd=%u",
+	    pkt_seq, s->ack_nr, plen, s->peer_wnd);
+
 	/* Process ACK embedded in data packet */
 	uint32_t their_delay = ntohl(h->timestamp_diff_us);
 	if (their_delay)
@@ -1066,7 +1175,7 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 		/* Cascade from recv_queue */
 		for (;;) {
 			uint16_t next = (uint16_t)(s->ack_nr + 1);
-			struct utp_recv_entry *e = &s->recv_queue[next & RECV_QUEUE_MASK];
+			struct utp_recv_entry *e = &s->recv_queue[next & s->queue_mask];
 			if (!e->valid || e->seq_nr != next)
 				break;
 			if (utp_deliver_data(s, e->data, e->len, next) < 0)
@@ -1078,14 +1187,25 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 		if (s->readcb && rbuf_available(s) >= s->rbuf_watermark)
 			s->readcb(&s->conn, s->cb_arg);
 	} else {
-		/* Out of order: buffer if slot free */
-		struct utp_recv_entry *e = &s->recv_queue[pkt_seq & RECV_QUEUE_MASK];
-		if (!e->valid) {
-			e->valid  = 1;
-			e->seq_nr = pkt_seq;
-			e->len    = (uint16_t)(plen > UTP_MAX_PACKET_SIZE
-			                     ? UTP_MAX_PACKET_SIZE : plen);
-			memcpy(e->data, payload, e->len);
+		/*
+		 * Out of order: buffer only if within the reorder window
+		 * (ack_nr, ack_nr + window_pkts]. anything further ahead would
+		 * alias a slot belonging to a different seq, so drop it -- we
+		 * advertise a window <= window_pkts (utp_adv_wnd), so a
+		 * conforming peer never sends beyond this; a packet past it is
+		 * either a misbehaving peer or stale, and dropping it (no ack
+		 * advance) just makes the peer retransmit in range.
+		 */
+		uint16_t ahead = (uint16_t)(pkt_seq - s->ack_nr);
+		if (ahead >= 1 && ahead <= s->window_pkts) {
+			struct utp_recv_entry *e = &s->recv_queue[pkt_seq & s->queue_mask];
+			if (!e->valid) {
+				e->valid  = 1;
+				e->seq_nr = pkt_seq;
+				e->len    = (uint16_t)(plen > UTP_MAX_PACKET_SIZE
+				                     ? UTP_MAX_PACKET_SIZE : plen);
+				memcpy(e->data, payload, e->len);
+			}
 		}
 	}
 
@@ -1331,7 +1451,7 @@ mbt_utp_connect(struct mbt_utp_ctx *ctx,
 	h->conn_id           = htons(s->recv_conn_id);
 	h->timestamp_us      = htonl(utp_now_us32());
 	h->timestamp_diff_us = 0;
-	h->wnd_size          = htonl((uint32_t)RBUF_CAP);
+	h->wnd_size          = htonl(utp_adv_wnd(s));
 	h->seq_nr            = htons(1);
 	h->ack_nr            = 0;
 
