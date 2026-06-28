@@ -43,6 +43,13 @@ enum {
 	PIPELINE_INIT = 4,     /* slow-start initial window */
 };
 
+/* A snubbed peer is retried after this cooldown (if it is still unchoked):
+ * un-snub on piece arrival is the fast path, but a snubbed peer is not
+ * requested from, so without a timed retry a transient stall (e.g. a uTP pipe
+ * hiccup) would strand an otherwise-good peer -- fatal when it is the only
+ * seed on a LAN. Re-arming requests lets the stall self-heal. */
+#define SNUB_RETRY_COOLDOWN 30  /* seconds */
+
 static uint64_t now_usec(void);
 
 /* Per-piece tracking (only allocated for active pieces) */
@@ -84,6 +91,7 @@ struct torrent_peer {
 	int hash_failures;     /* consecutive hash failures from this peer */
 	int failures;          /* peer penalty score (decays over time) */
 	int snubbed;           /* peer not sending data, skip in drive_peer */
+	time_t snubbed_at;     /* when we snubbed it, for recovery cooldown */
 	uint64_t bytes_from;   /* bytes received from peer in current interval */
 	uint64_t bytes_to;     /* bytes sent to peer in current interval */
 	uint64_t total_down;   /* lifetime bytes received */
@@ -532,6 +540,24 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	{
 		time_t now_t = time(NULL);
 		struct torrent_peer *tp;
+
+		/* Recovery: un-snub peers past the retry cooldown that are currently
+		 * unchoked, and re-drive them so requests flow again. Without this a
+		 * snubbed peer is never requested from, so the on-arrival un-snub can
+		 * never fire and the peer stays dead -- catastrophic when it is the
+		 * only seed. */
+		TAILQ_FOREACH(tp, &t->peers, entry) {
+			if (tp->snubbed && tp->peer && tp->failures < 10 &&
+			    !mbt_peer_choked(tp->peer) &&
+			    now_t - tp->snubbed_at >= SNUB_RETRY_COOLDOWN) {
+				tp->snubbed = 0;
+				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: snub retry (cooldown elapsed)",
+				              mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer));
+				if (tp->outstanding == 0)
+					torrent_drive_peer(t, tp);
+			}
+		}
+
 		/* First pass: identify idle 0% peers to drop (disconnect after loop
 		 * to avoid SLIST corruption from synchronous on_error removal) */
 		struct mbt_peer *idle_drop[16];
@@ -556,12 +582,18 @@ torrent_timeout_cb(struct mbt_ev_timer *timer, void *v)
 		TAILQ_FOREACH(tp, &t->peers, entry) {
 			if (tp->failures >= 10 || tp->snubbed || !tp->peer)
 				continue;
-			if ((tp->outstanding > 0 || mbt_peer_choked(tp->peer)) &&
+			/* Snub = a peer that has unchoked us and has our requests
+			 * outstanding but has gone quiet. A peer that is *choking* us is
+			 * not snubbing -- it's just not our turn -- so don't snub on
+			 * choke alone (that used to mark a briefly-choking peer dead with
+			 * no way back, since un-snub only happens on piece arrival but
+			 * snubbed peers are never re-requested). */
+			if (tp->outstanding > 0 && !mbt_peer_choked(tp->peer) &&
 			    now_t - tp->last_recv >= t->timers.snub_timeout) {
 				tp->snubbed = 1;
-				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: snubbed (%s, no data for %ds)",
+				tp->snubbed_at = now_t;
+				mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: snubbed (no response, no data for %ds)",
 				              mbt_peer_addr(tp->peer), mbt_peer_conn_port(tp->peer),
-				              mbt_peer_choked(tp->peer) ? "choked" : "no response",
 				              t->timers.snub_timeout);
 				/* Cancel outstanding requests and release owned pieces */
 				{
