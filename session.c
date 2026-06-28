@@ -1289,6 +1289,15 @@ mbt_session_torrent_next(struct mbt_session *s, struct mbt_torrent *after)
 	return NULL;
 }
 
+static const char *mbt_fallback_trackers[] = {
+	"udp://tracker.opentrackr.org:1337/announce",
+	"udp://open.demonii.com:1337/announce",
+	"udp://tracker.openbittorrent.com:6969/announce",
+	"udp://exodus.desync.com:6969/announce",
+	"udp://tracker.torrent.eu.org:451/announce",
+	NULL,
+};
+
 int
 mbt_session_add_tracker(struct mbt_session *s, struct mbt_torrent *t, const char *url)
 {
@@ -1305,6 +1314,13 @@ mbt_session_add_tracker(struct mbt_session *s, struct mbt_torrent *t, const char
 		return 0;
 	}
 	return -ENOENT;
+}
+
+void
+mbt_session_add_tracker_fallbacks(struct mbt_session *s, struct mbt_torrent *t)
+{
+	for (int i = 0; mbt_fallback_trackers[i]; i++)
+		mbt_session_add_tracker(s, t, mbt_fallback_trackers[i]);
 }
 
 int

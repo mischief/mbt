@@ -302,18 +302,9 @@ main(int argc, char *argv[])
 	}
 
 	/* Inject fallback public trackers */
-	static const char *fallback_trackers[] = {
-		"udp://tracker.opentrackr.org:1337/announce",
-		"udp://open.demonii.com:1337/announce",
-		"udp://tracker.openbittorrent.com:6969/announce",
-		"udp://exodus.desync.com:6969/announce",
-		"udp://tracker.torrent.eu.org:451/announce",
-	};
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
-	if (t) {
-		for (size_t i = 0; i < sizeof(fallback_trackers)/sizeof(*fallback_trackers); i++)
-			mbt_session_add_tracker(session, t, fallback_trackers[i]);
-	}
+	if (t)
+		mbt_session_add_tracker_fallbacks(session, t);
 
 	/* Set callbacks on the torrent */
 	if (t) {

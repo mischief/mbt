@@ -91,6 +91,7 @@ MBT_API struct mbt_torrent *mbt_session_torrent_next(struct mbt_session *s, stru
 MBT_API int mbt_session_torrent_tracker_count(struct mbt_session *s, struct mbt_torrent *t);
 MBT_API const char *mbt_session_torrent_tracker(struct mbt_session *s, struct mbt_torrent *t, int idx);
 MBT_API int mbt_session_add_tracker(struct mbt_session *s, struct mbt_torrent *t, const char *url);
+MBT_API void mbt_session_add_tracker_fallbacks(struct mbt_session *s, struct mbt_torrent *t);
 
 /* Peer discovery — enable/disable sources */
 MBT_API int mbt_session_enable_lsd(struct mbt_session *s);
