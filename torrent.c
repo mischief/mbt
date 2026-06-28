@@ -1299,6 +1299,9 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 		return;
 	if (t->have_count == t->piece_count)
 		return; /* complete — nothing to request */
+	struct mbt_bitmap *drive_bf = mbt_peer_bitfield(tp->peer);
+	if (!drive_bf || mbt_bitmap_count(drive_bf) == 0)
+		return; /* peer has nothing — HAVE_NONE or no bitfield yet */
 
 	/* Throttle requests if download rate exceeded */
 	uint64_t d1 = mbt_ratelimit_delay(t->download_limit, BLOCK_SIZE);
@@ -2047,28 +2050,15 @@ mbt_picker_rarest_bucket(struct mbt_torrent *t, void *peer, void *ctx)
 	if (mbt_torrent_have_count(t) == 0)
 		return mbt_picker_random(t, peer, ctx);
 
-	int skip_have = 0, skip_peer = 0, skip_full = 0, total = 0;
-	uint32_t first_peer_fail = UINT32_MAX;
 	for (int b = 0; b < t->avail_buckets_n; b++) {
 		struct piece_entry *e;
 		LIST_FOREACH(e, &t->avail_buckets[b], bucket_entry) {
 			uint32_t piece = (uint32_t)(e - t->piece_entries);
-			total++;
-			if (mbt_torrent_has_piece(t, piece)) { skip_have++; continue; }
-			if (mbt_bitmap_isset(peer_bits, piece) <= 0) {
-				if (first_peer_fail == UINT32_MAX) first_peer_fail = piece;
-				skip_peer++; continue;
-			}
-			if (mbt_torrent_piece_fully_requested(t, piece)) { skip_full++; continue; }
+			if (mbt_torrent_has_piece(t, piece)) continue;
+			if (mbt_bitmap_isset(peer_bits, piece) <= 0) continue;
+			if (mbt_torrent_piece_fully_requested(t, piece)) continue;
 			return (int)piece;
 		}
 	}
-	mbt_log_debug(MBT_LOG_TORRENT,
-	              "picker -1: total=%d skip_have=%d skip_peer=%d(first=%u,bits=%zu,isset=%d) skip_full=%d",
-	              total, skip_have, skip_peer,
-	              first_peer_fail,
-	              peer_bits ? mbt_bitmap_bits(peer_bits) : 0,
-	              first_peer_fail != UINT32_MAX ? mbt_bitmap_isset(peer_bits, first_peer_fail) : -99,
-	              skip_full);
 	return -1;
 }
