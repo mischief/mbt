@@ -45,8 +45,9 @@
 #define UTP_MSS              1400
 #define UTP_MAX_PACKET_SIZE  UTP_MSS   /* wire payload cap == MSS */
 #define UTP_INIT_TIMEOUT_MS  1000
-#define UTP_CCONTROL_TARGET  100000   /* us target one-way delay */
-#define UTP_MAX_CWND_INC     3000     /* bytes/RTT max window increase */
+#define UTP_CCONTROL_TARGET  100000   /* us target one-way delay (RFC 6817 TARGET) */
+#define UTP_LEDBAT_GAIN      1        /* RFC 6817 GAIN, MUST be <= 1 */
+#define UTP_ALLOWED_INCREASE 1        /* RFC 6817 ALLOWED_INCREASE, in MSS */
 #define UTP_REORDER_THRESH   3
 #define UTP_BASE_DELAY_HIST  120      /* seconds */
 #define UTP_CONN_HASH_BITS   6
@@ -968,7 +969,8 @@ utp_update_rtt(struct mbt_utp_sock *s, int32_t sample_us)
 }
 
 static void
-utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us)
+utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us,
+                  uint32_t bytes_newly_acked, uint32_t flightsize)
 {
 	uint64_t now = utp_now_us_c(s);
 	if (s->base_delay_us == 0 || their_delay_us < s->base_delay_us ||
@@ -982,22 +984,44 @@ utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us)
 	/*
 	 * Bound off_target to +/- one target. our_delay is derived from peer
 	 * timestamps and can be wildly large (clock skew, jitter, a stale or
-	 * bogus sample), which would otherwise produce a huge negative gain and
-	 * collapse the window in a single update. LEDBAT only needs the sign and
-	 * a bounded magnitude here. (utp.md item 9.)
+	 * bogus sample), which would otherwise produce a huge swing in a single
+	 * update. LEDBAT only needs the sign and a bounded magnitude here.
 	 */
 	if (off_target < -UTP_CCONTROL_TARGET) off_target = -UTP_CCONTROL_TARGET;
 	if (off_target >  UTP_CCONTROL_TARGET) off_target =  UTP_CCONTROL_TARGET;
 
-	if (!s->max_window) return;
+	if (!s->max_window || bytes_newly_acked == 0)
+		return;
 
-	uint32_t in_flight = s->sbuf_snd - s->sbuf_una;
-	double gain = (double)UTP_MAX_CWND_INC
-	            * ((double)off_target / UTP_CCONTROL_TARGET)
-	            * ((double)in_flight / s->max_window);
+	/*
+	 * RFC 6817 sec 2.4.2:
+	 *   off_target_norm = (TARGET - queuing_delay) / TARGET   in [-1, 1]
+	 *   cwnd += GAIN * off_target_norm * bytes_newly_acked * MSS / cwnd
+	 *   cwnd  = min(cwnd, flightsize + ALLOWED_INCREASE * MSS)
+	 *   cwnd  = max(cwnd, MIN_CWND * MSS)
+	 *
+	 * The flightsize-based clamp (not an absolute per-RTT byte cap) is what
+	 * bounds growth: cwnd may exceed what was actually in flight last RTT by
+	 * at most ALLOWED_INCREASE MSS, so it tracks real usage and ramps as the
+	 * pipe fills. Our previous code instead scaled the increase by
+	 * (in_flight/max_window) and capped it at a fixed 3000 B/RTT, which
+	 * throttled the ramp to a crawl and pinned throughput at a few MB/s.
+	 */
+	double off_norm = (double)off_target / UTP_CCONTROL_TARGET;
+	double inc = (double)UTP_LEDBAT_GAIN * off_norm
+	           * ((double)bytes_newly_acked * UTP_MSS / (double)s->max_window);
 
-	int32_t nw = (int32_t)s->max_window + (int32_t)gain;
-	s->max_window = nw < (int32_t)UTP_MIN_WINDOW ? UTP_MIN_WINDOW : (uint32_t)nw;
+	int64_t cwnd = (int64_t)s->max_window + (int64_t)inc;
+
+	int64_t max_allowed = (int64_t)flightsize + (int64_t)UTP_ALLOWED_INCREASE * UTP_MSS;
+	if (cwnd > max_allowed)
+		cwnd = max_allowed;
+	if (cwnd < (int64_t)UTP_MIN_WINDOW)
+		cwnd = UTP_MIN_WINDOW;
+	if (cwnd > (int64_t)(s->window_pkts * UTP_MSS))
+		cwnd = s->window_pkts * UTP_MSS;   /* never exceed the configured ceiling */
+
+	s->max_window = (uint32_t)cwnd;
 }
 
 /* ---- retransmit timer ---- */
@@ -1264,9 +1288,14 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 		utp_arm_rto(s);
 	}
 
-	/* LEDBAT */
-	if (their_delay_us)
-		utp_ledbat_update(s, their_delay_us);
+	/* LEDBAT (RFC 6817). bytes_newly_acked = how much send_una advanced this
+	 * ack; flightsize = bytes outstanding before this ack (sent minus the
+	 * previously-acked offset). */
+	if (their_delay_us) {
+		uint32_t newly_acked = s->sbuf_una - old_una;
+		uint32_t flightsize  = s->sbuf_snd - old_una;
+		utp_ledbat_update(s, their_delay_us, newly_acked, flightsize);
+	}
 
 	/* Rearm or disarm RTO */
 	if (s->send_una != s->seq_nr)
@@ -1350,10 +1379,9 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	mbt_log_trace(MBT_LOG_UTP, "  data seq=%u vs ack_nr=%u plen=%zu",
 	    pkt_seq, s->ack_nr, plen);
 
-	/* Process ACK embedded in data packet */
+	/* Process ACK embedded in data packet. The LEDBAT cwnd update happens
+	 * inside utp_process_ack, where bytes_newly_acked is known. */
 	uint32_t their_delay = ntohl(h->timestamp_diff_us);
-	if (their_delay)
-		utp_ledbat_update(s, their_delay);
 	utp_process_ack(s, ntohs(h->ack_nr), their_delay, NULL, 0);
 
 	/* Duplicate: already delivered */
