@@ -96,7 +96,7 @@ peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 	mbt_pack_end(&pk);
 
 	struct iovec iov[2] = {
-		{ .iov_base = prefix,            .iov_len = sizeof(prefix) },
+		{ .iov_base = (void *)prefix,    .iov_len = sizeof(prefix) },
 		{ .iov_base = (void *)buf,       .iov_len = len },
 	};
 	ssize_t rv = mbt_conn_writev(p->conn, iov, 2);
@@ -1114,7 +1114,7 @@ mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	mbt_pack_end(&pk);
 
 	struct iovec iov[2] = {
-		{ .iov_base = hdr,          .iov_len = sizeof(hdr) },
+		{ .iov_base = (void *)hdr,  .iov_len = sizeof(hdr) },
 		{ .iov_base = (void *)data, .iov_len = len },
 	};
 	ssize_t rv = mbt_conn_writev(p->conn, iov, 2);
