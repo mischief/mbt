@@ -105,7 +105,8 @@ main(void)
 	assert(l.cwnd == MSS);
 
 	/* 5. The LAN case: tiny flightsize per ack. This reproduces the field
-	 *    pinning -- documents current behaviour. */
+	 *    pinning -- documents current behaviour. No assertion: the purpose is
+	 *    to record what cwnd ends up at when flightsize is always 1 MSS. */
 	uint32_t drained = sim_drained(0, 1000);
 	printf("drained (flightsize=1 MSS, 1000 acks): cwnd=%u\n", drained);
 
@@ -173,6 +174,178 @@ main(void)
 		assert(sl.ssthresh == 50 * MSS);
 		assert(sl.cwnd == 50 * MSS);
 		printf("loss-in-ss: ssthresh=%u cwnd=%u\n", sl.ssthresh, sl.cwnd);
+	}
+
+	/*
+	 * 9. RTT estimator: first sample sets baseline; subsequent samples
+	 *    apply exponential smoothing. Also verify the RTO floor at 500 ms.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, INIT, MINW, MAXW, MSS);
+		assert(sl.rtt_us == 0);
+		assert(sl.rtt_var_us == 0);
+		/* First sample: 10 ms RTT */
+		ledbat_on_rtt_sample(&sl, 10000);
+		assert(sl.rtt_us == 10000);
+		assert(sl.rtt_var_us == 5000);      /* sample / 2 */
+		assert(sl.timeout_ms == 500);       /* 10+5*4=30ms -> floors to 500 */
+		/* Second sample: 14 ms -> delta = |10000 - 14000| = 4000 */
+		ledbat_on_rtt_sample(&sl, 14000);
+		/* rtt_var += (4000 - 5000)/4 = 5000 - 250 = 4750 */
+		assert(sl.rtt_var_us == 4750);
+		/* rtt += (14000 - 10000)/8 = 10000 + 500 = 10500 */
+		assert(sl.rtt_us == 10500);
+		/* Third sample: 8 ms */
+		ledbat_on_rtt_sample(&sl, 8000);
+		assert(sl.rtt_us > 0);
+		assert(sl.rtt_var_us > 0);
+		/* RTO = (rtt + var*4)/1000, must stay >= 500 */
+		assert(sl.timeout_ms >= 500);
+		/* Large RTT: feed several samples to let 1/8 smoothing converge.
+		 * Use 800ms RTT so rto = rtt + 4*var exceeds the 500ms floor.
+		 * (With 200ms RTT, var converges to 0 and rto floors at 500 forever.) */
+		for (int i = 0; i < 20; i++)
+			ledbat_on_rtt_sample(&sl, 800000);  /* 800 ms */
+		assert(sl.rtt_us > 500000);           /* smoothed RTT > 500 ms */
+		assert(sl.timeout_ms > 500);          /* RTO above floor */
+		fprintf(stderr, "rtt_estimator: rtt=%d var=%d rto=%d\n",
+		        sl.rtt_us, sl.rtt_var_us, sl.timeout_ms);
+	}
+
+	/*
+	 * 10. Base-delay reset: after LEDBAT_BASE_HIST_S (120 s) the base delay
+	 *     expires and a newer (lower) delay sample can replace it.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, INIT, MINW, MAXW, MSS);
+		uint64_t now = 0;
+		/* Establish a 100 ms base delay */
+		for (int a = 0; a < 10; a++, now += 1000)
+			ledbat_on_ack(&sl, 100000, MSS, INIT, now);
+		assert(sl.base_delay_us == 100000);
+		/* Advance 121 s (> 120 s window); now a lower delay should replace base */
+		now += (uint64_t)(LEDBAT_BASE_HIST_S + 1) * 1000000;
+		ledbat_on_ack(&sl, 5000, MSS, INIT, now);
+		assert(sl.base_delay_us == 5000);
+		fprintf(stderr, "base_reset: base_delay %u -> %u after 121s gap\n",
+		        100000, sl.base_delay_us);
+	}
+
+	/*
+	 * 11. Loss at min_cwnd: cwnd stays at floor, but ssthresh still updates.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, MSS, MINW, MAXW, MSS);  /* init == min */
+		assert(sl.cwnd == MSS);
+		ledbat_on_loss(&sl);
+		assert(sl.cwnd == MSS);         /* clamped at floor */
+		assert(sl.ssthresh == MSS);     /* ssthresh = MSS/2 -> clamped to min */
+		assert(sl.slow_start == 0);
+		printf("loss-at-min: cwnd=%u ssthresh=%u (both == min)\n",
+		       sl.cwnd, sl.ssthresh);
+	}
+
+	/*
+	 * 12. Timeout at min_cwnd: re-enters slow-start, cwnd stays at floor.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, MSS, MINW, MAXW, MSS);
+		ledbat_on_timeout(&sl);
+		assert(sl.cwnd == MSS);         /* clamped at floor */
+		assert(sl.slow_start == 1);     /* re-enter slow-start */
+		assert(sl.ssthresh == MSS);     /* half of MSS -> clamped to min */
+		printf("timeout-at-min: cwnd=%u ss=%d ssthresh=%u\n",
+		       sl.cwnd, sl.slow_start, sl.ssthresh);
+	}
+
+	/*
+	 * 13. Additive steady-state convergence: after slow-start exits, with
+	 *     zero queuing delay, cwnd should grow by ~1 MSS per RTT. Skip
+	 *     slow-start (it would just hit max_cwnd) and start in additive mode.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, INIT, MINW, MAXW, MSS);
+		sl.slow_start = 0;              /* test additive directly */
+		sl.ssthresh = INIT;
+		uint64_t now = 0;
+		for (int r = 0; r < 100; r++) {
+			uint32_t window = sl.cwnd;
+			int acks = window / MSS;
+			if (acks < 1) acks = 1;
+			for (int a = 0; a < acks; a++)
+				ledbat_on_ack(&sl, 0, MSS, window, now);
+			now += 1000;
+		}
+		uint32_t additive_growth = sl.cwnd - INIT;
+		/* With GAIN=1 and zero delay, each RTT adds ~1 MSS. Over 100 RTTs
+		 * we expect at least 20 MSS of growth (generous lower bound) but
+		 * not an explosion. */
+		fprintf(stderr, "additive: cwnd=%u growth=%u (%u pkts)\n",
+		        sl.cwnd, additive_growth, additive_growth / MSS);
+		assert(additive_growth >= 20 * MSS);
+		assert(additive_growth <= 200 * MSS);
+	}
+
+	/*
+	 * 14. Multiple losses in succession: each loss halves ssthresh (TCP-style).
+	 *     Verify the halving chain converges to min_cwnd floor. Use a start
+	 *     value that cleanly halves: 64 MSS -> 32 -> 16 -> 8 -> 4 -> 2 -> 1.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, 64 * MSS, MINW, MAXW, MSS);
+		sl.slow_start = 0;
+		sl.ssthresh = 64 * MSS;
+		uint32_t expect[] = {32, 16, 8, 4, 2, 1};  /* MSS units */
+		for (int k = 0; k < 6; k++) {
+			ledbat_on_loss(&sl);
+			uint32_t exp_cwnd = expect[k] * MSS;
+			if (exp_cwnd < MINW) exp_cwnd = MINW;
+			if (g_trace)
+				fprintf(stderr, "  loss %d: cwnd=%u ssthresh=%u (expect %u)\n",
+				        k + 1, sl.cwnd, sl.ssthresh, exp_cwnd);
+			assert(sl.ssthresh == exp_cwnd);
+			assert(sl.cwnd == exp_cwnd);
+		}
+		/* After 6 halvings from 64 MSS: at floor */
+		assert(sl.cwnd == MINW);
+		assert(sl.ssthresh == MINW);
+		printf("multi-loss: 6 consecutive losses from 64 MSS -> cwnd=%u (floor)\n",
+		       sl.cwnd);
+	}
+
+	/*
+	 * 15. Slow-start re-enters after reaching ssthresh following a loss:
+	 *     timeout sets ss=1, then ramp should exit ss when hitting ssthresh.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, 100 * MSS, MINW, MAXW, MSS);
+		ledbat_on_timeout(&sl);  /* cwnd = MSS, ssthresh = 50 MSS, ss = 1 */
+		assert(sl.slow_start == 1);
+		assert(sl.ssthresh == 50 * MSS);
+		assert(sl.cwnd == MSS);
+		/* Ramp exponentially until ssthresh */
+		uint64_t now = 0;
+		for (int r = 0; r < 20; r++) {
+			uint32_t window = sl.cwnd;
+			int acks = window / MSS;
+			if (acks < 1) acks = 1;
+			for (int a = 0; a < acks; a++)
+				ledbat_on_ack(&sl, 0, MSS, window, now);
+			if (sl.slow_start == 0) break;
+			now += 1000;
+		}
+		/* Should have exited slow-start at or before ssthresh */
+		fprintf(stderr, "ss-reenter: exited ss=%d cwnd=%u ssthresh=%u\n",
+		        sl.slow_start, sl.cwnd, sl.ssthresh);
+		assert(sl.slow_start == 0);
+		assert(sl.cwnd >= sl.ssthresh);
 	}
 
 	printf("ledbat tests done\n");
