@@ -155,3 +155,10 @@ test('utp', utp_test, timeout: 30, suite: 'utp')
 utp_robust_test = executable('utp_robust_test', 'utp_robust_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('utp_robust', utp_robust_test, timeout: 60, suite: 'utp')
+
+# >4 GiB one-way transfer to exercise the 2^32 byte-counter wrap. Slow (modest
+# uTP loopback throughput), so it lives in the 'slow' suite, excluded from the
+# default run; invoke with: meson test -C build --suite slow utp_throughput
+utp_throughput_test = executable('utp_throughput_test', 'utp_throughput_test.c',
+  link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('utp_throughput', utp_throughput_test, timeout: 900, suite: 'slow')

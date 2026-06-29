@@ -865,7 +865,14 @@ utp_flush(struct mbt_utp_sock *s)
 		return 0;
 
 	for (;;) {
-		if (s->sbuf_wr <= s->sbuf_snd)
+		/* Nothing left to send? Use equality, not sbuf_wr <= sbuf_snd: these
+		 * are monotonic uint32 byte counters that wrap at 2^32 (~4 GiB on a
+		 * long-lived connection). After a wrap sbuf_wr can be numerically
+		 * less than sbuf_snd while data is still pending, and a <= test would
+		 * wrongly stop the sender forever (observed: a uTP transfer wedging at
+		 * ~4000 MB). The pending amount (sbuf_wr - sbuf_snd) is wrap-safe and
+		 * always < ring_cap, so equality is the correct "empty" test. */
+		if (s->sbuf_wr == s->sbuf_snd)
 			break;
 
 		uint32_t window = s->max_window < s->peer_wnd
