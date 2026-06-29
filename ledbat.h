@@ -13,6 +13,15 @@
  * once-per-loss-episode guard) stays in utp.c, which calls ledbat_on_loss()
  * when it decides a loss episode has begun.
  *
+ * RFC 6817's controller (sec 2.4.2) is additive-increase only: it ramps at
+ * ~+1 MSS/RTT, which takes hundreds of RTTs to reach the bandwidth-delay
+ * product on a fast/low-RTT path. The RFC mentions slow-start only as an
+ * optional MAY; libutp (the BEP 29 reference) adds a TCP-style exponential
+ * slow-start on top, which is what lets real uTP peers reach line rate
+ * quickly. We do the same: grow cwnd by bytes_acked per ack (doubling per RTT)
+ * until queuing delay first reaches TARGET (or a loss/timeout), then fall into
+ * the RFC additive controller for the polite steady state.
+ *
  * Units: bytes for windows, microseconds for delay/RTT, milliseconds for the
  * timeout. now_us is a monotonic clock in microseconds (the caller's).
  */
@@ -33,6 +42,9 @@ struct ledbat {
 
 	uint32_t base_delay_us;   /* sliding-min one-way delay baseline */
 	uint64_t base_delay_ts_us;/* when base_delay was last (re)set */
+
+	int      slow_start;      /* 1 while ramping exponentially (TCP-style) */
+	uint32_t ssthresh;        /* cwnd at which to leave slow-start, bytes */
 
 	int32_t  rtt_us;
 	int32_t  rtt_var_us;

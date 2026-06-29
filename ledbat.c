@@ -19,6 +19,8 @@ ledbat_init(struct ledbat *l, uint32_t init_cwnd, uint32_t min_cwnd,
 	l->mss             = mss;
 	l->base_delay_us   = 0;
 	l->base_delay_ts_us= 0;
+	l->slow_start      = 1;          /* start in exponential ramp */
+	l->ssthresh        = max_cwnd;   /* no threshold yet; ceiling caps us */
 	l->rtt_us          = 0;
 	l->rtt_var_us      = 0;
 	l->timeout_ms      = 1000;
@@ -58,6 +60,28 @@ ledbat_on_ack(struct ledbat *l, uint32_t their_delay_us,
 		return;
 
 	/*
+	 * Slow-start (RFC 6817 sec 2.4.2 MAY; libutp de-facto): ramp cwnd
+	 * exponentially -- +bytes_acked per ack == doubling per RTT -- until the
+	 * queuing delay first reaches TARGET (the pipe is full) or we hit ssthresh.
+	 * Then hand off to the additive controller below for the polite steady
+	 * state. This reaches the BDP in ~log2(BDP/IW) RTTs instead of the
+	 * additive controller's ~BDP/MSS RTTs.
+	 */
+	if (l->slow_start) {
+		if (our_delay >= LEDBAT_TARGET_US || l->cwnd >= l->ssthresh) {
+			l->slow_start = 0;
+			l->ssthresh   = l->cwnd;
+			/* fall through to additive for this ack */
+		} else {
+			uint64_t cwnd = (uint64_t)l->cwnd + bytes_acked;
+			if (cwnd > l->max_cwnd)
+				cwnd = l->max_cwnd;
+			l->cwnd = (uint32_t)cwnd;
+			return;
+		}
+	}
+
+	/*
 	 * RFC 6817 sec 2.4.2:
 	 *   off_target_norm = (TARGET - queuing_delay) / TARGET   in [-1, 1]
 	 *   cwnd += GAIN * off_target_norm * bytes_acked * MSS / cwnd
@@ -93,6 +117,11 @@ ledbat_on_ack(struct ledbat *l, uint32_t their_delay_us,
 void
 ledbat_on_loss(struct ledbat *l)
 {
+	/* leave slow-start; remember half the window as the new threshold */
+	l->slow_start = 0;
+	l->ssthresh   = l->cwnd / 2;
+	if (l->ssthresh < l->min_cwnd)
+		l->ssthresh = l->min_cwnd;
 	l->cwnd /= 2;
 	if (l->cwnd < l->min_cwnd)
 		l->cwnd = l->min_cwnd;
@@ -101,6 +130,13 @@ ledbat_on_loss(struct ledbat *l)
 void
 ledbat_on_timeout(struct ledbat *l)
 {
+	/* severe signal: drop to 1 MSS and re-enter slow-start, ramping back to
+	 * half the pre-timeout window (TCP RTO behavior). */
+	uint32_t half = l->cwnd / 2;
+	if (half < l->min_cwnd)
+		half = l->min_cwnd;
+	l->ssthresh   = half;
+	l->slow_start = 1;
 	l->cwnd = l->mss;
 	if (l->cwnd < l->min_cwnd)
 		l->cwnd = l->min_cwnd;

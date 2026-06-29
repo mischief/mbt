@@ -109,6 +109,72 @@ main(void)
 	uint32_t drained = sim_drained(0, 1000);
 	printf("drained (flightsize=1 MSS, 1000 acks): cwnd=%u\n", drained);
 
+	/*
+	 * 6. Slow-start reaches a high window in a LOGARITHMIC number of RTTs.
+	 *    With exponential growth (doubling per RTT) from IW10, a 768-pkt
+	 *    target should take ~log2(768/10) ~= 7 RTTs, vs ~750 for additive.
+	 *    Assert we get there in well under 20 RTTs.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, INIT, MINW, MAXW, MSS);
+		uint64_t now = 0;
+		int rtts_to_target = -1;
+		for (int r = 0; r < 40; r++) {
+			uint32_t window = sl.cwnd;
+			int acks = window / MSS;
+			if (acks < 1) acks = 1;
+			for (int a = 0; a < acks; a++)
+				ledbat_on_ack(&sl, /*delay*/ 0, MSS, window, now);
+			if (g_trace && r < 15)
+				fprintf(stderr, "  ss rtt %2d: cwnd=%u (%u pkts) ss=%d\n",
+				        r, sl.cwnd, sl.cwnd / MSS, sl.slow_start);
+			if (rtts_to_target < 0 && sl.cwnd >= 768 * MSS)
+				rtts_to_target = r + 1;
+			now += 1000;
+		}
+		fprintf(stderr, "slow-start: reached 768 pkts in %d rtts (cwnd=%u)\n",
+		        rtts_to_target, sl.cwnd);
+		assert(rtts_to_target > 0 && rtts_to_target < 20);
+	}
+
+	/*
+	 * 7. Slow-start EXITS when queuing delay reaches TARGET, handing off to
+	 *    the additive controller (no more doubling). Establish a low base,
+	 *    then feed delay >= TARGET and confirm slow_start clears and the
+	 *    window stops exploding.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, INIT, MINW, MAXW, MSS);
+		uint64_t now = 0;
+		/* low base delay, a few exponential steps */
+		for (int a = 0; a < 5; a++, now += 1000)
+			ledbat_on_ack(&sl, /*base*/ 2000, MSS, sl.cwnd, now);
+		assert(sl.slow_start == 1);
+		uint32_t before = sl.cwnd;
+		/* now queuing delay == base + TARGET -> our_delay == TARGET -> exit */
+		ledbat_on_ack(&sl, 2000 + LEDBAT_TARGET_US, MSS, sl.cwnd, now);
+		fprintf(stderr, "slow-start exit: ss=%d ssthresh=%u cwnd %u->%u\n",
+		        sl.slow_start, sl.ssthresh, before, sl.cwnd);
+		assert(sl.slow_start == 0);        /* exited slow-start */
+		assert(sl.ssthresh == before);     /* threshold pinned at exit window */
+	}
+
+	/*
+	 * 8. Loss during slow-start exits it and sets ssthresh = cwnd/2.
+	 */
+	{
+		struct ledbat sl;
+		ledbat_init(&sl, 100 * MSS, MINW, MAXW, MSS);
+		assert(sl.slow_start == 1);
+		ledbat_on_loss(&sl);
+		assert(sl.slow_start == 0);
+		assert(sl.ssthresh == 50 * MSS);
+		assert(sl.cwnd == 50 * MSS);
+		printf("loss-in-ss: ssthresh=%u cwnd=%u\n", sl.ssthresh, sl.cwnd);
+	}
+
 	printf("ledbat tests done\n");
 	return 0;
 }
