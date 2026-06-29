@@ -455,11 +455,6 @@ on_resize(int sig)
 static void
 do_resize(void)
 {
-	endwin();
-	refresh();
-
-	/* Use ioctl directly — LINES/COLS may not update until after resizeterm
-	 * on some ncurses implementations, so compute layout from ws ourselves. */
 	struct winsize ws;
 	int rows, cols;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
