@@ -18,6 +18,7 @@
 #include "mbt/log.h"
 #include "net.h"
 #include "udp_mux.h"
+#include "ledbat.h"
 #include "internal.h"
 
 #include <stdlib.h>
@@ -44,12 +45,7 @@
  */
 #define UTP_MSS              1400
 #define UTP_MAX_PACKET_SIZE  UTP_MSS   /* wire payload cap == MSS */
-#define UTP_INIT_TIMEOUT_MS  1000
-#define UTP_CCONTROL_TARGET  100000   /* us target one-way delay (RFC 6817 TARGET) */
-#define UTP_LEDBAT_GAIN      1        /* RFC 6817 GAIN, MUST be <= 1 */
-#define UTP_ALLOWED_INCREASE 1        /* RFC 6817 ALLOWED_INCREASE, in MSS */
 #define UTP_REORDER_THRESH   3
-#define UTP_BASE_DELAY_HIST  120      /* seconds */
 #define UTP_CONN_HASH_BITS   6
 #define UTP_CONN_HASH_SIZE   (1 << UTP_CONN_HASH_BITS)
 #define UTP_FIN_WAIT_MS      4000
@@ -175,17 +171,10 @@ struct mbt_utp_sock {
 	/* recv sequence */
 	uint16_t     ack_nr;        /* last in-order seq received */
 
-	/* congestion */
-	uint32_t     max_window;
-	uint32_t     peer_wnd;
-
-	/* RTT / LEDBAT */
-	int32_t  rtt_us;
-	int32_t  rtt_var_us;
-	int32_t  timeout_ms;
-	uint32_t reply_micro;
-	uint32_t base_delay_us;
-	uint64_t base_delay_ts_us;
+	/* congestion control (RFC 6817 LEDBAT) -- see ledbat.h */
+	struct ledbat ledbat;       /* cwnd, base-delay, rtt/timeout */
+	uint32_t     peer_wnd;      /* peer's advertised receive window */
+	uint32_t     reply_micro;   /* our latest one-way delay sample to echo back */
 
 	struct sockaddr_storage peer_addr;
 	socklen_t               peer_addrlen;
@@ -732,7 +721,6 @@ utp_sock_new(struct mbt_utp_ctx *ctx,
 	s->readcb     = readcb;
 	s->eventcb    = eventcb;
 	s->cb_arg     = arg;
-	s->timeout_ms = UTP_INIT_TIMEOUT_MS;
 	s->rbuf_watermark = 1;
 
 	/* Window source of truth: everything derives from window_pkts. */
@@ -741,11 +729,13 @@ utp_sock_new(struct mbt_utp_ctx *ctx,
 	/* SACK bitmask must cover the whole window; bep 29 wants 4-byte units. */
 	s->sack_bytes  = ((s->window_pkts + 31) / 32) * 4;
 
-	/* Initial cwnd, capped to the window we can actually track. */
+	/* Congestion control: initial cwnd IW10 capped to the configured window;
+	 * floor 1 MSS; ceiling = the whole window we can track. */
 	{
-		uint32_t win_bytes = s->window_pkts * UTP_MSS;
-		s->max_window = UTP_INIT_CWND < win_bytes ? UTP_INIT_CWND : win_bytes;
-		s->peer_wnd   = s->max_window;
+		uint32_t win_bytes  = s->window_pkts * UTP_MSS;
+		uint32_t init_cwnd  = UTP_INIT_CWND < win_bytes ? UTP_INIT_CWND : win_bytes;
+		ledbat_init(&s->ledbat, init_cwnd, UTP_MIN_WINDOW, win_bytes, UTP_MSS);
+		s->peer_wnd = init_cwnd;
 	}
 	/* rings hold at least one window of packets AND one whole message
 	 * (UTP_RING_MIN), so a small window never deadlocks the message reader. */
@@ -900,15 +890,15 @@ utp_flush(struct mbt_utp_sock *s)
 		if (s->sbuf_wr == s->sbuf_snd)
 			break;
 
-		uint32_t window = s->max_window < s->peer_wnd
-		                ? s->max_window : s->peer_wnd;
+		uint32_t window = s->ledbat.cwnd < s->peer_wnd
+		                ? s->ledbat.cwnd : s->peer_wnd;
 		if (window < UTP_MIN_PACKET_SIZE) window = UTP_MIN_PACKET_SIZE;
 
 		uint32_t in_flight = s->sbuf_snd - s->sbuf_una;
 		if (in_flight >= window) {
 			mbt_log_trace(MBT_LOG_UTP,
 			    "flush stop: window in_flight=%u window=%u maxw=%u peer_wnd=%u pending=%u",
-			    in_flight, window, s->max_window, s->peer_wnd,
+			    in_flight, window, s->ledbat.cwnd, s->peer_wnd,
 			    s->sbuf_wr - s->sbuf_snd);
 			break;
 		}
@@ -956,72 +946,15 @@ utp_flush(struct mbt_utp_sock *s)
 static void
 utp_update_rtt(struct mbt_utp_sock *s, int32_t sample_us)
 {
-	if (s->rtt_us == 0) {
-		s->rtt_us     = sample_us;
-		s->rtt_var_us = sample_us / 2;
-	} else {
-		int32_t delta  = s->rtt_us - sample_us;
-		s->rtt_var_us += (abs(delta) - s->rtt_var_us) / 4;
-		s->rtt_us     += (sample_us - s->rtt_us) / 8;
-	}
-	int32_t to = (s->rtt_us + s->rtt_var_us * 4) / 1000;
-	s->timeout_ms = to < 500 ? 500 : to;
+	ledbat_on_rtt_sample(&s->ledbat, sample_us);
 }
 
 static void
 utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us,
                   uint32_t bytes_newly_acked, uint32_t flightsize)
 {
-	uint64_t now = utp_now_us_c(s);
-	if (s->base_delay_us == 0 || their_delay_us < s->base_delay_us ||
-	    now - s->base_delay_ts_us > (uint64_t)UTP_BASE_DELAY_HIST * 1000000) {
-		s->base_delay_us    = their_delay_us;
-		s->base_delay_ts_us = now;
-	}
-	int32_t our_delay  = (int32_t)(their_delay_us - s->base_delay_us);
-	if (our_delay < 0) our_delay = 0;
-	int32_t off_target = UTP_CCONTROL_TARGET - our_delay;
-	/*
-	 * Bound off_target to +/- one target. our_delay is derived from peer
-	 * timestamps and can be wildly large (clock skew, jitter, a stale or
-	 * bogus sample), which would otherwise produce a huge swing in a single
-	 * update. LEDBAT only needs the sign and a bounded magnitude here.
-	 */
-	if (off_target < -UTP_CCONTROL_TARGET) off_target = -UTP_CCONTROL_TARGET;
-	if (off_target >  UTP_CCONTROL_TARGET) off_target =  UTP_CCONTROL_TARGET;
-
-	if (!s->max_window || bytes_newly_acked == 0)
-		return;
-
-	/*
-	 * RFC 6817 sec 2.4.2:
-	 *   off_target_norm = (TARGET - queuing_delay) / TARGET   in [-1, 1]
-	 *   cwnd += GAIN * off_target_norm * bytes_newly_acked * MSS / cwnd
-	 *   cwnd  = min(cwnd, flightsize + ALLOWED_INCREASE * MSS)
-	 *   cwnd  = max(cwnd, MIN_CWND * MSS)
-	 *
-	 * The flightsize-based clamp (not an absolute per-RTT byte cap) is what
-	 * bounds growth: cwnd may exceed what was actually in flight last RTT by
-	 * at most ALLOWED_INCREASE MSS, so it tracks real usage and ramps as the
-	 * pipe fills. Our previous code instead scaled the increase by
-	 * (in_flight/max_window) and capped it at a fixed 3000 B/RTT, which
-	 * throttled the ramp to a crawl and pinned throughput at a few MB/s.
-	 */
-	double off_norm = (double)off_target / UTP_CCONTROL_TARGET;
-	double inc = (double)UTP_LEDBAT_GAIN * off_norm
-	           * ((double)bytes_newly_acked * UTP_MSS / (double)s->max_window);
-
-	int64_t cwnd = (int64_t)s->max_window + (int64_t)inc;
-
-	int64_t max_allowed = (int64_t)flightsize + (int64_t)UTP_ALLOWED_INCREASE * UTP_MSS;
-	if (cwnd > max_allowed)
-		cwnd = max_allowed;
-	if (cwnd < (int64_t)UTP_MIN_WINDOW)
-		cwnd = UTP_MIN_WINDOW;
-	if (cwnd > (int64_t)(s->window_pkts * UTP_MSS))
-		cwnd = s->window_pkts * UTP_MSS;   /* never exceed the configured ceiling */
-
-	s->max_window = (uint32_t)cwnd;
+	ledbat_on_ack(&s->ledbat, their_delay_us, bytes_newly_acked, flightsize,
+	              utp_now_us_c(s));
 }
 
 /* ---- retransmit timer ---- */
@@ -1029,7 +962,7 @@ utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us,
 static void
 utp_arm_rto(struct mbt_utp_sock *s)
 {
-	uint64_t usec = (uint64_t)s->timeout_ms * 1000;
+	uint64_t usec = (uint64_t)s->ledbat.timeout_ms * 1000;
 	if (!s->rto_timer)
 		mbt_ev_timer_new(s->ctx->ev, &s->rto_timer, usec, utp_rto_cb, s);
 	else
@@ -1107,9 +1040,7 @@ utp_enter_loss(struct mbt_utp_sock *s)
 		return 0;
 	s->last_loss_una = s->send_una;
 	s->loss_acted = 1;
-	s->max_window /= 2;
-	if (s->max_window < UTP_MIN_WINDOW)
-		s->max_window = UTP_MIN_WINDOW;
+	ledbat_on_loss(&s->ledbat);
 	return 1;
 }
 
@@ -1181,10 +1112,8 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 
 	if (s->state == UTP_CS_CONNECTED &&
 	    s->send_una != s->seq_nr) {
-		/* Halve window on loss. */
-		s->max_window /= 2;
-		if (s->max_window < UTP_MIN_WINDOW)
-			s->max_window = UTP_MIN_WINDOW;
+		/* Halve window on loss (RTO). */
+		ledbat_on_loss(&s->ledbat);
 
 		/*
 		 * Retransmit the unacked window in place (utp_retransmit resends
