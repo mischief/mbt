@@ -1283,7 +1283,12 @@ utp_handle_syn(struct mbt_utp_ctx *ctx,
 		utp_sock_real_free(s);
 		return;
 	}
-	s->seq_nr++; /* SYN-ACK advances seq_nr per BEP 29 */
+	/* Do NOT advance seq_nr after the SYN-ACK: the STATE does not consume a
+	 * sequence number, so our first data packet reuses this seq_nr. This
+	 * matches libutp (the BEP 29 reference) and our initiator, which sets
+	 * ack_nr = STATE.seq_nr - 1 and so expects the first data at STATE.seq_nr.
+	 * (Advancing here desynced against libutp peers, who never saw our first
+	 * data packet.) */
 	s->send_una = s->seq_nr;
 
 	s->state = UTP_CS_CONNECTED;
@@ -1382,9 +1387,15 @@ utp_handle_state(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	s->peer_wnd    = ntohl(h->wnd_size);
 
 	if (s->state == UTP_CS_SYN_SENT) {
-		/* bep 29: on the SYN-ACK, c.ack_nr = pkt.seq_nr (the STATE consumes a
-		 * sequence number via seq_nr=c.seq_nr++ on the acceptor). */
-		s->ack_nr   = ntohs(h->seq_nr);
+		/* SYN-ACK (STATE) received. The acceptor's STATE does NOT consume a
+		 * sequence number: its first data packet reuses the STATE's seq_nr
+		 * (this is what libutp -- the BEP 29 reference -- does, verified on
+		 * the wire). So set ack_nr = STATE.seq_nr - 1, making that first data
+		 * packet in-order (seq == ack_nr + 1). Setting ack_nr = STATE.seq_nr
+		 * directly made the first data look already-acked and silently
+		 * dropped it (e.g. the peer's BitTorrent handshake), stalling the
+		 * connection until the peer gave up with a FIN. */
+		s->ack_nr   = (uint16_t)(ntohs(h->seq_nr) - 1);
 		s->state    = UTP_CS_CONNECTED;
 		utp_disarm_rto(s);
 		if (s->eventcb)
