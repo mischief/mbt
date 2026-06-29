@@ -376,6 +376,7 @@ utp_ctx_remove(struct mbt_utp_ctx *ctx, struct mbt_utp_sock *s)
 	struct utp_sock_list *h = &ctx->buckets[s->recv_conn_id & (UTP_CONN_HASH_SIZE - 1)];
 	SLIST_REMOVE(h, s, mbt_utp_sock, bucket_entry);
 	s->in_hash = 0;
+	s->ctx = NULL;
 }
 
 /* ---- rbuf helpers ---- */
