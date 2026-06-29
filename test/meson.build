@@ -162,3 +162,9 @@ test('utp_robust', utp_robust_test, timeout: 60, suite: 'utp')
 utp_throughput_test = executable('utp_throughput_test', 'utp_throughput_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('utp_throughput', utp_throughput_test, timeout: 900, suite: 'slow')
+
+# TCP control for utp_throughput: same >4 GiB one-way transfer through the TCP
+# mbt_conn path, to isolate uTP per-packet overhead from common framework cost.
+tcp_throughput_test = executable('tcp_throughput_test', 'tcp_throughput_test.c',
+  link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tcp_throughput', tcp_throughput_test, timeout: 900, suite: 'slow')
