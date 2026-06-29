@@ -50,6 +50,16 @@
 #define UTP_CONN_HASH_SIZE   (1 << UTP_CONN_HASH_BITS)
 #define UTP_FIN_WAIT_MS      4000
 
+/* Delayed ACK: coalesce STATE acks for in-order data. Ack after every
+ * UTP_ACK_EVERY in-order packets (like TCP delayed-ack), or after
+ * UTP_DELAYED_ACK_MS if the stream pauses. Out-of-order/gap, duplicate, and
+ * window-update acks are still sent immediately so SACK/loss recovery and flow
+ * control aren't delayed. Halving the in-order ack rate ~halves the sender's
+ * per-datagram recv cost, which profiling showed dominates a busy seeder's CPU
+ * on a fast path. */
+#define UTP_DELAYED_ACK_MS   4
+#define UTP_ACK_EVERY        3
+
 /*
  * Window source of truth.
  *
@@ -212,6 +222,8 @@ struct mbt_utp_sock {
 	struct mbt_ev_timer *readcb_timer; /* deferred readcb notification */
 	struct mbt_ev_timer *fin_timer;    /* deferred eventcb(0) after FIN before accept_cb */
 	struct mbt_ev_timer *rtx_timer;    /* deferred fast-retransmit (breaks send->ack->rtx reentrancy) */
+	struct mbt_ev_timer *ack_timer;    /* delayed-ack: coalesce in-order acks */
+	uint16_t     unacked_pkts;         /* in-order data packets since last ack sent */
 
 	int          got_fin;   /* FIN received before eventcb was installed */
 	int          in_hash;   /* 1 if inserted into ctx->buckets */
@@ -464,6 +476,8 @@ utp_conn_set_watermark(struct mbt_conn *c, size_t low)
 
 static int utp_flush(struct mbt_utp_sock *s);
 static int utp_send_ack(struct mbt_utp_sock *s);
+static void utp_send_ack_now(struct mbt_utp_sock *s);
+static void utp_ack_delayed(struct mbt_utp_sock *s);
 static int utp_do_sendto(struct mbt_utp_sock *s, const void *buf, size_t len);
 
 static size_t
@@ -490,7 +504,7 @@ utp_conn_read(struct mbt_conn *c, void *buf, size_t len)
 	}
 	s->rbuf_rd += (uint32_t)len;
 	/* Advertise the newly freed window space to the peer */
-	utp_send_ack(s);
+	utp_send_ack_now(s);
 	return (ssize_t)len;
 }
 
@@ -579,6 +593,10 @@ utp_sock_real_free(struct mbt_utp_sock *s)
 	if (s->rtx_timer) {
 		mbt_ev_timer_free(s->rtx_timer);
 		s->rtx_timer = NULL;
+	}
+	if (s->ack_timer) {
+		mbt_ev_timer_free(s->ack_timer);
+		s->ack_timer = NULL;
 	}
 	free(s->rbuf);
 	free(s->sbuf);
@@ -831,6 +849,60 @@ utp_send_ack(struct mbt_utp_sock *s)
 	}
 
 	return utp_do_sendto(s, buf, total);
+}
+
+static void utp_ack_timer_cb(struct mbt_ev_timer *t, void *arg);
+
+/* Cancel any pending delayed ack and reset the coalescing counter. Call right
+ * after an ack has actually been put on the wire. */
+static void
+utp_ack_sent(struct mbt_utp_sock *s)
+{
+	s->unacked_pkts = 0;
+	if (s->ack_timer) {
+		mbt_ev_timer_free(s->ack_timer);
+		s->ack_timer = NULL;
+	}
+}
+
+/* Send an ack immediately (used for gaps/dups/window updates and when the
+ * delayed-ack policy says it's time). */
+static void
+utp_send_ack_now(struct mbt_utp_sock *s)
+{
+	utp_send_ack(s);
+	utp_ack_sent(s);
+}
+
+/*
+ * Delayed ack for in-order data: send now if we already have an un-acked
+ * in-order packet pending (ack every UTP_ACK_EVERY), otherwise arm a short
+ * timer so a lone trailing packet is still acked promptly when the stream
+ * pauses. Keeps cumulative-ack latency bounded while halving the ack rate on a
+ * steady stream.
+ */
+static void
+utp_ack_delayed(struct mbt_utp_sock *s)
+{
+	if (++s->unacked_pkts >= UTP_ACK_EVERY) {
+		utp_send_ack_now(s);
+		return;
+	}
+	if (!s->ack_timer)
+		mbt_ev_timer_new(s->ctx->ev, &s->ack_timer,
+		                 (uint64_t)UTP_DELAYED_ACK_MS * 1000,
+		                 utp_ack_timer_cb, s);
+}
+
+static void
+utp_ack_timer_cb(struct mbt_ev_timer *t, void *arg)
+{
+	struct mbt_utp_sock *s = arg;
+	s->ack_timer = NULL;
+	mbt_ev_timer_free(t);
+	s->ctx->now_us = utp_now_us();   /* not under mbt_utp_recv; refresh cache */
+	if (s->unacked_pkts > 0)
+		utp_send_ack_now(s);
 }
 
 static int
@@ -1315,7 +1387,7 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 
 	/* Duplicate: already delivered */
 	if ((int16_t)(pkt_seq - s->ack_nr) <= 0) {
-		utp_send_ack(s);
+		utp_send_ack_now(s);
 		return;
 	}
 
@@ -1323,7 +1395,7 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 		/* In-order: deliver — only advance ack_nr if data was stored */
 		if (utp_deliver_data(s, payload, plen, pkt_seq) < 0) {
 			/* rbuf full; ACK with current ack_nr so peer sees wnd=0 */
-			utp_send_ack(s);
+			utp_send_ack_now(s);
 			return;
 		}
 		s->ack_nr++;
@@ -1342,30 +1414,35 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 
 		if (s->readcb && rbuf_available(s) >= s->rbuf_watermark)
 			s->readcb(&s->conn, s->cb_arg);
-	} else {
-		/*
-		 * Out of order: buffer only if within the reorder window
-		 * (ack_nr, ack_nr + window_pkts]. anything further ahead would
-		 * alias a slot belonging to a different seq, so drop it -- we
-		 * advertise a window <= window_pkts (utp_adv_wnd), so a
-		 * conforming peer never sends beyond this; a packet past it is
-		 * either a misbehaving peer or stale, and dropping it (no ack
-		 * advance) just makes the peer retransmit in range.
-		 */
-		uint16_t ahead = (uint16_t)(pkt_seq - s->ack_nr);
-		if (ahead >= 1 && ahead <= s->window_pkts) {
-			struct utp_recv_entry *e = &s->recv_queue[pkt_seq & s->queue_mask];
-			if (!e->valid) {
-				e->valid  = 1;
-				e->seq_nr = pkt_seq;
-				e->len    = (uint16_t)(plen > UTP_MAX_PACKET_SIZE
-				                     ? UTP_MAX_PACKET_SIZE : plen);
-				memcpy(e->data, payload, e->len);
-			}
+
+		/* In-order data: coalesce the ack (delayed-ack). */
+		utp_ack_delayed(s);
+		return;
+	}
+
+	/*
+	 * Out of order: buffer only if within the reorder window
+	 * (ack_nr, ack_nr + window_pkts]. anything further ahead would
+	 * alias a slot belonging to a different seq, so drop it -- we
+	 * advertise a window <= window_pkts (utp_adv_wnd), so a
+	 * conforming peer never sends beyond this; a packet past it is
+	 * either a misbehaving peer or stale, and dropping it (no ack
+	 * advance) just makes the peer retransmit in range.
+	 */
+	uint16_t ahead = (uint16_t)(pkt_seq - s->ack_nr);
+	if (ahead >= 1 && ahead <= s->window_pkts) {
+		struct utp_recv_entry *e = &s->recv_queue[pkt_seq & s->queue_mask];
+		if (!e->valid) {
+			e->valid  = 1;
+			e->seq_nr = pkt_seq;
+			e->len    = (uint16_t)(plen > UTP_MAX_PACKET_SIZE
+			                     ? UTP_MAX_PACKET_SIZE : plen);
+			memcpy(e->data, payload, e->len);
 		}
 	}
 
-	utp_send_ack(s);
+	/* Gap: ack immediately so the SACK reaches the sender for fast retransmit. */
+	utp_send_ack_now(s);
 }
 
 static void
@@ -1408,8 +1485,8 @@ utp_handle_fin(struct mbt_utp_sock *s, const struct utp_hdr *h)
 	if ((int16_t)(fin_seq - s->ack_nr) > 0)
 		s->ack_nr = fin_seq;
 
-	/* Send final STATE ack */
-	utp_send_ack(s);
+	/* Send final STATE ack (flush any pending delayed ack too) */
+	utp_send_ack_now(s);
 
 	if (s->state == UTP_CS_FIN_SENT || s->state == UTP_CS_DESTROY)
 		return;
