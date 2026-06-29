@@ -155,11 +155,17 @@ struct utp_send_entry {
 };
 
 /* ---- per-packet recv reorder buffer ---- */
+/* Metadata only; payload is dynamically allocated on arrival and freed
+ * on cascade. A permanently allocated 1400-byte buffer per slot wasted
+ * ~46 KiB/peer (32 slots x 1456 B) even though reorder slots are
+ * rarely all occupied. With a pointer, each slot is ~16 bytes on
+ * 64-bit and payloads are malloc'd only when a packet actually arrives
+ * out of order. */
 struct utp_recv_entry {
-	uint8_t  valid;
-	uint16_t seq_nr;
-	uint16_t len;
-	uint8_t  data[UTP_MAX_PACKET_SIZE];
+	uint8_t    valid;
+	uint16_t   seq_nr;
+	uint16_t   len;
+	uint8_t   *data;    /* dynamically allocated; NULL when slot is free */
 };
 
 /* ---- one uTP stream ---- */
@@ -602,7 +608,11 @@ utp_sock_real_free(struct mbt_utp_sock *s)
 	free(s->rbuf);
 	free(s->sbuf);
 	free(s->send_queue);
-	free(s->recv_queue);
+	if (s->recv_queue) {
+		for (uint32_t i = 0; i < s->window_pkts; i++)
+			free(s->recv_queue[i].data);
+		free(s->recv_queue);
+	}
 	free(s);
 }
 
@@ -1409,6 +1419,8 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 				break;
 			if (utp_deliver_data(s, e->data, e->len, next) < 0)
 				break;
+			free(e->data);
+			e->data  = NULL;
 			e->valid = 0;
 			s->ack_nr++;
 		}
@@ -1434,10 +1446,16 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	if (ahead >= 1 && ahead <= s->window_pkts) {
 		struct utp_recv_entry *e = &s->recv_queue[pkt_seq & s->queue_mask];
 		if (!e->valid) {
+			size_t dlen = plen > UTP_MAX_PACKET_SIZE ? UTP_MAX_PACKET_SIZE : plen;
+			e->data = malloc(dlen);
+			if (!e->data) {
+				/* malloc failed: drop packet, peer will retransmit */
+				utp_send_ack_now(s);
+				return;
+			}
 			e->valid  = 1;
 			e->seq_nr = pkt_seq;
-			e->len    = (uint16_t)(plen > UTP_MAX_PACKET_SIZE
-			                     ? UTP_MAX_PACKET_SIZE : plen);
+			e->len    = (uint16_t)dlen;
 			memcpy(e->data, payload, e->len);
 		}
 	}
