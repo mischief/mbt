@@ -38,7 +38,7 @@ test('ratelimit', ratelimit_test)
 
 bitfield_test = executable('bitfield_test', 'bitfield_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 seed_seed_test = executable('seed_seed_test', 'seed_seed_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('seed_seed', seed_seed_test)
+test('seed_seed', seed_seed_test, suite: 'slow')
 dns_test = executable('dns_test', 'dns_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('dns', dns_test)
 test('bitfield', bitfield_test)
@@ -63,7 +63,7 @@ toggle_test = executable('toggle_test', 'toggle_test.c', link_with: [libmbt], in
 test('toggle', toggle_test)
 
 dht_test = executable('dht_test', 'dht_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('dht', dht_test, timeout: 10)
+test('dht', dht_test, timeout: 10, suite: 'slow')
 
 tracker_server_test = executable('tracker_server_test', 'tracker_server_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_server', tracker_server_test, timeout: 15)
@@ -93,7 +93,7 @@ tracker_shared_test = executable('tracker_shared_test', 'tracker_shared_test.c',
 test('tracker_shared', tracker_shared_test, timeout: 15)
 
 pcp_test = executable('pcp_test', 'pcp_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('pcp', pcp_test, timeout: 10)
+test('pcp', pcp_test, timeout: 10, suite: 'slow')
 
 rarest_test = executable('rarest_test', 'rarest_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 # rarest is statistical and sensitive to allocator perturbation (MALLOC_PERTURB_);
@@ -111,7 +111,7 @@ test('endgame', endgame_test, timeout: 20)
 
 swarm_test = executable('swarm_test', 'swarm_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('swarm_direct',      swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16'])
-test('swarm_tracker',     swarm_test, timeout: 60, args: ['--seeders', '3', '--leechers', '10', '--pieces', '4', '--piece-size', '64', '--tracker'])
+test('swarm_tracker',     swarm_test, timeout: 60, suite: 'slow', args: ['--seeders', '3', '--leechers', '10', '--pieces', '4', '--piece-size', '64', '--tracker'])
 test('swarm_single_seed', swarm_test, timeout: 60, args: ['--seeders', '1', '--leechers', '8', '--pieces', '20', '--piece-size', '8'])
 test('swarm_tcp_only',    swarm_test, timeout: 60, args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16', '--disable-utp'])
 test('swarm_utp_only',    swarm_test, timeout: 60, suite: 'utp', args: ['--seeders', '2', '--leechers', '5', '--pieces', '8', '--piece-size', '16', '--disable-tcp'])
@@ -122,13 +122,13 @@ ipv6_test = executable('ipv6_test', 'ipv6_test.c', link_with: [libmbt], include_
 
 peer_source_test = executable('peer_source_test', 'peer_source_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('peer_source', peer_source_test)
-test('ipv6', ipv6_test, timeout: 30)
+test('ipv6', ipv6_test, timeout: 30, suite: 'slow')
 
 torrent_nodes_test = executable('torrent_nodes_test', 'torrent_nodes_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('torrent_nodes', torrent_nodes_test)
 
 bep44_test = executable('bep44_test', 'bep44_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('bep44', bep44_test, timeout: 10)
+test('bep44', bep44_test, timeout: 10, suite: 'slow')
 
 poll_test = executable('poll_test', 'poll_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
@@ -144,7 +144,7 @@ test('bep51', bep51_test, timeout: 10)
 
 pex_test = executable('pex_test', 'pex_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-test('pex', pex_test, timeout: 30)
+test('pex', pex_test, timeout: 30, suite: 'slow')
 
 ledbat_test = executable('ledbat_test', 'ledbat_test.c', '../ledbat.c',
   include_directories: mbt_inc)
