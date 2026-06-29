@@ -239,6 +239,14 @@ struct mbt_utp_ctx {
 
 	uint32_t          window_pkts;   /* resolved window for sockets on this ctx */
 
+	/* Cached monotonic time (us) for the current inbound datagram. The
+	 * clocksource can be slow (e.g. HPET), and processing one datagram used
+	 * to read the clock several times (reply_micro + the reply's timestamp);
+	 * those reads are microseconds apart and may as well share one value.
+	 * Set at the top of mbt_utp_recv; valid only during its synchronous
+	 * processing. Timer/flush paths read the clock fresh. */
+	uint64_t          now_us;
+
 	mbt_utp_accept_cb accept_cb;
 	void             *accept_arg;
 
@@ -266,6 +274,20 @@ static uint32_t
 utp_now_us32(void)
 {
 	return (uint32_t)(utp_now_us() & 0xFFFFFFFF);
+}
+
+/* Cached "now" for the current inbound datagram (see ctx->now_us). Falls back
+ * to a fresh read when no datagram is in flight (now_us == 0). */
+static uint64_t
+utp_now_us_c(struct mbt_utp_sock *s)
+{
+	return s->ctx->now_us ? s->ctx->now_us : utp_now_us();
+}
+
+static uint32_t
+utp_now_us32_c(struct mbt_utp_sock *s)
+{
+	return (uint32_t)(utp_now_us_c(s) & 0xFFFFFFFF);
 }
 
 /* round v up to a power of two */
@@ -507,6 +529,7 @@ utp_conn_write(struct mbt_conn *c, const void *buf, size_t len)
 	if (len > space) return -ENOBUFS;
 	sbuf_copy_in(s, s->sbuf_wr, buf, len);
 	s->sbuf_wr += (uint32_t)len;
+	s->ctx->now_us = utp_now_us();   /* refresh cache for the flush below */
 	utp_flush(s);
 	return (ssize_t)len;
 }
@@ -536,6 +559,7 @@ utp_conn_writev(struct mbt_conn *c, const struct iovec *iov, int iovcnt)
 		wr += (uint32_t)iov[i].iov_len;
 	}
 	s->sbuf_wr += (uint32_t)total;
+	s->ctx->now_us = utp_now_us();   /* refresh cache for the flush below */
 	utp_flush(s);
 	return (ssize_t)total;
 }
@@ -803,7 +827,7 @@ utp_send_ack(struct mbt_utp_sock *s)
 	h->type_ver          = (uint8_t)((ST_STATE << 4) | UTP_VERSION);
 	h->extension         = ext_len ? 1 : 0;
 	h->conn_id           = htons(s->send_conn_id);
-	h->timestamp_us      = htonl(utp_now_us32());
+	h->timestamp_us      = htonl(utp_now_us32_c(s));
 	h->timestamp_diff_us = htonl(s->reply_micro);
 	h->wnd_size          = htonl(utp_adv_wnd(s));
 	h->seq_nr            = htons(s->seq_nr);
@@ -831,7 +855,7 @@ utp_send_data(struct mbt_utp_sock *s, uint16_t seq,
 	h->type_ver          = (uint8_t)((ST_DATA << 4) | UTP_VERSION);
 	h->extension         = 0;
 	h->conn_id           = htons(s->send_conn_id);
-	h->timestamp_us      = htonl(utp_now_us32());
+	h->timestamp_us      = htonl(utp_now_us32_c(s));
 	h->timestamp_diff_us = htonl(s->reply_micro);
 	h->wnd_size          = htonl(utp_adv_wnd(s));
 	h->seq_nr            = htons(seq);
@@ -913,7 +937,7 @@ utp_flush(struct mbt_utp_sock *s)
 		e->seq_nr      = cur_seq;
 		e->sbuf_off    = s->sbuf_snd;
 		e->len         = (uint16_t)chunk;
-		e->sent_us     = utp_now_us();
+		e->sent_us     = utp_now_us_c(s);
 		e->retransmits = 0;
 		e->sacked      = 0;
 		e->valid       = 1;
@@ -946,7 +970,7 @@ utp_update_rtt(struct mbt_utp_sock *s, int32_t sample_us)
 static void
 utp_ledbat_update(struct mbt_utp_sock *s, uint32_t their_delay_us)
 {
-	uint64_t now = utp_now_us();
+	uint64_t now = utp_now_us_c(s);
 	if (s->base_delay_us == 0 || their_delay_us < s->base_delay_us ||
 	    now - s->base_delay_ts_us > (uint64_t)UTP_BASE_DELAY_HIST * 1000000) {
 		s->base_delay_us    = their_delay_us;
@@ -1005,7 +1029,7 @@ utp_resend_entry(struct mbt_utp_sock *s, struct utp_send_entry *e)
 	sbuf_copy_out(s, e->sbuf_off, payload, e->len);
 	utp_send_data(s, e->seq_nr, payload, e->len);
 	e->retransmits++;
-	e->sent_us = utp_now_us();
+	e->sent_us = utp_now_us_c(s);
 }
 
 /*
@@ -1096,6 +1120,7 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 {
 	(void)t;
 	struct mbt_utp_sock *s = arg;
+	s->ctx->now_us = utp_now_us();   /* not under mbt_utp_recv; refresh cache */
 
 	if (s->state == UTP_CS_SYN_SENT) {
 		/* Give up if the peer never answers our SYN (likely not uTP). Fire a
@@ -1120,7 +1145,7 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 		h->type_ver          = (uint8_t)((ST_SYN << 4) | UTP_VERSION);
 		h->extension         = 0;
 		h->conn_id           = htons(s->recv_conn_id);
-		h->timestamp_us      = htonl(utp_now_us32());
+		h->timestamp_us      = htonl(utp_now_us32_c(s));
 		h->timestamp_diff_us = 0;
 		h->wnd_size          = htonl(utp_adv_wnd(s));
 		h->seq_nr            = htons(1);
@@ -1174,7 +1199,7 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 
 	s->dup_acks = 0;
 
-	uint64_t now = utp_now_us();
+	uint64_t now = utp_now_us_c(s);
 
 	/* Mark cumulative acks */
 	for (uint16_t seq = s->send_una;
@@ -1279,7 +1304,7 @@ utp_handle_syn(struct mbt_utp_ctx *ctx,
 	s->ack_nr       = ntohs(h->seq_nr);
 	s->seq_nr       = (uint16_t)(arc4random() & 0xFFFF);
 	s->send_una     = s->seq_nr;
-	s->reply_micro  = utp_now_us32() - ntohl(h->timestamp_us);
+	s->reply_micro = utp_now_us32_c(s) - ntohl(h->timestamp_us);
 	s->peer_wnd     = ntohl(h->wnd_size);
 
 	utp_ctx_insert(ctx, s);
@@ -1319,7 +1344,7 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 {
 	uint16_t pkt_seq = ntohs(h->seq_nr);
 
-	s->reply_micro = utp_now_us32() - ntohl(h->timestamp_us);
+	s->reply_micro = utp_now_us32_c(s) - ntohl(h->timestamp_us);
 	s->peer_wnd    = ntohl(h->wnd_size);
 
 	mbt_log_trace(MBT_LOG_UTP, "  data seq=%u vs ack_nr=%u plen=%zu",
@@ -1390,7 +1415,7 @@ static void
 utp_handle_state(struct mbt_utp_sock *s, const struct utp_hdr *h,
                  const uint8_t *sack_data, size_t sack_len)
 {
-	s->reply_micro = utp_now_us32() - ntohl(h->timestamp_us);
+	s->reply_micro = utp_now_us32_c(s) - ntohl(h->timestamp_us);
 	s->peer_wnd    = ntohl(h->wnd_size);
 
 	if (s->state == UTP_CS_SYN_SENT) {
@@ -1419,7 +1444,7 @@ static void
 utp_handle_fin(struct mbt_utp_sock *s, const struct utp_hdr *h)
 {
 	uint16_t fin_seq = ntohs(h->seq_nr);
-	s->reply_micro = utp_now_us32() - ntohl(h->timestamp_us);
+	s->reply_micro = utp_now_us32_c(s) - ntohl(h->timestamp_us);
 	s->peer_wnd    = ntohl(h->wnd_size);
 
 	/* FIN occupies a seq_nr; treat ack_nr = fin_seq to allow ack */
@@ -1565,6 +1590,10 @@ mbt_utp_recv(struct mbt_utp_ctx *ctx,
 
 	if (len < UTP_HEADER_SIZE)
 		return -1;
+
+	/* One clock read per inbound datagram; the per-packet handlers reuse it
+	 * (see ctx->now_us / utp_now_us_c). */
+	ctx->now_us = utp_now_us();
 
 	const struct utp_hdr *h = buf;
 	uint8_t type = h->type_ver >> 4;
