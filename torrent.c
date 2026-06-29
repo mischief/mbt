@@ -1152,13 +1152,14 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 		}
 	}
 
-	/* During slow-start, pipeline may not cover a full piece yet — refill per block.
-	 * Once reqq_window exceeds one piece worth of blocks, piece completion handles it. */
-	{
-		int bpp = t->piece_length ? (int)((t->piece_length + BLOCK_SIZE - 1) / BLOCK_SIZE) : 1;
-		if (tp->reqq_window < bpp)
-			torrent_drive_peer(t, tp);
-	}
+	/* Refill the request pipeline after every block. drive_peer prefers
+	 * continuing pieces this peer already owns (a cheap SLIST walk) and only
+	 * calls the picker when crossing into a new piece, so this does not incur
+	 * a picker call per block. Refilling only on piece completion (every bpp
+	 * blocks) let `outstanding` drain to ~0 between completions on high
+	 * bandwidth-delay links, starving the sender (observed as REQ~0 on the
+	 * seeder and throttled throughput). */
+	torrent_drive_peer(t, tp);
 }
 
 static void
