@@ -214,10 +214,12 @@
   - [x] Incoming SYN → `mbt_conn` handed to session accept path
   - [x] window_pkts is the single source of truth (queues/SACK/adv-wnd); validated session knob (cfg.utp_window_pkts)
 - [x] Session: try uTP first, fall back to TCP (peerdb utp_cap); per-peer transport visible (mbt_peer_transport_name, 'u' flag in tui)
-- [ ] FIN eof_pkt wait (currently truncates on a FIN before a reordered tail; cosmetic for hash-checked torrents)
+- [ ] FIN eof_pkt wait: utp_handle_fin jumps ack_nr past gaps and signals EOF at once, so a FIN before a reordered tail truncates the stream (cosmetic for hash-checked torrents)
 - [ ] ST_RESET for unknown conn_id (politeness/interop)
 - [ ] RTT sampling from SACKed packets; reset timeout counter on receive (minor conformance)
-- [ ] memory: reorder payloads into rbuf (metadata-only recv_queue); lazy/sized buffers; timer consolidation (see utp.md)
+- [ ] memory: reorder payloads into rbuf (metadata-only recv_queue); timer consolidation
+- [ ] memory: lazy-allocate rbuf/sbuf/queues on first data, grow on demand (mbt_ringbuf); idle choked peers then cost ~1 KiB, not a full window
+- [ ] cleanup: seq_lt/seq_le helpers for the (int16_t) wrap compares; sanity-check reply_micro against bogus peer timestamps; confirm all-or-nothing utp_conn_write matches the mbt_conn contract
 
 ### Message-stream encryption (MSE/PE, BEP 8)
 - [ ] DH key exchange + RC4 obfuscation. Needed to interop with peers that
