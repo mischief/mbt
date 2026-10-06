@@ -1,6 +1,9 @@
 tbmap_test = executable('tbmap_test', 'bitmap_test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('tbmap', tbmap_test)
 
+ringbuf_test = executable('ringbuf_test', 'ringbuf_test.c', link_with: [libmbt], include_directories: mbt_inc)
+test('ringbuf', ringbuf_test)
+
 be_test = executable('be_test', 'test.c', link_with: [libmbt], include_directories: mbt_inc)
 test('be', be_test)
 

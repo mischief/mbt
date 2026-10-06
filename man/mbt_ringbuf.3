@@ -1,0 +1,140 @@
+.\" SPDX-License-Identifier: ISC
+.Dd June 30, 2026
+.Dt MBT_RINGBUF 3
+.Os
+.Sh NAME
+.Nm mbt_ringbuf_new ,
+.Nm mbt_ringbuf_free ,
+.Nm mbt_ringbuf_available ,
+.Nm mbt_ringbuf_space ,
+.Nm mbt_ringbuf_cap ,
+.Nm mbt_ringbuf_produce ,
+.Nm mbt_ringbuf_consume ,
+.Nm mbt_ringbuf_discard ,
+.Nm mbt_ringbuf_grow ,
+.Nm mbt_ringbuf_shrink ,
+.Nm mbt_ringbuf_update_peak ,
+.Nm mbt_ringbuf_peak ,
+.Nm mbt_ringbuf_write_ptr ,
+.Nm mbt_ringbuf_write_done
+.Nd dynamic ring buffer with bounded growth and shrink-on-idle
+.Sh SYNOPSIS
+.In mbt/ringbuf.h
+.Ft int
+.Fn mbt_ringbuf_new "struct mbt_ringbuf **out" "uint32_t max_cap"
+.Ft void
+.Fn mbt_ringbuf_free "struct mbt_ringbuf *r"
+.Ft uint32_t
+.Fn mbt_ringbuf_available "const struct mbt_ringbuf *r"
+.Ft uint32_t
+.Fn mbt_ringbuf_space "const struct mbt_ringbuf *r"
+.Ft uint32_t
+.Fn mbt_ringbuf_cap "const struct mbt_ringbuf *r"
+.Ft int
+.Fn mbt_ringbuf_produce "struct mbt_ringbuf *r" "const void *src" "uint32_t len"
+.Ft ssize_t
+.Fn mbt_ringbuf_consume "struct mbt_ringbuf *r" "void *dst" "uint32_t len"
+.Ft void
+.Fn mbt_ringbuf_discard "struct mbt_ringbuf *r" "uint32_t len"
+.Ft int
+.Fn mbt_ringbuf_grow "struct mbt_ringbuf *r" "uint32_t want" "uint32_t *out_delta"
+.Ft int
+.Fn mbt_ringbuf_shrink "struct mbt_ringbuf *r" "uint32_t min_cap" "uint32_t *out_delta"
+.Ft void
+.Fn mbt_ringbuf_update_peak "struct mbt_ringbuf *r"
+.Ft uint32_t
+.Fn mbt_ringbuf_peak "const struct mbt_ringbuf *r"
+.Ft uint8_t *
+.Fn mbt_ringbuf_write_ptr "struct mbt_ringbuf *r" "uint32_t *out_len"
+.Ft void
+.Fn mbt_ringbuf_write_done "struct mbt_ringbuf *r" "uint32_t len"
+.Sh DESCRIPTION
+.Ao
+.Vt struct mbt_ringbuf
+.An
+is a dynamic ring buffer that grows from 1 MSS (1460 bytes), doubling up to
+.Fa max_cap .
+When
+.Fa max_cap
+is 0, the buffer grows unboundedly.
+.Pp
+The buffer uses monotonic read/write counters with power-of-2 masking for
+O(1) wrap-around.
+No
+.Fn memmove
+is used during normal operation.
+.Pp
+.Fn mbt_ringbuf_new
+allocates an empty ring buffer with maximum capacity
+.Fa max_cap
+(power-of-2 rounded internally).
+Returns 0 on success, \-ENOMEM on failure.
+.Fn mbt_ringbuf_free
+frees the buffer.
+.Pp
+.Fn mbt_ringbuf_available
+returns the number of bytes currently in the buffer.
+.Fn mbt_ringbuf_space
+returns available write space.
+.Fn mbt_ringbuf_cap
+returns the current allocated capacity.
+.Pp
+.Fn mbt_ringbuf_produce
+copies
+.Fa len
+bytes from
+.Fa src
+into the buffer, growing it if necessary.
+Returns 0 on success.
+Returns \-ENOBUFS if at maximum capacity and data cannot fit.
+Returns \-ENOMEM on allocation failure.
+.Pp
+.Fn mbt_ringbuf_consume
+copies up to
+.Fa len
+bytes from the buffer into
+.Fa dst .
+Returns the number of bytes consumed.
+.Fn mbt_ringbuf_discard
+advances the read pointer by
+.Fa len
+bytes without copying.
+.Pp
+.Fn mbt_ringbuf_grow
+explicitly grows the buffer to hold at least
+.Fa want
+more bytes, compacting live data to physical offset 0.
+The
+.Fa out_delta
+parameter receives the old read offset, enabling callers to adjust external
+references into the buffer (e.g., send queue entry offsets).
+Returns \-ENOBUFS if at maximum capacity, \-ENOMEM on failure, 0 on success.
+.Pp
+.Fn mbt_ringbuf_shrink
+reduces the buffer allocation when live data is well below current capacity.
+The buffer shrinks to the smallest power-of-2 that holds
+.Fa min_cap
+plus the current live data.
+If the buffer is empty, it is freed entirely.
+This is non-fatal: returns 0 even if shrinking is not beneficial.
+Callers with external offsets must adjust them by
+.Fa out_delta .
+.Pp
+.Fn mbt_ringbuf_update_peak
+records the current live data size if it exceeds the tracked high-water mark.
+.Fn mbt_ringbuf_peak
+returns the recorded peak.
+Use these to decide when to shrink (e.g.,
+when peak has been below half of allocated capacity for N round-trip times).
+.Pp
+.Fn mbt_ringbuf_write_ptr
+returns a pointer to the next contiguous write region and its available length.
+After writing, call
+.Fn mbt_ringbuf_write_done
+with the number of bytes written to advance the write pointer.
+Returns NULL if the buffer is not yet allocated or has no space.
+.Sh SEE ALSO
+.Xr mbt 3 ,
+.Xr mbt_conn 3
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org
