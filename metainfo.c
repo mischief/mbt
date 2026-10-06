@@ -123,7 +123,7 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 		else if (*i == 'e') { depth--; i++; if (depth == 0) break; }
 		else if (*i == 'i') { i = memchr(i, 'e', end - i); if (i) i++; else break; }
 		else if (*i >= '0' && *i <= '9') {
-			unsigned char *colon = memchr(i, ':', end - i);
+			const unsigned char *colon = memchr(i, ':', end - i);
 			if (!colon) break;
 			size_t slen = strtoul((char *)i, NULL, 10);
 			i = colon + 1 + slen;
