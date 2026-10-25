@@ -18,6 +18,14 @@
 #include <sys/socket.h>
 #include <stddef.h>
 
+/*
+ * Largest datagram the mux receives whole: one Ethernet MTU, which covers uTP
+ * and DHT. A larger datagram is truncated, so it is dropped. The uTP receive
+ * path sizes its payload limit from this (UTP_MAX_RECV_PAYLOAD in utp.c); it is
+ * a receive-side limit, unrelated to the payload size we send (UTP_MSS).
+ */
+#define UDP_RECV_MAX 1500
+
 struct mbt_ev;
 struct mbt_udp_mux;
 

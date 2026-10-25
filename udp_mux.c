@@ -29,7 +29,6 @@
  * batching -- so we kept the loop: one buffer, no feature detection, portable.)
  */
 #define UDP_RECV_BATCH 16
-#define UDP_RECV_MAX   1500   /* one Ethernet MTU; covers uTP and DHT datagrams */
 
 struct mbt_udp_mux {
 	struct mbt_listener listener;

@@ -163,6 +163,12 @@ utp_robust_test = executable('utp_robust_test', 'utp_robust_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('utp_robust', utp_robust_test, timeout: 60, suite: 'utp')
 
+# wire-level receive tests: a hand-built remote peer feeds crafted DATA packets
+# (oversize payloads, seq wrap, window edges, extensions) into mbt_utp_recv().
+utp_wire_test = executable('utp_wire_test', 'utp_wire_test.c',
+  link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('utp_wire', utp_wire_test, timeout: 30, suite: 'utp')
+
 # >4 GiB one-way transfer to exercise the 2^32 byte-counter wrap. Slow (modest
 # uTP loopback throughput), so it lives in the 'slow' suite, excluded from the
 # default run; invoke with: meson test -C build --suite slow utp_throughput

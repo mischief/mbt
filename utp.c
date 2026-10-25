@@ -44,7 +44,19 @@
  * defeats LEDBAT's delay signal, so we stay well under the common 1500 MTU.
  */
 #define UTP_MSS              1400
-#define UTP_MAX_PACKET_SIZE  UTP_MSS   /* wire payload cap == MSS */
+#define UTP_MAX_PACKET_SIZE  UTP_MSS   /* payload cap on packets we SEND */
+/*
+ * Payload cap on packets we RECEIVE. Peers choose their own packet size and may
+ * send more than our MSS (up to what fits the datagram the mux receives), so
+ * this is deliberately not tied to UTP_MSS. A packet buffered out of order must
+ * keep every byte: the in-order path delivers the whole payload, and a clipped
+ * copy would ack bytes that are never stored.
+ */
+#define UTP_MAX_RECV_PAYLOAD (UDP_RECV_MAX - UTP_HEADER_SIZE)
+_Static_assert(UTP_MAX_RECV_PAYLOAD >= UTP_MAX_PACKET_SIZE,
+    "receive cap must cover what we send");
+_Static_assert(UTP_MAX_RECV_PAYLOAD <= UINT16_MAX,
+    "recv_queue entry len is 16 bits");
 #define UTP_REORDER_THRESH   3
 #define UTP_CONN_HASH_BITS   6
 #define UTP_CONN_HASH_SIZE   (1 << UTP_CONN_HASH_BITS)
@@ -1446,7 +1458,12 @@ utp_handle_data(struct mbt_utp_sock *s, const struct utp_hdr *h,
 	if (ahead >= 1 && ahead <= s->window_pkts) {
 		struct utp_recv_entry *e = &s->recv_queue[pkt_seq & s->queue_mask];
 		if (!e->valid) {
-			size_t dlen = plen > UTP_MAX_PACKET_SIZE ? UTP_MAX_PACKET_SIZE : plen;
+			/* Keep the whole payload or none of it, never a clipped
+			 * copy. The mux cannot hand us more than the cap, but
+			 * mbt_utp_recv() is also called directly. */
+			size_t dlen = plen;
+			if (dlen > UTP_MAX_RECV_PAYLOAD)
+				return;	/* unacked: the peer resends */
 			e->data = malloc(dlen);
 			if (!e->data) {
 				/* malloc failed: drop packet, peer will retransmit */
