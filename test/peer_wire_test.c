@@ -528,6 +528,32 @@ test_holepunch_send(void)
 	rig_close(&r);
 }
 
+/* BEP 10 "yourip": we send the peer its address (a unix socketpair has none,
+ * so nothing is sent), and we record the one the peer sends us. */
+static void
+test_yourip(void)
+{
+	struct rig r;
+	static const char hs[] = "d1:md6:ut_pexi1ee6:yourip4:\xc0\x00\x02\x63" "e";
+	static const char hs6[] = "d1:md6:ut_pexi1ee6:yourip16:\x20\x01\x0d\xb8\0\0\0\0\0\0\0\0\0\0\0\x07" "e";
+	static const char bad[] = "d1:md6:ut_pexi1ee6:yourip3:abce";
+
+	printf("test_yourip\n"); fflush(stdout);
+	rig_open(&r, hs, sizeof(hs) - 1);
+	CHECK(mbt_peer_yourip(r.peer) && strcmp(mbt_peer_yourip(r.peer), "192.0.2.99") == 0,
+	    "yourip v4: %s", mbt_peer_yourip(r.peer) ? mbt_peer_yourip(r.peer) : "(null)");
+	rig_close(&r);
+
+	rig_open(&r, hs6, sizeof(hs6) - 1);
+	CHECK(mbt_peer_yourip(r.peer) && strcmp(mbt_peer_yourip(r.peer), "2001:db8::7") == 0,
+	    "yourip v6: %s", mbt_peer_yourip(r.peer) ? mbt_peer_yourip(r.peer) : "(null)");
+	rig_close(&r);
+
+	rig_open(&r, bad, sizeof(bad) - 1);
+	CHECK(mbt_peer_yourip(r.peer) == NULL, "bad-length yourip accepted");
+	rig_close(&r);
+}
+
 static const struct {
 	const char *name;
 	void (*fn)(void);
@@ -545,6 +571,7 @@ static const struct {
 	{ "holepunch_recv", test_holepunch_recv },
 	{ "holepunch_unadvertised", test_holepunch_unadvertised },
 	{ "holepunch_send", test_holepunch_send },
+	{ "yourip", test_yourip },
 };
 
 /* With no argument run every case; with a name, only that one. */

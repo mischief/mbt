@@ -166,6 +166,7 @@ MBT_API const char *mbt_peer_addr(struct mbt_peer *p);
 MBT_API uint16_t mbt_peer_conn_port(struct mbt_peer *p);   /* ephemeral TCP source port */
 MBT_API const char *mbt_peer_transport_name(struct mbt_peer *p); /* "tcp" / "utp" */
 MBT_API const char *mbt_peer_version(struct mbt_peer *p);  /* BEP 10 "v" client string, NULL if unknown */
+MBT_API const char *mbt_peer_yourip(struct mbt_peer *p);   /* BEP 10 "yourip": our address as the peer sees it, NULL if not sent */
 MBT_API const uint8_t *mbt_peer_id(struct mbt_peer *p);
 MBT_API uint16_t mbt_peer_port(struct mbt_peer *p);        /* listen port from BEP 10, 0 if unknown */
 MBT_API void mbt_peer_set_our_listen_port(struct mbt_peer *p, uint16_t port);

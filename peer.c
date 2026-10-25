@@ -74,6 +74,7 @@ struct mbt_peer {
 	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
 	uint8_t ut_pex_id;     /* their msg id for ut_pex, 0=unsupported */
 	uint8_t ut_holepunch_id; /* their msg id for ut_holepunch (BEP 55), 0=unsupported */
+	char yourip[INET6_ADDRSTRLEN]; /* BEP 10 "yourip": our address as they see it, "" if not sent */
 	uint8_t have_all;      /* BEP 6: peer sent HAVE_ALL (deferred until piece_count known) */
 	size_t metadata_size;
 	int reqq;              /* peer's max outstanding requests (0=unknown) */
@@ -196,6 +197,11 @@ peer_recv_handshake(struct mbt_peer *p)
 	mbt_unpack_mem(&pk, p->their_id, 20);
 	mbt_unpack_end(&pk);
 
+	/* We dialed ourselves (our own external address, through a NAT that
+	 * hairpins). The owner learns the address from this error. */
+	if (memcmp(p->their_id, p->our_id, 20) == 0)
+		return -ELOOP;
+
 	return 0;
 }
 
@@ -221,6 +227,16 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	if (p->our_reqq > 0)
 		if (mbt_be_dict_append_number(be, "reqq", p->our_reqq) < 0) return -ENOMEM;
 	if (mbt_be_dict_append_string(be, "v", MBT_VERSION, strlen(MBT_VERSION)) < 0) return -ENOMEM;
+	/* BEP 10 "yourip": tell the peer its address as we see it, so it
+	 * can learn its external address (and skip dialing itself). */
+	{
+		unsigned char ipbuf[16];
+		if (inet_pton(AF_INET, p->addr, ipbuf) == 1) {
+			if (mbt_be_dict_append_string(be, "yourip", ipbuf, 4) < 0) return -ENOMEM;
+		} else if (inet_pton(AF_INET6, p->addr, ipbuf) == 1) {
+			if (mbt_be_dict_append_string(be, "yourip", ipbuf, 16) < 0) return -ENOMEM;
+		}
+	}
 
 	rv = mbt_be_value_encode(be, &encoded, &sz);
 	if (rv < 0)
@@ -293,6 +309,15 @@ peer_parse_extension_handshake(struct mbt_peer *p, const unsigned char *buf,
 		for (size_t i = 0; i < n; i++)
 			p->client_version[i] = (src[i] >= 0x20 && src[i] != 0x7f) ? (char)src[i] : '?';
 		p->client_version[n] = '\0';
+	}
+
+	/* BEP 10 "yourip": compact address (4 or 16 bytes) the peer sees us at */
+	tmp = mbt_be_find(be, "yourip");
+	if (tmp && tmp->type == BE_STRING &&
+	    (tmp->string.len == 4 || tmp->string.len == 16)) {
+		int af = tmp->string.len == 4 ? AF_INET : AF_INET6;
+		if (!inet_ntop(af, tmp->string.buf, p->yourip, sizeof(p->yourip)))
+			p->yourip[0] = '\0';
 	}
 
 	return 0;
@@ -1127,6 +1152,12 @@ const char *
 mbt_peer_version(struct mbt_peer *p)
 {
 	return p->client_version[0] ? p->client_version : NULL;
+}
+
+const char *
+mbt_peer_yourip(struct mbt_peer *p)
+{
+	return p->yourip[0] ? p->yourip : NULL;
 }
 
 void

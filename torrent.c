@@ -888,6 +888,12 @@ on_active(struct mbt_peer *p, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
+	/* BEP 10 "yourip": the peer tells us our address as it sees it. One
+	 * peer could lie, but the worst a wrong entry does is make us skip
+	 * that address on our own listen port. */
+	if (t->session && mbt_peer_yourip(p))
+		mbt_session_note_self_addr(t->session, mbt_peer_yourip(p));
+
 	/* Outgoing connections learn the peer id only now. */
 	if (!mbt_torrent_resolve_duplicate(t, p, mbt_peer_id(p),
 	        mbt_peer_source(p) != MBT_SOURCE_INCOMING)) {
@@ -1503,10 +1509,20 @@ on_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length, 
 static void
 on_error(struct mbt_peer *p, int err, void *arg)
 {
-	(void)err;
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
+
+	/* We dialed ourselves: remember the address so we never dial it again,
+	 * and drop the entry from the peer list. */
+	if (err == -ELOOP) {
+		struct mbt_peer_entry *pe = mbt_peerdb_find(&t->peerdb, mbt_peer_addr(p),
+		                                            mbt_peer_conn_port(p));
+		if (pe)
+			pe->state = MBT_PEERDB_BANNED;
+		if (t->session)
+			mbt_session_note_self_addr(t->session, mbt_peer_addr(p));
+	}
 
 	{
 		struct mbt_bitmap *pb = mbt_peer_bitfield(p);
@@ -1629,13 +1645,9 @@ holepunch_relay(struct mbt_torrent *t, struct mbt_peer *from,
 		holepunch_send_error(from, req, MBT_HP_ERR_NO_SUCH_PEER);
 		return;
 	}
-	if (t->session) {
-		const char *ext = mbt_session_external_addr(t->session);
-		uint16_t lp = mbt_session_listen_port(t->session);
-		if (ext[0] && strcmp(ext, addr) == 0 && port == lp) {
-			holepunch_send_error(from, req, MBT_HP_ERR_NO_SELF);
-			return;
-		}
+	if (t->session && mbt_session_is_self(t->session, addr, port)) {
+		holepunch_send_error(from, req, MBT_HP_ERR_NO_SELF);
+		return;
 	}
 
 	struct torrent_peer *target = holepunch_find(t, addr, port);

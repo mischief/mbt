@@ -92,6 +92,10 @@ int mbt_session_holepunch_connect(struct mbt_session *s, struct mbt_torrent *t,
                                   const char *addr, uint16_t port);
 const uint8_t *mbt_session_peer_id(struct mbt_session *s);
 const char *mbt_session_external_addr(struct mbt_session *s);
+/* Self-dial avoidance (session.c): remember one of our own addresses, and
+ * test whether addr:port is us (only our own listen port counts). */
+void mbt_session_note_self_addr(struct mbt_session *s, const char *addr);
+int mbt_session_is_self(struct mbt_session *s, const char *addr, uint16_t port);
 /* BEP 55 (torrent.c): a direct connect to addr:port failed; ask the peer that
  * told us about it to introduce us. Returns 0 if a rendezvous was sent. */
 int mbt_torrent_resolve_duplicate(struct mbt_torrent *t, struct mbt_peer *self,

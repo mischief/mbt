@@ -33,6 +33,7 @@
 .Nm mbt_peer_id ,
 .Nm mbt_peer_source ,
 .Nm mbt_peer_version ,
+.Nm mbt_peer_yourip ,
 .Nm mbt_peer_set_our_listen_port
 .Nd BitTorrent peer wire protocol state machine
 .Sh SYNOPSIS
@@ -97,6 +98,8 @@
 .Fn mbt_peer_source "struct mbt_peer *p"
 .Ft "const char *"
 .Fn mbt_peer_version "struct mbt_peer *p"
+.Ft "const char *"
+.Fn mbt_peer_yourip "struct mbt_peer *p"
 .Ft void
 .Fn mbt_peer_set_our_listen_port "struct mbt_peer *p" "uint16_t port"
 .Sh DESCRIPTION
@@ -156,6 +159,10 @@ for inbound peers.
 returns the BEP 10 client version string
 .Pq the Dq v
 key from the extension handshake, or NULL if not available.
+.Fn mbt_peer_yourip
+returns our own address as the peer sees it
+.Pq the BEP 10 Dq yourip
+key, IPv4 or IPv6, as a string, or NULL if the peer did not send one.
 .Fn mbt_peer_set_our_listen_port
 sets the listen port advertised to this peer in the BEP 10 handshake.
 .Ss Extension and internal helpers

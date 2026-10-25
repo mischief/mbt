@@ -83,6 +83,9 @@ test('holepunch', holepunch_test)
 holepunch_swarm_test = executable('holepunch_swarm_test', 'holepunch_swarm_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('holepunch_swarm', holepunch_swarm_test, timeout: 60, suite: 'utp')
 
+self_dial_test = executable('self_dial_test', 'self_dial_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('self_dial', self_dial_test, timeout: 30)
+
 # peer wire framing: messages whose length disagrees with what the handler
 # reads must not desync the stream (see peer_wire_test.c).
 peer_wire_test = executable('peer_wire_test', 'peer_wire_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)

@@ -138,6 +138,20 @@ struct mbt_session {
 	const char *pcp_gateway;
 	int enable_pcp;
 	char external_addr[INET6_ADDRSTRLEN]; /* our external IP from PCP, empty if unknown */
+
+	/*
+	 * Our own addresses, to avoid dialing ourselves: a tracker, DHT or PEX
+	 * hands us our own external address, and the connect then fails (no
+	 * hairpin NAT) or loops back to us and is rejected on peer id. Learned
+	 * from PCP, from peers' BEP 10 "yourip", and from rejected self
+	 * connections. Advisory only: a stale or wrong entry can only make us
+	 * skip one address on our own listen port.
+	 */
+#define SELF_ADDRS 8
+	struct {
+		char addr[INET6_ADDRSTRLEN];
+		time_t seen;
+	} self_addrs[SELF_ADDRS];
 	/* Listen socket (TCP) */
 	struct mbt_listener listener;
 
@@ -555,6 +569,15 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		char hex[MBT_PEER_ID_STRLEN + 1];
 		mbt_hex_encode(s->peer_id, MBT_PEER_ID_LEN, hex, sizeof(hex));
 		mbt_log_debug(MBT_LOG_SESSION, "self-connection rejected: peer_id=%s", hex);
+		/* We dialed ourselves through a hairpinning NAT; the source is
+		 * our external (or own) address. Remember it so the dialing side,
+		 * which only sees us close, stops trying. */
+		{
+			char saddr[INET6_ADDRSTRLEN];
+			uint16_t sport;
+			mbt_sockaddr_split(&pa->addr, saddr, sizeof(saddr), &sport);
+			mbt_session_note_self_addr(s, saddr);
+		}
 		close(pa->fd);
 		mbt_ev_io_free(pa->io);
 		free(pa);
@@ -650,6 +673,10 @@ pending_utp_read(struct mbt_conn *c, void *v)
 	memcpy(their_id, pa->hs + 48, 20);
 
 	if (memcmp(their_id, s->peer_id, MBT_PEER_ID_LEN) == 0) {
+		char saddr[INET6_ADDRSTRLEN];
+		uint16_t sport;
+		mbt_conn_peer_addr(pa->conn, saddr, sizeof(saddr), &sport);
+		mbt_session_note_self_addr(s, saddr);
 		pending_utp_accept_free(pa, 1);
 		return;
 	}
@@ -1708,6 +1735,42 @@ mbt_session_utp_ctx(struct mbt_session *s)
 	return s ? s->utp_ctx : NULL;
 }
 
+/* Remember addr as one of ours (see self_addrs). Replaces the oldest entry. */
+void
+mbt_session_note_self_addr(struct mbt_session *s, const char *addr)
+{
+	int slot = 0;
+
+	if (!s || !addr || !addr[0])
+		return;
+	for (int i = 0; i < SELF_ADDRS; i++) {
+		if (strcmp(s->self_addrs[i].addr, addr) == 0) {
+			s->self_addrs[i].seen = time(NULL);
+			return;
+		}
+		if (s->self_addrs[i].seen < s->self_addrs[slot].seen)
+			slot = i;
+	}
+	mbt_log_info(MBT_LOG_SESSION, "learned own address %s", addr);
+	snprintf(s->self_addrs[slot].addr, sizeof(s->self_addrs[slot].addr), "%s", addr);
+	s->self_addrs[slot].seen = time(NULL);
+}
+
+/* Is addr:port us? Only our own listen port counts: another host behind the
+ * same NAT shares the external address on a different port. */
+int
+mbt_session_is_self(struct mbt_session *s, const char *addr, uint16_t port)
+{
+	if (!s || port != s->listen_port)
+		return 0;
+	if (s->external_addr[0] && strcmp(addr, s->external_addr) == 0)
+		return 1;
+	for (int i = 0; i < SELF_ADDRS; i++)
+		if (s->self_addrs[i].addr[0] && strcmp(s->self_addrs[i].addr, addr) == 0)
+			return 1;
+	return 0;
+}
+
 /* Our external address from PCP ("" if unknown), for BEP 55 NoSelf. */
 const char *
 mbt_session_external_addr(struct mbt_session *s)
@@ -1773,9 +1836,15 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	if (mbt_torrent_peer_count(st->torrent) + pending >= s->max_peers)
 		return 0;
 
-	/* Skip self-connect (our own external address via PCP) */
-	if (s->external_addr[0] && strcmp(addr, s->external_addr) == 0 && port == s->listen_port)
+	/* Skip self-connect (our own external address via PCP, yourip, or a
+	 * previous self connection) */
+	if (mbt_session_is_self(s, addr, port)) {
+		mbt_log_debug(MBT_LOG_SESSION, "not dialing %s:%hu: it is us", addr, port);
+		struct mbt_peer_entry *self = mbt_peerdb_find(mbt_torrent_peerdb(st->torrent), addr, port);
+		if (self)
+			self->state = MBT_PEERDB_BANNED;
 		return 0;
+	}
 
 	/* Skip if already connected or connecting to this address */
 	STAILQ_FOREACH(pcc, &s->pending, next) {
