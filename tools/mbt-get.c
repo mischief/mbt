@@ -173,7 +173,7 @@ on_signal(int sig)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-dRqDPSLTU] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] [-W pkts] <file.torrent | magnet:?...>\n", prog);
+	fprintf(stderr, "usage: %s [-dRqDPSLTU] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] [-W pkts] <file.torrent | magnet:?... | infohash>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
 	fprintf(stderr, "  -R            enable trace logging (all components, very verbose)\n");
 	fprintf(stderr, "  -q            suppress progress output\n");
@@ -323,6 +323,12 @@ main(int argc, char *argv[])
 			errx(1, "add_magnet: %s", strerror(-rv));
 	} else {
 		rv = mbt_session_add_torrent_file(session, argv[0], NULL);
+		if (rv < 0 && strlen(argv[0]) == 40) {
+			/* Try as raw SHA1 infohash hex */
+			char mag[64];
+			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", argv[0]);
+			rv = mbt_session_add_magnet(session, mag, NULL);
+		}
 		if (rv < 0)
 			errx(1, "add_torrent: %s", strerror(-rv));
 	}
