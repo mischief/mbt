@@ -15,11 +15,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #include "mbt/event.h"
 #include "mbt/conn.h"
 #include "mbt/infohash.h"
 #include "mbt/peer.h"
+#include "mbt/holepunch.h"
 
 #define CHECK(c, ...) do { if (!(c)) { \
 	fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
@@ -43,6 +46,8 @@ struct rig {
 	int have_marker;        /* saw HAVE(MARKER_PIECE) */
 	int other_haves;        /* any HAVE that is not the marker */
 	int requests;
+	int holepunches;
+	struct mbt_hp_msg hp;
 	int error;
 	int err;
 	uint32_t req[3];
@@ -79,6 +84,15 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t off, uint32_t len,
 	r->req[0] = piece;
 	r->req[1] = off;
 	r->req[2] = len;
+}
+
+static void
+on_holepunch(struct mbt_peer *p, const struct mbt_hp_msg *m, void *arg)
+{
+	struct rig *r = arg;
+	(void)p;
+	r->holepunches++;
+	r->hp = *m;
 }
 
 static void
@@ -160,6 +174,7 @@ rig_open(struct rig *r, const char *ext_body, size_t ext_len)
 		.on_have = on_have,
 		.on_request = on_request,
 		.on_error = on_error,
+		.on_holepunch = on_holepunch,
 	};
 	uint8_t id[20], hs[68], rx[68];
 	struct mbt_conn *conn = NULL;
@@ -390,6 +405,129 @@ test_bad_ext_handshake(void)
 	rig_close(&r);
 }
 
+/* Read one whole message from the remote end; returns its length and copies
+ * up to cap bytes of the body (id included) into buf. */
+static size_t
+read_msg(int fd, uint8_t *buf, size_t cap)
+{
+	uint8_t hdr[4];
+	size_t got = 0, len;
+
+	while (got < 4) {
+		ssize_t n = read(fd, hdr + got, 4 - got);
+		CHECK(n > 0, "read length");
+		got += (size_t)n;
+	}
+	len = ((size_t)hdr[0] << 24) | ((size_t)hdr[1] << 16) |
+	      ((size_t)hdr[2] << 8) | hdr[3];
+	for (got = 0; got < len; ) {
+		uint8_t tmp[512];
+		size_t want = len - got < sizeof(tmp) ? len - got : sizeof(tmp);
+		ssize_t n = read(fd, tmp, want);
+		CHECK(n > 0, "read body");
+		for (ssize_t i = 0; i < n; i++)
+			if (got + (size_t)i < cap)
+				buf[got + (size_t)i] = tmp[i];
+		got += (size_t)n;
+	}
+	return len;
+}
+
+/* Our extension handshake advertises ut_holepunch. */
+static void
+test_holepunch_advertised(void)
+{
+	struct rig r;
+	uint8_t buf[2048];
+
+	printf("test_holepunch_advertised\n"); fflush(stdout);
+	rig_open(&r, NULL, 0);
+	size_t n = read_msg(r.fd, buf, sizeof(buf));
+	CHECK(n > 2 && n <= sizeof(buf) && buf[0] == BT_EXTENSION && buf[1] == 0,
+	    "first message is not an extension handshake");
+	CHECK(memmem(buf + 2, n - 2, "12:ut_holepunchi5e", 18) != NULL,
+	    "ut_holepunch not advertised");
+	rig_close(&r);
+}
+
+static void
+send_hp(int fd, uint8_t ext_id, const uint8_t *payload, size_t plen)
+{
+	uint8_t m[1 + 32];
+	m[0] = ext_id;
+	memcpy(m + 1, payload, plen);
+	send_msg(fd, BT_EXTENSION, m, 1 + plen);
+}
+
+static const uint8_t HP_CONNECT_V4[] = {
+	0x01, 0x00, 192, 0, 2, 7, 0x1a, 0xe1, 0, 0, 0, 0,
+};
+
+/* A holepunch message from a peer that advertised the extension reaches
+ * on_holepunch; one with trailing junk is dropped without desync. */
+static void
+test_holepunch_recv(void)
+{
+	struct rig r;
+	static const char hs[] = "d1:md12:ut_holepunchi9eee";
+	uint8_t bad[sizeof(HP_CONNECT_V4) + 3];
+
+	printf("test_holepunch_recv\n"); fflush(stdout);
+	rig_open(&r, hs, strlen(hs));
+	CHECK(mbt_peer_supports_holepunch(r.peer), "support not recorded");
+	send_hp(r.fd, 5, HP_CONNECT_V4, sizeof(HP_CONNECT_V4));
+	memcpy(bad, HP_CONNECT_V4, sizeof(HP_CONNECT_V4));
+	memset(bad + sizeof(HP_CONNECT_V4), 0, 3);
+	send_hp(r.fd, 5, bad, sizeof(bad));
+	expect_marker(&r, "holepunch recv");
+	CHECK(r.holepunches == 1, "holepunch callbacks: %d", r.holepunches);
+	CHECK(r.hp.type == MBT_HP_CONNECT, "type");
+	const struct sockaddr_in *sin = (const void *)&r.hp.addr;
+	CHECK(sin->sin_family == AF_INET && ntohs(sin->sin_port) == 6881 &&
+	    ntohl(sin->sin_addr.s_addr) == 0xc0000207, "addr");
+	rig_close(&r);
+}
+
+/* BEP 55: a peer that did not advertise ut_holepunch is ignored. */
+static void
+test_holepunch_unadvertised(void)
+{
+	struct rig r;
+
+	printf("test_holepunch_unadvertised\n"); fflush(stdout);
+	rig_open(&r, NULL, 0);
+	CHECK(!mbt_peer_supports_holepunch(r.peer), "support without advert");
+	send_hp(r.fd, 5, HP_CONNECT_V4, sizeof(HP_CONNECT_V4));
+	expect_marker(&r, "holepunch unadvertised");
+	CHECK(r.holepunches == 0, "holepunch delivered without advert");
+	rig_close(&r);
+}
+
+/* Sending uses the peer's own id for the extension. */
+static void
+test_holepunch_send(void)
+{
+	struct rig r;
+	static const char hs[] = "d1:md12:ut_holepunchi9eee";
+	struct mbt_hp_msg m;
+	uint8_t buf[2048];
+
+	printf("test_holepunch_send\n"); fflush(stdout);
+	rig_open(&r, hs, strlen(hs));
+	CHECK(mbt_hp_decode(HP_CONNECT_V4, sizeof(HP_CONNECT_V4), &m) == 0, "decode");
+	CHECK(mbt_peer_send_holepunch(r.peer, &m) == 0, "send");
+	(void)read_msg(r.fd, buf, sizeof(buf));     /* our extension handshake */
+	size_t n = read_msg(r.fd, buf, sizeof(buf));
+	CHECK(n == 2 + sizeof(HP_CONNECT_V4), "length %zu", n);
+	CHECK(buf[0] == BT_EXTENSION && buf[1] == 9, "header %u %u", buf[0], buf[1]);
+	CHECK(memcmp(buf + 2, HP_CONNECT_V4, sizeof(HP_CONNECT_V4)) == 0, "payload");
+	rig_close(&r);
+
+	rig_open(&r, NULL, 0);
+	CHECK(mbt_peer_send_holepunch(r.peer, &m) == -ENOTSUP, "send without advert");
+	rig_close(&r);
+}
+
 static const struct {
 	const char *name;
 	void (*fn)(void);
@@ -403,6 +541,10 @@ static const struct {
 	{ "big_ext_handshake_first", test_big_ext_handshake_first },
 	{ "big_ext_handshake_again", test_big_ext_handshake_again },
 	{ "bad_ext_handshake", test_bad_ext_handshake },
+	{ "holepunch_advertised", test_holepunch_advertised },
+	{ "holepunch_recv", test_holepunch_recv },
+	{ "holepunch_unadvertised", test_holepunch_unadvertised },
+	{ "holepunch_send", test_holepunch_send },
 };
 
 /* With no argument run every case; with a name, only that one. */

@@ -18,6 +18,7 @@
 #include "mbt/peer.h"
 #include "mbt/bitmap.h"
 #include "mbt/be.h"
+#include "mbt/holepunch.h"
 #include "internal.h"
 #include "version.h"
 
@@ -28,6 +29,14 @@ struct mbt_ev_timer;
 enum {
 	HANDSHAKE_SIZE = 1 + 19 + 8 + 20 + 20, /* 68 */
 	METADATA_BLOCKSIZE = 1 << 14,
+};
+
+/* Our BEP 10 extended message ids: what we advertise in "m" and what peers
+ * put in the header of extended messages they send us. */
+enum {
+	EXT_ID_UT_METADATA  = 3,
+	EXT_ID_UT_PEX       = 4,
+	EXT_ID_UT_HOLEPUNCH = 5,
 };
 
 /* Handshake reserved byte flags */
@@ -64,6 +73,7 @@ struct mbt_peer {
 	char client_version[20]; /* BEP 10 "v" string, empty if unknown */
 	uint8_t ut_metadata_id; /* their msg id for ut_metadata, 0=unsupported */
 	uint8_t ut_pex_id;     /* their msg id for ut_pex, 0=unsupported */
+	uint8_t ut_holepunch_id; /* their msg id for ut_holepunch (BEP 55), 0=unsupported */
 	uint8_t have_all;      /* BEP 6: peer sent HAVE_ALL (deferred until piece_count known) */
 	size_t metadata_size;
 	int reqq;              /* peer's max outstanding requests (0=unknown) */
@@ -200,8 +210,9 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	_cleanup_be_ struct mbt_be_value *m = NULL;
 	if (mbt_be_dict_new(&be) < 0) return -ENOMEM;
 	if (mbt_be_dict_new(&m) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_number(m, "ut_metadata", 3) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_number(m, "ut_pex", 4) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(m, "ut_holepunch", EXT_ID_UT_HOLEPUNCH) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(m, "ut_metadata", EXT_ID_UT_METADATA) < 0) return -ENOMEM;
+	if (mbt_be_dict_append_number(m, "ut_pex", EXT_ID_UT_PEX) < 0) return -ENOMEM;
 	if (mbt_be_dict_append(be, "m", m) < 0) return -ENOMEM;
 	if (p->our_listen_port > 0)
 		if (mbt_be_dict_append_number(be, "p", p->our_listen_port) < 0) return -ENOMEM;
@@ -254,6 +265,13 @@ peer_parse_extension_handshake(struct mbt_peer *p, const unsigned char *buf,
 		struct mbt_be_value *utp = mbt_be_find(tmp, "ut_pex");
 		if (utp && utp->type == BE_INTEGER)
 			p->ut_pex_id = (uint8_t)utp->integer;
+
+		/* BEP 10: an id of 0 in a later handshake disables the
+		 * extension; out-of-range ids are treated the same way. */
+		struct mbt_be_value *uth = mbt_be_find(tmp, "ut_holepunch");
+		if (uth && uth->type == BE_INTEGER)
+			p->ut_holepunch_id = (uth->integer > 0 && uth->integer < 256)
+			                     ? (uint8_t)uth->integer : 0;
 	}
 
 	tmp = mbt_be_find(be, "p");
@@ -497,7 +515,7 @@ peer_rx_message(struct mbt_peer *p)
 			/* extension handshake (can arrive again) */
 			if ((rv = peer_recv_extension_handshake(p)) < 0)
 				return rv;
-		} else if (p->ut_metadata_id && extcmd == 3) {
+		} else if (p->ut_metadata_id && extcmd == EXT_ID_UT_METADATA) {
 			/* ut_metadata message */
 			unsigned char *mbuf;
 			size_t mlen;
@@ -525,7 +543,7 @@ peer_rx_message(struct mbt_peer *p)
 				}
 			}
 			free(mbuf);
-		} else if (extcmd == 4) {
+		} else if (extcmd == EXT_ID_UT_PEX) {
 			/* ut_pex: peer exchange */
 			unsigned char *pbuf;
 			size_t plen;
@@ -561,6 +579,25 @@ peer_rx_message(struct mbt_peer *p)
 				}
 			}
 			free(pbuf);
+		} else if (extcmd == EXT_ID_UT_HOLEPUNCH) {
+			/* BEP 55. Messages from a peer that did not advertise
+			 * ut_holepunch MUST be ignored silently, as must
+			 * malformed ones. */
+			unsigned char hbuf[MBT_HP_MSG_MAX_LEN];
+			size_t hlen = p->msglen;
+			struct mbt_hp_msg hm;
+
+			if (!p->ut_holepunch_id || hlen > sizeof(hbuf))
+				break;
+			if ((rv = peer_take(p, hbuf, hlen)) < 0)
+				return rv;
+			if (mbt_hp_decode(hbuf, hlen, &hm) < 0) {
+				mbt_log_debug(MBT_LOG_PEER, "%s:%hu: bad ut_holepunch message (%zu bytes)",
+				              p->addr, p->conn_port, hlen);
+				break;
+			}
+			if (p->cb.on_holepunch)
+				p->cb.on_holepunch(p, &hm, p->cb_arg);
 		}
 		/* unknown extension: peer_skip() below discards it */
 		break;
@@ -929,6 +966,30 @@ uint8_t
 mbt_peer_ut_pex_id(struct mbt_peer *p)
 {
 	return p->ut_pex_id;
+}
+
+int
+mbt_peer_supports_holepunch(struct mbt_peer *p)
+{
+	return p->ut_holepunch_id != 0;
+}
+
+int
+mbt_peer_send_holepunch(struct mbt_peer *p, const struct mbt_hp_msg *msg)
+{
+	uint8_t buf[2 + MBT_HP_MSG_MAX_LEN];
+	int n;
+
+	if (!p->ut_holepunch_id)
+		return -ENOTSUP;
+	if (p->state != MBT_PEER_ACTIVE)
+		return -ENOTCONN;
+	n = mbt_hp_encode(msg, buf + 2, sizeof(buf) - 2);
+	if (n < 0)
+		return n;
+	buf[0] = BT_EXTENSION;
+	buf[1] = p->ut_holepunch_id;
+	return (int)peer_write_msg(p, buf, 2 + (size_t)n);
 }
 void
 mbt_peer_free(struct mbt_peer *p)

@@ -24,6 +24,7 @@ struct mbt_conn;
 struct mbt_ev;
 struct mbt_infohash;
 struct mbt_bitmap;
+struct mbt_hp_msg;
 
 /* Peer states */
 enum mbt_peer_state {
@@ -97,6 +98,11 @@ struct mbt_peer_callbacks {
 	/* BEP 6 Fast: peer rejected our request */
 	void (*on_reject)(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	                  uint32_t length, void *arg);
+
+	/* BEP 55: a well-formed ut_holepunch message from a peer that
+	 * advertised the extension (others are dropped before this). */
+	void (*on_holepunch)(struct mbt_peer *p, const struct mbt_hp_msg *msg,
+	                     void *arg);
 };
 
 /* Create peer from a connected mbt_conn (takes ownership of conn) */
@@ -116,6 +122,11 @@ MBT_API void mbt_peer_set_our_metadata_size(struct mbt_peer *p, size_t sz);
 MBT_API void mbt_peer_set_our_reqq(struct mbt_peer *p, int reqq);
 MBT_API void mbt_peer_set_piece_count(struct mbt_peer *p, uint32_t count);
 MBT_API uint8_t mbt_peer_ut_pex_id(struct mbt_peer *p);
+/* BEP 55: does the peer support ut_holepunch (advertised in its handshake)? */
+MBT_API int mbt_peer_supports_holepunch(struct mbt_peer *p);
+/* BEP 55: send a ut_holepunch message. -ENOTSUP if the peer did not
+ * advertise the extension. */
+MBT_API int mbt_peer_send_holepunch(struct mbt_peer *p, const struct mbt_hp_msg *msg);
 
 /* Free peer (closes connection) */
 MBT_API void mbt_peer_free(struct mbt_peer *p);
