@@ -188,15 +188,17 @@ if get_option('tests')
 endif
 
 # Tools
-executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true)
-executable('mbt-torrent', 'tools/mbt-torrent.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true)
-executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true)
-executable('mbt-dhtd', 'tools/mbt-dhtd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true)
-executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true)
+# Installed binaries find libmbt in a non-system prefix.
+mbt_rpath = get_option('prefix') == '/usr' ? '' : get_option('prefix') / get_option('libdir')
+executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+executable('mbt-torrent', 'tools/mbt-torrent.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+executable('mbt-dhtd', 'tools/mbt-dhtd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 
 libcurl_dep = dependency('libcurl', required: false)
 if libcurl_dep.found()
-  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [libcurl_dep], install: true)
+  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [libcurl_dep], install: true, install_rpath: mbt_rpath)
 endif
 
 # Fuzz
@@ -208,5 +210,5 @@ if not ncurses_dep.found()
   ncurses_dep = dependency('ncurses', required: false)
 endif
 if ncurses_dep.found() and libcurl_dep.found()
-  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep, libcurl_dep], install: true)
+  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep, libcurl_dep], install: true, install_rpath: mbt_rpath)
 endif
