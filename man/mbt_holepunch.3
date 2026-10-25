@@ -1,0 +1,108 @@
+.\" SPDX-License-Identifier: ISC
+.Dd October 24, 2026
+.Dt MBT_HOLEPUNCH 3
+.Os
+.Sh NAME
+.Nm mbt_hp_encode ,
+.Nm mbt_hp_decode ,
+.Nm mbt_hp_type_str ,
+.Nm mbt_hp_error_str
+.Nd BEP 55 holepunch message codec
+.Sh SYNOPSIS
+.In mbt/holepunch.h
+.Ft int
+.Fn mbt_hp_encode "const struct mbt_hp_msg *msg" "void *buf" "size_t cap"
+.Ft int
+.Fn mbt_hp_decode "const void *buf" "size_t len" "struct mbt_hp_msg *msg"
+.Ft const char *
+.Fn mbt_hp_type_str "enum mbt_hp_type type"
+.Ft const char *
+.Fn mbt_hp_error_str "uint32_t err"
+.Sh DESCRIPTION
+These functions convert between
+.Vt struct mbt_hp_msg
+and the binary payload of a BEP 55
+.Dq ut_holepunch
+extension message, the bytes after the BEP 10 extended message header.
+.Bd -literal
+struct mbt_hp_msg {
+	enum mbt_hp_type type;
+	struct sockaddr_storage addr;
+	uint32_t err;
+};
+.Ed
+.Pp
+.Fa type
+is
+.Dv MBT_HP_RENDEZVOUS ,
+.Dv MBT_HP_CONNECT
+or
+.Dv MBT_HP_ERROR .
+.Fa addr
+holds an
+.Dv AF_INET
+or
+.Dv AF_INET6
+socket address with the port in network byte order.
+.Fa err
+is one of
+.Dv MBT_HP_ERR_NO_SUCH_PEER ,
+.Dv MBT_HP_ERR_NOT_CONNECTED ,
+.Dv MBT_HP_ERR_NO_SUPPORT
+or
+.Dv MBT_HP_ERR_NO_SELF
+in an error message, and 0 otherwise.
+.Pp
+.Fn mbt_hp_encode
+writes
+.Fa msg
+to
+.Fa buf ,
+which holds
+.Fa cap
+bytes.
+The error code is written only for
+.Dv MBT_HP_ERROR
+messages.
+.Pp
+.Fn mbt_hp_decode
+parses the
+.Fa len
+byte payload in
+.Fa buf
+into
+.Fa msg .
+The payload must be exactly
+.Dv MBT_HP_MSG_V4_LEN
+(12) or
+.Dv MBT_HP_MSG_V6_LEN
+(24) bytes, matching its address type.
+Unknown error codes in an error message are passed through.
+.Pp
+.Fn mbt_hp_type_str
+and
+.Fn mbt_hp_error_str
+return static names for logging, or
+.Dq unknown .
+.Sh RETURN VALUES
+.Fn mbt_hp_encode
+returns the payload length, or
+.Er -EINVAL
+for an unknown message type or address family, or
+.Er -ENOBUFS
+if
+.Fa cap
+is too small.
+.Pp
+.Fn mbt_hp_decode
+returns 0, or
+.Er -EPROTO
+if the length does not match the address type, the message or address
+type is unknown, or a non-error message carries a nonzero error code.
+.Sh SEE ALSO
+.Xr mbt 3 ,
+.Xr mbt_peer 3
+.Sh STANDARDS
+BEP 55, Holepunch extension.
+.Sh AUTHORS
+.An Nick Owens Aq Mt mischief@offblast.org

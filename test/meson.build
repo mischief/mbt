@@ -77,6 +77,9 @@ test('metainfo', metainfo_test)
 magnet_flow_test = executable('magnet_flow_test', 'magnet_flow_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('magnet_flow', magnet_flow_test, timeout: 15)
 
+holepunch_test = executable('holepunch_test', 'holepunch_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('holepunch', holepunch_test)
+
 # peer wire framing: messages whose length disagrees with what the handler
 # reads must not desync the stream (see peer_wire_test.c).
 peer_wire_test = executable('peer_wire_test', 'peer_wire_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
