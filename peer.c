@@ -231,19 +231,17 @@ peer_send_extension_handshake(struct mbt_peer *p)
 }
 
 static int
-peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
+peer_parse_extension_handshake(struct mbt_peer *p, const unsigned char *buf,
+                               size_t len)
 {
-	unsigned char buf[1024];
 	_cleanup_be_ struct mbt_be_value *be = NULL;
 	struct mbt_be_value *tmp;
-	ssize_t rd;
 	int rv;
 
-	rd = mbt_conn_read(p->conn, buf, MIN(sizeof(buf), len));
-	if (rd <= 0)
+	if (len == 0)
 		return -ENOMSG;
 
-	rv = mbt_be_value_parse(buf, rd, &be);
+	rv = mbt_be_value_parse(buf, len, &be);
 	if (rv < 0)
 		return rv;
 
@@ -282,7 +280,90 @@ peer_recv_extension_handshake(struct mbt_peer *p, size_t len)
 	return 0;
 }
 
+static int peer_take_rest(struct mbt_peer *p, unsigned char **out, size_t *len);
+
+/* Read the rest of the current message as an extension handshake. The whole
+ * dictionary is read whatever its size (the old fixed 1024-byte buffer left
+ * the tail of a larger handshake in the stream). A malformed handshake is
+ * logged and ignored; the message is consumed either way. */
+static int
+peer_recv_extension_handshake(struct mbt_peer *p)
+{
+	unsigned char *buf;
+	size_t len;
+	int rv;
+
+	rv = peer_take_rest(p, &buf, &len);
+	if (rv < 0)
+		return rv;
+	rv = peer_parse_extension_handshake(p, buf, len);
+	if (rv < 0)
+		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: bad extension handshake (%zu bytes)",
+		              p->addr, p->conn_port, len);
+	free(buf);
+	return 0;
+}
+
 /* --- Message dispatch (ACTIVE state) --- */
+
+/*
+ * Message body accounting. p->msglen is the number of bytes of the current
+ * message not yet consumed; the read watermark guarantees all of them are
+ * buffered. Every read of a message body goes through peer_take(), and
+ * peer_skip() discards whatever a handler left over, so a message that is
+ * longer than its handler expects can never leave bytes behind to be parsed
+ * as the next length prefix.
+ */
+static int
+peer_take(struct mbt_peer *p, void *buf, size_t n)
+{
+	if (n > p->msglen)
+		return -EPROTO;
+	if (mbt_conn_read(p->conn, buf, n) != (ssize_t)n)
+		return -EIO;
+	p->msglen -= n;
+	return 0;
+}
+
+static void
+peer_skip(struct mbt_peer *p)
+{
+	unsigned char discard[1024];
+
+	while (p->msglen > 0) {
+		size_t chunk = MIN(p->msglen, sizeof(discard));
+		ssize_t n = mbt_conn_read(p->conn, discard, chunk);
+		if (n <= 0)
+			break;
+		p->msglen -= (size_t)n;
+	}
+	p->msglen = 0;
+}
+
+/* Read the rest of the message into a fresh buffer (*out, *len). An empty
+ * remainder yields *out == NULL and *len == 0. */
+static int
+peer_take_rest(struct mbt_peer *p, unsigned char **out, size_t *len)
+{
+	size_t n = p->msglen;
+	int rv;
+
+	*out = NULL;
+	*len = 0;
+	if (n == 0)
+		return 0;
+	unsigned char *buf = malloc(n);
+	if (!buf)
+		return -ENOMEM;
+	rv = peer_take(p, buf, n);
+	if (rv < 0) {
+		free(buf);
+		return rv;
+	}
+	*out = buf;
+	*len = n;
+	return 0;
+}
 
 static int
 peer_rx_message(struct mbt_peer *p)
@@ -323,12 +404,16 @@ peer_rx_message(struct mbt_peer *p)
 		return 0;
 	}
 
-	sz = mbt_conn_read(p->conn, &cmd, 1);
-	if (sz != 1)
-		return -EIO;
-	p->msglen -= 1;
+	rv = peer_take(p, &cmd, 1);
+	if (rv < 0)
+		return rv;
 
-
+	/*
+	 * Each case reads its fixed fields with peer_take(), which fails with
+	 * -EPROTO on a message too short for them (rather than reading into the
+	 * next message). Trailing bytes a case does not use are discarded by
+	 * peer_skip() after the switch.
+	 */
 	switch (cmd) {
 	case BT_CHOKE:
 		p->peer_choking = 1;
@@ -355,7 +440,8 @@ peer_rx_message(struct mbt_peer *p)
 		break;
 
 	case BT_HAVE:
-		sz = mbt_conn_read(p->conn, buf, 4);
+		if ((rv = peer_take(p, buf, 4)) < 0)
+			return rv;
 		{ struct mbt_unpacker pk; mbt_unpack_init(&pk, buf, 4); piece = mbt_unpack_u32(&pk); }
 		if (!p->bitfield && p->piece_count > 0)
 			mbt_bitmap_new_bits(&p->bitfield, p->piece_count);
@@ -367,11 +453,12 @@ peer_rx_message(struct mbt_peer *p)
 
 	case BT_BITFIELD:
 		{
-		unsigned char *bfbuf = malloc(p->msglen);
-		if (!bfbuf) return -ENOMEM;
-		sz = mbt_conn_read(p->conn, bfbuf, p->msglen);
+		unsigned char *bfbuf;
+		size_t bflen;
+		if ((rv = peer_take_rest(p, &bfbuf, &bflen)) < 0)
+			return rv;
 		mbt_bitmap_unref(p->bitfield);
-		mbt_bitmap_fromarray(&p->bitfield, bfbuf, sz, p->piece_count);
+		mbt_bitmap_fromarray(&p->bitfield, bfbuf, bflen, p->piece_count);
 		free(bfbuf);
 		if (p->cb.on_bitfield)
 			p->cb.on_bitfield(p, p->bitfield, p->cb_arg);
@@ -379,7 +466,8 @@ peer_rx_message(struct mbt_peer *p)
 		}
 
 	case BT_REQUEST:
-		sz = mbt_conn_read(p->conn, buf, 12);
+		if ((rv = peer_take(p, buf, 12)) < 0)
+			return rv;
 		{ struct mbt_unpacker pk; mbt_unpack_init(&pk, buf, 12); piece = mbt_unpack_u32(&pk); offset = mbt_unpack_u32(&pk); req_len = mbt_unpack_u32(&pk); }
 		if (p->cb.on_request)
 			p->cb.on_request(p, piece, offset, req_len, p->cb_arg);
@@ -387,13 +475,14 @@ peer_rx_message(struct mbt_peer *p)
 
 	case BT_PIECE: {
 		unsigned char hdr[8];
-		sz = mbt_conn_read(p->conn, hdr, 8);
+		if ((rv = peer_take(p, hdr, 8)) < 0)
+			return rv;
 		{ struct mbt_unpacker pk; mbt_unpack_init(&pk, hdr, 8); piece = mbt_unpack_u32(&pk); offset = mbt_unpack_u32(&pk); }
-		size_t data_len = p->msglen - 8;
-		unsigned char *data = malloc(data_len);
-		if (!data) return -ENOMEM;
-		sz = mbt_conn_read(p->conn, data, data_len);
-		if (p->cb.on_piece)
+		unsigned char *data;
+		size_t data_len;
+		if ((rv = peer_take_rest(p, &data, &data_len)) < 0)
+			return rv;
+		if (data_len > 0 && p->cb.on_piece)
 			p->cb.on_piece(p, piece, offset, data, data_len, p->cb_arg);
 		free(data);
 		break;
@@ -401,17 +490,20 @@ peer_rx_message(struct mbt_peer *p)
 
 	case BT_EXTENSION: {
 		uint8_t extcmd;
-		sz = mbt_conn_read(p->conn, &extcmd, 1);
-		p->msglen -= 1;
+		if ((rv = peer_take(p, &extcmd, 1)) < 0)
+			return rv;
 
 		if (extcmd == 0) {
 			/* extension handshake (can arrive again) */
-			peer_recv_extension_handshake(p, p->msglen);
+			if ((rv = peer_recv_extension_handshake(p)) < 0)
+				return rv;
 		} else if (p->ut_metadata_id && extcmd == 3) {
 			/* ut_metadata message */
-			unsigned char *mbuf = malloc(p->msglen);
-			if (!mbuf) return -ENOMEM;
-			sz = mbt_conn_read(p->conn, mbuf, p->msglen);
+			unsigned char *mbuf;
+			size_t mlen;
+			if ((rv = peer_take_rest(p, &mbuf, &mlen)) < 0)
+				return rv;
+			sz = (ssize_t)mlen;
 
 			_cleanup_be_ struct mbt_be_value *be = NULL;
 			rv = mbt_be_value_parse(mbuf, sz, &be);
@@ -435,9 +527,11 @@ peer_rx_message(struct mbt_peer *p)
 			free(mbuf);
 		} else if (extcmd == 4) {
 			/* ut_pex: peer exchange */
-			unsigned char *pbuf = malloc(p->msglen);
-			if (!pbuf) return -ENOMEM;
-			sz = mbt_conn_read(p->conn, pbuf, p->msglen);
+			unsigned char *pbuf;
+			size_t plen;
+			if ((rv = peer_take_rest(p, &pbuf, &plen)) < 0)
+				return rv;
+			sz = (ssize_t)plen;
 
 			_cleanup_be_ struct mbt_be_value *be = NULL;
 			rv = mbt_be_value_parse(pbuf, sz, &be);
@@ -467,27 +561,18 @@ peer_rx_message(struct mbt_peer *p)
 				}
 			}
 			free(pbuf);
-		} else {
-			/* unknown extension, discard */
-			if (p->msglen > 0) {
-				unsigned char discard[1024];
-				size_t rem = p->msglen;
-				while (rem > 0) {
-					size_t chunk = rem < sizeof(discard) ? rem : sizeof(discard);
-					mbt_conn_read(p->conn, discard, chunk);
-					rem -= chunk;
-				}
-			}
 		}
+		/* unknown extension: peer_skip() below discards it */
 		break;
 	}
+
 
 	default:
 		/* BEP 5: PORT message — peer's DHT port */
 		if (cmd == BT_PORT && p->msglen >= 2) {
 			uint8_t portbuf[2];
-			mbt_conn_read(p->conn, portbuf, 2);
-			p->msglen -= 2;
+			if ((rv = peer_take(p, portbuf, 2)) < 0)
+				return rv;
 			uint16_t dht_port = (portbuf[0] << 8) | portbuf[1];
 			if (p->cb.on_port)
 				p->cb.on_port(p, dht_port, p->cb_arg);
@@ -528,8 +613,8 @@ peer_rx_message(struct mbt_peer *p)
 		if (cmd == BT_REJECT && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 12) {
 			/* REJECT_REQUEST — peer won't serve this block */
 			unsigned char rj[12];
-			mbt_conn_read(p->conn, rj, 12);
-			p->msglen -= 12;
+			if ((rv = peer_take(p, rj, 12)) < 0)
+				return rv;
 			uint32_t rpiece, roffset, rlen;
 			{ struct mbt_unpacker pk; mbt_unpack_init(&pk, rj, 12); rpiece = mbt_unpack_u32(&pk); roffset = mbt_unpack_u32(&pk); rlen = mbt_unpack_u32(&pk); }
 			if (p->cb.on_reject)
@@ -539,26 +624,17 @@ peer_rx_message(struct mbt_peer *p)
 		if (cmd == BT_ALLOWED_FAST && (p->flags & MBT_PEER_FLAG_FAST) && p->msglen >= 4) {
 			/* ALLOWED_FAST — piece we can request while choked */
 			unsigned char af[4];
-			mbt_conn_read(p->conn, af, 4);
-			p->msglen -= 4;
+			if ((rv = peer_take(p, af, 4)) < 0)
+				return rv;
 			/* Store or just log — for now ignore (we still request normally) */
 			break;
 		}
 
-		/* unknown message, discard payload */
-		if (p->msglen > 0) {
-			unsigned char discard[1024];
-			size_t rem = p->msglen;
-			while (rem > 0) {
-				size_t chunk = rem < sizeof(discard) ? rem : sizeof(discard);
-				mbt_conn_read(p->conn, discard, chunk);
-				rem -= chunk;
-			}
-		}
+		/* unknown message: peer_skip() below discards the payload */
 		break;
 	}
 
-	p->msglen = 0;
+	peer_skip(p);
 	mbt_conn_set_watermark(p->conn, 4);
 	return 0;
 }
@@ -620,6 +696,16 @@ peer_on_read(struct mbt_conn *c, void *v)
 
 			if (length == 0) break; /* keepalive */
 
+			/* Same cap as the ACTIVE path: we wait for the whole message
+			 * to be buffered, so an unbounded length would let the peer
+			 * make us buffer without limit. */
+			if (length > (1 << 18)) {
+				mbt_log_warn(MBT_LOG_PEER, "%s:%hu: msg too large: %u",
+				             p->addr, p->conn_port, length);
+				peer_error(p, -ENOMSG);
+				return;
+			}
+
 			if (length < 2) {
 				unsigned char skip[16];
 				if (length > 0)
@@ -636,20 +722,11 @@ peer_on_read(struct mbt_conn *c, void *v)
 			return; /* wait for full message */
 		}
 
-		/* Second pass: full message available */
-		length = p->msglen;
-		p->msglen = 0;
-
-		sz = mbt_conn_read(p->conn, &cmd, 1);
+		/* Second pass: full message available (length >= 2) */
+		if ((rv = peer_take(p, &cmd, 1)) < 0) { peer_error(p, rv); return; }
 		if (cmd != BT_EXTENSION) {
 			/* Non-extension message — skip and go active */
-			size_t rem = length - 1;
-			while (rem > 0) {
-				unsigned char discard[1024];
-				size_t chunk = rem < sizeof(discard) ? rem : sizeof(discard);
-				mbt_conn_read(p->conn, discard, chunk);
-				rem -= chunk;
-			}
+			peer_skip(p);
 			p->state = MBT_PEER_ACTIVE;
 			mbt_conn_set_watermark(p->conn, 4);
 			if (p->cb.on_active)
@@ -657,10 +734,13 @@ peer_on_read(struct mbt_conn *c, void *v)
 			break;
 		}
 
-		sz = mbt_conn_read(p->conn, &extcmd, 1);
-		if (extcmd == 0) {
-			peer_recv_extension_handshake(p, length - 2);
+		if ((rv = peer_take(p, &extcmd, 1)) < 0) { peer_error(p, rv); return; }
+		if (extcmd == 0 &&
+		    (rv = peer_recv_extension_handshake(p)) < 0) {
+			peer_error(p, rv);
+			return;
 		}
+		peer_skip(p);
 
 		p->state = MBT_PEER_ACTIVE;
 		mbt_log_debug(MBT_LOG_PEER, "%s:%hu: ACTIVE (metadata_size=%zu reqq=%d)",
