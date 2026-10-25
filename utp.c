@@ -277,6 +277,14 @@ struct mbt_utp_ctx {
 	               const struct sockaddr *src, socklen_t srclen, void *arg);
 	void *rx_hook_arg;
 
+	/* Test-only transmit observer/filter, the mirror of rx_hook: consulted
+	 * for each datagram we send; return 0 to drop it. With rx_hook it lets
+	 * tests model a stateful firewall (inbound allowed only from endpoints
+	 * we have sent to). */
+	int (*tx_hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
+	               const struct sockaddr *dst, socklen_t dstlen, void *arg);
+	void *tx_hook_arg;
+
 	struct utp_sock_list buckets[UTP_CONN_HASH_SIZE];
 };
 
@@ -814,6 +822,11 @@ utp_do_sendto(struct mbt_utp_sock *s, const void *buf, size_t len)
 	struct mbt_utp_ctx *ctx = s->ctx;
 
 	utp_trace_pkt("tx", buf, len);
+
+	if (ctx->tx_hook &&
+	    ctx->tx_hook(ctx, buf, len, (struct sockaddr *)&s->peer_addr,
+	                 s->peer_addrlen, ctx->tx_hook_arg) == 0)
+		return (int)len;	/* dropped "on the wire" */
 
 	return mbt_udp_mux_sendto(ctx->mux, buf, len,
 	                          (struct sockaddr *)&s->peer_addr, s->peer_addrlen);
@@ -1636,6 +1649,16 @@ mbt_utp_ctx_set_rx_hook(struct mbt_utp_ctx *ctx,
 {
 	ctx->rx_hook     = hook;
 	ctx->rx_hook_arg = arg;
+}
+
+void
+mbt_utp_ctx_set_tx_hook(struct mbt_utp_ctx *ctx,
+    int (*hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
+                const struct sockaddr *dst, socklen_t dstlen, void *arg),
+    void *arg)
+{
+	ctx->tx_hook     = hook;
+	ctx->tx_hook_arg = arg;
 }
 
 void

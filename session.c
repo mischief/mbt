@@ -90,6 +90,7 @@ struct pending_utp_connect {
 	char                addr[INET6_ADDRSTRLEN];
 	uint16_t            port;
 	enum mbt_peer_source source;
+	int                 holepunch; /* BEP 55 attempt: failure must not mark utp_cap NO */
 	STAILQ_ENTRY(pending_utp_connect) next;
 };
 
@@ -433,6 +434,16 @@ pending_utp_connect_event(struct mbt_conn *c, int err, void *v)
 
 	STAILQ_REMOVE(&s->pending_utp, pc, pending_utp_connect, next);
 
+	if (err < 0 && pc->holepunch) {
+		/* The far side's NAT/firewall never let our SYN through (or
+		 * the target chose to ignore the connect). Nothing learned
+		 * about uTP support; leave the peerdb entry alone. */
+		mbt_log_info(MBT_LOG_SESSION, "holepunch uTP connect to %s:%hu failed: %s",
+		             pc->addr, pc->port, strerror(-err));
+		pending_utp_connect_free(pc, 1);
+		return;
+	}
+
 	if (err < 0) {
 		mbt_log_debug(MBT_LOG_SESSION, "uTP connect to %s:%hu failed: %s (will try TCP)",
 		             pc->addr, pc->port, strerror(-err));
@@ -445,6 +456,11 @@ pending_utp_connect_event(struct mbt_conn *c, int err, void *v)
 			pe->utp_cap = MBT_UTP_NO;
 			pe->state = MBT_PEERDB_KNOWN;
 		}
+		/* BEP 55: the peer may be behind a NAT or firewall that drops
+		 * unsolicited SYNs. If a connected peer told us about it and
+		 * both support holepunch, ask for an introduction (rate
+		 * limited per target in torrent.c). */
+		mbt_torrent_holepunch_rendezvous(pc->torrent, pc->addr, pc->port);
 		pending_utp_connect_free(pc, 1);
 		return;
 	}
@@ -557,15 +573,13 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		return;
 	}
 
-	/* Reject duplicate peer_id (same peer connecting twice) */
-	for (int i = 0; i < mbt_torrent_peer_count(st->torrent); i++) {
-		struct mbt_peer *ep = mbt_torrent_peer_at(st->torrent, i);
-		if (ep && mbt_peer_id_eq(mbt_peer_id(ep), their_id)) {
-			close(pa->fd);
-			mbt_ev_io_free(pa->io);
-			free(pa);
-			return;
-		}
+	/* Duplicate peer_id: keep one of the two by the symmetric rule in
+	 * mbt_torrent_resolve_duplicate (BEP 55 simultaneous opens). */
+	if (!mbt_torrent_resolve_duplicate(st->torrent, NULL, their_id, 0)) {
+		close(pa->fd);
+		mbt_ev_io_free(pa->io);
+		free(pa);
+		return;
 	}
 
 	/* Enforce peer limit */
@@ -650,12 +664,9 @@ pending_utp_read(struct mbt_conn *c, void *v)
 		return;
 	}
 
-	for (int i = 0; i < mbt_torrent_peer_count(st->torrent); i++) {
-		struct mbt_peer *ep = mbt_torrent_peer_at(st->torrent, i);
-		if (ep && mbt_peer_id_eq(mbt_peer_id(ep), their_id)) {
-			pending_utp_accept_free(pa, 1);
-			return;
-		}
+	if (!mbt_torrent_resolve_duplicate(st->torrent, NULL, their_id, 0)) {
+		pending_utp_accept_free(pa, 1);
+		return;
 	}
 
 	if (mbt_torrent_peer_count(st->torrent) >= s->max_peers) {
@@ -1626,6 +1637,90 @@ mbt_session_torrent_tracker(struct mbt_session *s, struct mbt_torrent *t, int id
 }
 
 /* --- Peer connection --- */
+
+/*
+ * BEP 55 target / initiator side: a relay told us to start a uTP connection
+ * to addr:port, the endpoint it sees for the other peer. Unlike
+ * mbt_session_add_peer this always uses uTP (the whole point is the
+ * simultaneous UDP open through both NATs), dials even while seeding, and
+ * ignores a learned utp_cap of NO (that came from a direct attempt the far
+ * NAT dropped). Returns 0 if a connect was started or is already pending or
+ * established, <0 on error.
+ */
+int
+mbt_session_holepunch_connect(struct mbt_session *s, struct mbt_torrent *t,
+                              const char *addr, uint16_t port)
+{
+	struct session_torrent *st;
+	struct pending_utp_connect *puc;
+
+	if (!s || !s->utp_ctx || s->disable_utp)
+		return -ENOTSUP;
+	STAILQ_FOREACH(st, &s->torrents, next)
+		if (st->torrent == t)
+			break;
+	if (!st)
+		return -ENOENT;
+
+	STAILQ_FOREACH(puc, &s->pending_utp, next)
+		if (puc->torrent == t && puc->port == port &&
+		    strcmp(puc->addr, addr) == 0)
+			return 0;
+	for (int i = 0; i < mbt_torrent_peer_count(t); i++) {
+		struct mbt_peer *p = mbt_torrent_peer_at(t, i);
+		if (p && strcmp(mbt_peer_addr(p), addr) == 0 &&
+		    (mbt_peer_port(p) == port || mbt_peer_conn_port(p) == port))
+			return 0; /* BEP 55: already connected, ignore */
+	}
+	if (mbt_torrent_peer_count(t) >= s->max_peers)
+		return -EBUSY;
+
+	struct sockaddr_storage dst;
+	socklen_t dstlen;
+	if (mbt_sockaddr_build(addr, port, &dst, &dstlen) < 0)
+		return -EINVAL;
+
+	puc = calloc(1, sizeof(*puc));
+	if (!puc)
+		return -ENOMEM;
+	puc->session   = s;
+	puc->torrent   = t;
+	puc->source    = MBT_SOURCE_PEX;
+	puc->holepunch = 1;
+	snprintf(puc->addr, sizeof(puc->addr), "%s", addr);
+	puc->port = port;
+
+	mbt_log_info(MBT_LOG_SESSION, "holepunch: uTP connecting to %s:%hu", addr, port);
+	int rv = mbt_utp_connect(s->utp_ctx, &puc->conn,
+	                         (struct sockaddr *)&dst, dstlen,
+	                         pending_utp_connected, pending_utp_connect_event, puc);
+	if (rv < 0) {
+		free(puc);
+		return rv;
+	}
+	STAILQ_INSERT_TAIL(&s->pending_utp, puc, next);
+	return 0;
+}
+
+struct mbt_utp_ctx *
+mbt_session_utp_ctx(struct mbt_session *s)
+{
+	return s ? s->utp_ctx : NULL;
+}
+
+/* Our external address from PCP ("" if unknown), for BEP 55 NoSelf. */
+const char *
+mbt_session_external_addr(struct mbt_session *s)
+{
+	return s ? s->external_addr : "";
+}
+
+/* Our own peer id, for the BEP 55 duplicate-connection tie break. */
+const uint8_t *
+mbt_session_peer_id(struct mbt_session *s)
+{
+	return s->peer_id;
+}
 
 int
 mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *ih)

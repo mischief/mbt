@@ -39,6 +39,13 @@ struct mbt_peer_entry {
 	int failures;            /* consecutive failure count */
 	uint64_t last_seen;      /* last time reported by tracker/DHT/PEX (usec) */
 	uint64_t last_attempt;   /* last time we tried connecting (usec) */
+
+	/* BEP 55: the connected peer that told us about this one via PEX
+	 * (addr + listen port), a candidate relay for a holepunch. Empty if
+	 * not learned from PEX. */
+	char via_addr[INET6_ADDRSTRLEN];
+	uint16_t via_port;
+	uint64_t last_holepunch; /* last rendezvous sent for this peer (usec) */
 };
 
 struct mbt_peerdb {

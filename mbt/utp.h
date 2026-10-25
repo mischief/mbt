@@ -71,6 +71,24 @@ MBT_API void mbt_utp_ctx_set_rx_hook(struct mbt_utp_ctx *ctx,
     void *arg);
 
 /*
+ * Install a TX hook on the ctx, the mirror of the RX hook: called for every
+ * uTP datagram the ctx sends, with its destination. If the hook returns 0 the
+ * datagram is dropped as if lost on the wire. Used by tests, with the RX hook,
+ * to model a stateful firewall or NAT filter.
+ */
+MBT_API void mbt_utp_ctx_set_tx_hook(struct mbt_utp_ctx *ctx,
+    int (*hook)(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
+                const struct sockaddr *dst, socklen_t dstlen, void *arg),
+    void *arg);
+
+/*
+ * The uTP context of a session (NULL if uTP is disabled), e.g. to install
+ * test hooks on it.
+ */
+struct mbt_session;
+MBT_API struct mbt_utp_ctx *mbt_session_utp_ctx(struct mbt_session *s);
+
+/*
  * Set the in-flight window (in packets) for sockets created on this ctx. 0
  * means library default. The value is clamped to [UTP_WINDOW_MIN,
  * UTP_WINDOW_MAX] and rounded up to a power of two per socket. The window sizes

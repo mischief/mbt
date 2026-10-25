@@ -23,6 +23,8 @@
 #include "mbt/peerdb.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "mbt/holepunch.h"
+#include "net.h"
 #include "internal.h"
 #include "mbt/picker.h"
 #include "mbt/peer_source.h"
@@ -671,6 +673,7 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 
 	/* Build compact IPv4 "added" list from all connected peers */
 	uint8_t added[50 * 6]; /* max 50 peers per BEP 11 */
+	uint8_t added_f[50];   /* BEP 11 per-peer flags, parallel to added */
 	int count = 0;
 	struct torrent_peer *tp;
 	for (struct torrent_peer *tp = TAILQ_FIRST(&t->peers); tp && count < 50; tp = TAILQ_NEXT(tp, entry)) {
@@ -678,19 +681,27 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 		const char *addr = mbt_peer_addr(tp->peer);
 		uint16_t port = mbt_peer_port(tp->peer);
 		struct in_addr in;
+		if (port == 0) continue; /* listen port unknown: not dialable */
 		if (inet_pton(AF_INET, addr, &in) <= 0) continue;
 		memcpy(added + count * 6, &in, 4);
 		uint16_t nport = htons(port);
 		memcpy(added + count * 6 + 4, &nport, 2);
+		uint8_t f = 0;
+		if (strcmp(mbt_peer_transport_name(tp->peer), "utp") == 0)
+			f |= MBT_PEX_UTP;
+		if (mbt_peer_supports_holepunch(tp->peer))
+			f |= MBT_PEX_HOLEPUNCH;
+		added_f[count] = f;
 		count++;
 	}
 
 	if (count == 0) goto done;
 
-	/* Build bencoded PEX message: d5:added<compact>e */
+	/* Build bencoded PEX message: d5:added<compact>7:added.f<flags>e */
 	struct mbt_be_value *msg = NULL;
 	mbt_be_dict_new(&msg);
 	mbt_be_dict_append_string(msg, "added", added, count * 6);
+	mbt_be_dict_append_string(msg, "added.f", added_f, count);
 
 	unsigned char *enc; size_t enc_len;
 	if (mbt_be_value_encode(msg, &enc, &enc_len) < 0) {
@@ -823,12 +834,66 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 	mbt_ev_timer_mod(timer, (uint64_t)t->timers.choke_interval * 1000000ULL);
 }
 
+/*
+ * Duplicate connections to one peer id. These are normal with BEP 55, where
+ * both sides dial at once and each may end up with an outgoing and an
+ * incoming connection. Both ends must keep the same one, or each drops a
+ * different one and no connection survives, so the rule is symmetric: keep
+ * the connection initiated by the peer with the lower peer id. Two
+ * connections with the same initiator are a plain duplicate; keep the old.
+ *
+ * Returns 1 to keep the new connection (the old one, if any, has been
+ * disconnected), 0 to drop the new one. `self` is the new connection's peer
+ * if it is already in the list, else NULL.
+ */
+int
+mbt_torrent_resolve_duplicate(struct mbt_torrent *t, struct mbt_peer *self,
+                              const uint8_t their_id[20], int new_outgoing)
+{
+	const uint8_t *our_id = t->peer_id;
+	struct torrent_peer *tp;
+
+	TAILQ_FOREACH(tp, &t->peers, entry) {
+		struct mbt_peer *ep = tp->peer;
+		if (!ep || ep == self)
+			continue;
+		enum mbt_peer_state st = mbt_peer_state(ep);
+		if (st == MBT_PEER_CONNECTING || st == MBT_PEER_HANDSHAKE ||
+		    st == MBT_PEER_CLOSED)
+			continue; /* peer id not known yet, or gone */
+		if (!mbt_peer_id_eq(mbt_peer_id(ep), their_id))
+			continue;
+
+		int old_outgoing = mbt_peer_source(ep) != MBT_SOURCE_INCOMING;
+		if (old_outgoing == new_outgoing)
+			return 0;
+		/* The outgoing connection was initiated by us, the incoming
+		 * one by them; keep the one whose initiator id is lower. */
+		int we_lower = memcmp(our_id, their_id, 20) < 0;
+		int keep_new = new_outgoing ? we_lower : !we_lower;
+		mbt_log_debug(MBT_LOG_TORRENT, "%s: duplicate connection, keeping the %s one",
+		              mbt_peer_addr(ep), keep_new == new_outgoing ? "outgoing" : "incoming");
+		if (!keep_new)
+			return 0;
+		mbt_peer_disconnect(ep);
+		return 1;
+	}
+	return 1;
+}
+
 static void
 on_active(struct mbt_peer *p, void *arg)
 {
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
+
+	/* Outgoing connections learn the peer id only now. */
+	if (!mbt_torrent_resolve_duplicate(t, p, mbt_peer_id(p),
+	        mbt_peer_source(p) != MBT_SOURCE_INCOMING)) {
+		mbt_peer_disconnect(p);
+		return;
+	}
 
 	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: active (fast=%d ext=%d piece_count=%u)",
 	              mbt_peer_addr(p), mbt_peer_conn_port(p),
@@ -1391,13 +1456,19 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 static void
 on_pex(struct mbt_peer *p, const char *addr, uint16_t port, uint8_t flags, void *arg)
 {
-	(void)p;
 	struct mbt_torrent *t = arg;
 	if (t->is_private) return; /* BEP 27: no PEX for private torrents */
 	if (port == 0) return;    /* port 0 is invalid */
 	struct mbt_peer_entry *pe = mbt_peerdb_insert(&t->peerdb, addr, port, MBT_SOURCE_PEX);
 	if (pe) {
 		pe->flags = flags;
+		/* Remember who told us, as a BEP 55 relay candidate: the
+		 * sender is connected to this peer (that is what PEX lists). */
+		if (mbt_peer_supports_holepunch(p)) {
+			snprintf(pe->via_addr, sizeof(pe->via_addr), "%s", mbt_peer_addr(p));
+			pe->via_port = mbt_peer_port(p) ? mbt_peer_port(p)
+			                                : mbt_peer_conn_port(p);
+		}
 		/* added.f bit MBT_PEX_UTP = peer supports uTP. Seed our learned
 		 * capability to YES, but never upgrade a peer we've proven uTP_NO on. */
 		if ((flags & MBT_PEX_UTP) && pe->utp_cap != MBT_UTP_NO)
@@ -1488,6 +1559,181 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	t->peer_count--;
 }
 
+/* --- Holepunch (BEP 55) --- */
+
+/*
+ * The endpoint to give one peer for reaching another, as seen from here.
+ * For a uTP connection that is the address the datagrams come from: the
+ * peer's NAT mapping of its shared listen socket, which is exactly where a
+ * simultaneous uTP open has to aim. For TCP the connection's source port is
+ * an ephemeral one, so use the listen port from the extension handshake.
+ * Returns 0, or -1 if no usable endpoint is known.
+ */
+static int
+holepunch_endpoint(struct mbt_peer *p, struct sockaddr_storage *out)
+{
+	socklen_t len;
+	uint16_t port;
+
+	if (strcmp(mbt_peer_transport_name(p), "utp") == 0)
+		port = mbt_peer_conn_port(p);
+	else
+		port = mbt_peer_port(p);
+	if (port == 0)
+		return -1;
+	return mbt_sockaddr_build(mbt_peer_addr(p), port, out, &len) < 0 ? -1 : 0;
+}
+
+/* Find the connected peer an endpoint names: same address, and the port is
+ * either its listen port or its connection's source port. */
+static struct torrent_peer *
+holepunch_find(struct mbt_torrent *t, const char *addr, uint16_t port)
+{
+	struct torrent_peer *tp;
+
+	TAILQ_FOREACH(tp, &t->peers, entry) {
+		if (!tp->peer || mbt_peer_state(tp->peer) != MBT_PEER_ACTIVE)
+			continue;
+		if (strcmp(mbt_peer_addr(tp->peer), addr) != 0)
+			continue;
+		if (mbt_peer_port(tp->peer) == port ||
+		    mbt_peer_conn_port(tp->peer) == port)
+			return tp;
+	}
+	return NULL;
+}
+
+static void
+holepunch_send_error(struct mbt_peer *p, const struct mbt_hp_msg *req, uint32_t err)
+{
+	struct mbt_hp_msg m = *req;   /* addr/port MUST echo the rendezvous */
+
+	m.type = MBT_HP_ERROR;
+	m.err = err;
+	mbt_log_debug(MBT_LOG_TORRENT, "%s: holepunch rendezvous refused: %s",
+	              mbt_peer_addr(p), mbt_hp_error_str(err));
+	mbt_peer_send_holepunch(p, &m);
+}
+
+/* Relay: `from` asks us to introduce it to the endpoint in `req`. */
+static void
+holepunch_relay(struct mbt_torrent *t, struct mbt_peer *from,
+                const struct mbt_hp_msg *req)
+{
+	char addr[INET6_ADDRSTRLEN];
+	uint16_t port;
+	struct mbt_hp_msg m;
+
+	mbt_sockaddr_split(&req->addr, addr, sizeof(addr), &port);
+	if (port == 0) {
+		holepunch_send_error(from, req, MBT_HP_ERR_NO_SUCH_PEER);
+		return;
+	}
+	if (t->session) {
+		const char *ext = mbt_session_external_addr(t->session);
+		uint16_t lp = mbt_session_listen_port(t->session);
+		if (ext[0] && strcmp(ext, addr) == 0 && port == lp) {
+			holepunch_send_error(from, req, MBT_HP_ERR_NO_SELF);
+			return;
+		}
+	}
+
+	struct torrent_peer *target = holepunch_find(t, addr, port);
+	if (!target || target->peer == from) {
+		holepunch_send_error(from, req, MBT_HP_ERR_NOT_CONNECTED);
+		return;
+	}
+	if (!mbt_peer_supports_holepunch(target->peer)) {
+		holepunch_send_error(from, req, MBT_HP_ERR_NO_SUPPORT);
+		return;
+	}
+
+	/* connect to each side, carrying the other's endpoint */
+	memset(&m, 0, sizeof(m));
+	m.type = MBT_HP_CONNECT;
+	if (holepunch_endpoint(target->peer, &m.addr) < 0) {
+		holepunch_send_error(from, req, MBT_HP_ERR_NOT_CONNECTED);
+		return;
+	}
+	struct mbt_hp_msg m2;
+	memset(&m2, 0, sizeof(m2));
+	m2.type = MBT_HP_CONNECT;
+	if (holepunch_endpoint(from, &m2.addr) < 0) {
+		holepunch_send_error(from, req, MBT_HP_ERR_NOT_CONNECTED);
+		return;
+	}
+	mbt_log_info(MBT_LOG_TORRENT, "holepunch: relaying %s:%hu <-> %s:%hu",
+	             mbt_peer_addr(from), mbt_peer_conn_port(from),
+	             mbt_peer_addr(target->peer), mbt_peer_conn_port(target->peer));
+	mbt_peer_send_holepunch(from, &m);
+	mbt_peer_send_holepunch(target->peer, &m2);
+}
+
+static void
+on_holepunch(struct mbt_peer *p, const struct mbt_hp_msg *msg, void *arg)
+{
+	struct mbt_torrent *t = arg;
+	char addr[INET6_ADDRSTRLEN];
+	uint16_t port;
+
+	if (t->is_private)
+		return; /* peers of a private torrent come from its tracker only */
+	mbt_sockaddr_split(&msg->addr, addr, sizeof(addr), &port);
+
+	switch (msg->type) {
+	case MBT_HP_RENDEZVOUS:
+		holepunch_relay(t, p, msg);
+		break;
+	case MBT_HP_CONNECT:
+		/* From a relay: dial the endpoint over uTP. Already connected
+		 * peers, a full peer list and so on are ignored silently, as
+		 * BEP 55 requires (no error back to the relay). */
+		if (!t->session || port == 0)
+			break;
+		mbt_log_info(MBT_LOG_TORRENT, "holepunch: connect to %s:%hu via %s",
+		             addr, port, mbt_peer_addr(p));
+		mbt_session_holepunch_connect(t->session, t, addr, port);
+		break;
+	case MBT_HP_ERROR:
+		mbt_log_info(MBT_LOG_TORRENT, "holepunch: %s could not reach %s:%hu: %s",
+		             mbt_peer_addr(p), addr, port, mbt_hp_error_str(msg->err));
+		break;
+	}
+}
+
+/* Minimum spacing of rendezvous requests for one target. */
+#define HOLEPUNCH_RETRY_USEC (5ULL * 60 * 1000000)
+
+int
+mbt_torrent_holepunch_rendezvous(struct mbt_torrent *t, const char *addr, uint16_t port)
+{
+	struct mbt_peer_entry *pe;
+	struct torrent_peer *relay;
+	struct mbt_hp_msg m;
+	socklen_t len;
+	uint64_t now = now_usec();
+
+	if (t->is_private)
+		return -EPERM;
+	pe = mbt_peerdb_find(&t->peerdb, addr, port);
+	if (!pe || !pe->via_addr[0] || !(pe->flags & MBT_PEX_HOLEPUNCH))
+		return -ENOENT;
+	if (pe->last_holepunch && now - pe->last_holepunch < HOLEPUNCH_RETRY_USEC)
+		return -EAGAIN;
+	relay = holepunch_find(t, pe->via_addr, pe->via_port);
+	if (!relay || !mbt_peer_supports_holepunch(relay->peer))
+		return -ENOTCONN;
+
+	memset(&m, 0, sizeof(m));
+	m.type = MBT_HP_RENDEZVOUS;
+	if (mbt_sockaddr_build(addr, port, &m.addr, &len) < 0)
+		return -EINVAL;
+	pe->last_holepunch = now;
+	mbt_log_info(MBT_LOG_TORRENT, "holepunch: asking %s to introduce %s:%hu",
+	             mbt_peer_addr(relay->peer), addr, port);
+	return mbt_peer_send_holepunch(relay->peer, &m);
+}
+
 static void
 on_port(struct mbt_peer *p, uint16_t dht_port, void *arg)
 {
@@ -1512,6 +1758,7 @@ static struct mbt_peer_callbacks torrent_peer_cbs = {
 	.on_error    = on_error,
 	.on_pex      = on_pex,
 	.on_port     = on_port,
+	.on_holepunch = on_holepunch,
 };
 
 /* --- Drive piece requests --- */

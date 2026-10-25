@@ -79,6 +79,9 @@ test('magnet_flow', magnet_flow_test, timeout: 15)
 
 holepunch_test = executable('holepunch_test', 'holepunch_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('holepunch', holepunch_test)
+# BEP 55 end to end: relay + two peers behind simulated stateful firewalls
+holepunch_swarm_test = executable('holepunch_swarm_test', 'holepunch_swarm_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('holepunch_swarm', holepunch_swarm_test, timeout: 60, suite: 'utp')
 
 # peer wire framing: messages whose length disagrees with what the handler
 # reads must not desync the stream (see peer_wire_test.c).

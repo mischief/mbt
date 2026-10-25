@@ -78,6 +78,7 @@ static inline uint32_t mbt_random_uniform(uint32_t upper) {
 struct mbt_ratelimit;
 struct mbt_session;
 struct mbt_torrent;
+struct mbt_peer;
 struct mbt_ratelimit *mbt_session_get_upload_limit(struct mbt_session *s);
 struct mbt_ratelimit *mbt_session_get_download_limit(struct mbt_session *s);
 void mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s);
@@ -86,6 +87,17 @@ int mbt_session_min_peers_before_download(struct mbt_session *s);
 int mbt_session_reqq(struct mbt_session *s);
 int mbt_session_max_pipeline(struct mbt_session *s);
 int mbt_picker_rarest_bucket(struct mbt_torrent *t, void *peer, void *ctx);
+/* BEP 55 (session.c): uTP-only connect to the endpoint a relay gave us. */
+int mbt_session_holepunch_connect(struct mbt_session *s, struct mbt_torrent *t,
+                                  const char *addr, uint16_t port);
+const uint8_t *mbt_session_peer_id(struct mbt_session *s);
+const char *mbt_session_external_addr(struct mbt_session *s);
+/* BEP 55 (torrent.c): a direct connect to addr:port failed; ask the peer that
+ * told us about it to introduce us. Returns 0 if a rendezvous was sent. */
+int mbt_torrent_resolve_duplicate(struct mbt_torrent *t, struct mbt_peer *self,
+                                  const uint8_t their_id[20], int new_outgoing);
+int mbt_torrent_holepunch_rendezvous(struct mbt_torrent *t,
+                                     const char *addr, uint16_t port);
 
 /* peer.h */
 struct mbt_peer;
