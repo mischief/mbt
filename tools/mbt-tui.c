@@ -202,8 +202,20 @@ draw_detail(void)
 	uint64_t have_bytes = (uint64_t)have * plen;
 
 	const char *views[] = {"Overview", "Peers", "Pieces", "Log"};
-	mvwprintw(win_detail, 0, 2, " %s [%s] (h/l to switch) ",
-	          name ? name : "(no metadata)", views[detail_view]);
+	{
+		/* Title sits in the top border: clip the name so it cannot wrap. */
+		char tail[64], title[512];
+		int avail = getmaxx(win_detail) - 4; /* border + 2 margin each side */
+		snprintf(tail, sizeof(tail), " [%s] (h/l to switch) ", views[detail_view]);
+		int namew = avail - (int)strlen(tail) - 1;
+		if (namew < 8) namew = 8;
+		const char *nm = name ? name : "(no metadata)";
+		if ((int)strlen(nm) > namew)
+			snprintf(title, sizeof(title), " %.*s...%s", namew - 3, nm, tail);
+		else
+			snprintf(title, sizeof(title), " %s%s", nm, tail);
+		mvwaddnstr(win_detail, 0, 2, title, avail);
+	}
 
 	if (detail_view == 0) {
 		/* Overview */
@@ -247,8 +259,14 @@ draw_detail(void)
 	} else if (detail_view == 1) {
 		/* Peers */
 		int np = mbt_torrent_peer_count(t);
-		mvwprintw(win_detail, 1, 1, "%-47s %5s %4s %7s %7s %4s %3s %-5s %-19s %s",
-		          "ENDPOINT", "DONE", "REQ", "DOWN", "UP", "FAIL", "PEN", "FLAGS", "CLIENT", "SRC");
+		/* Usable width inside borders; endpoint column takes the slack. */
+		int usable = getmaxx(win_detail) - 2;
+		int epw = usable - 63;
+		if (epw < 21) epw = 21;
+		char line[512];
+		snprintf(line, sizeof(line), "%-*s %5s %4s %7s %7s %4s %3s %-5s %-12s %s",
+		         epw, "ENDPOINT", "DONE", "REQ", "DOWN", "UP", "FAIL", "PEN", "FLAGS", "CLIENT", "SRC");
+		mvwaddnstr(win_detail, 1, 1, line, usable);
 		int maxrow = getmaxy(win_detail) - 2;
 		int max_scroll = np - (maxrow - 1);
 		if (detail_scroll > max_scroll) detail_scroll = max_scroll > 0 ? max_scroll : 0;
@@ -280,11 +298,12 @@ draw_detail(void)
 				snprintf(up, sizeof(up), "%.1fK", ps.uploaded / 1024.0);
 			else
 				snprintf(up, sizeof(up), "%luB", (unsigned long)ps.uploaded);
-			mvwprintw(win_detail, (i - detail_scroll) + 2, 1, "%-47s %4d%% %4d %7s %7s %4d %3d %-5s %-19.19s %s",
-			          endpoint, ps.done_pct, ps.outstanding,
-			          down, up, ps.hash_failures, ps.score, flags,
-			          ps.client_version ? ps.client_version : "",
-			          mbt_peer_source_str(ps.source));
+			snprintf(line, sizeof(line), "%-*s %4d%% %4d %7s %7s %4d %3d %-5s %-12.12s %s",
+			         epw, endpoint, ps.done_pct, ps.outstanding,
+			         down, up, ps.hash_failures, ps.score, flags,
+			         ps.client_version ? ps.client_version : "",
+			         mbt_peer_source_str(ps.source));
+			mvwaddnstr(win_detail, (i - detail_scroll) + 2, 1, line, usable);
 		}
 
 	} else if (detail_view == 2) {
