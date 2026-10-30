@@ -162,6 +162,26 @@ run(struct rig *r)
 	run_until(r, &r->have_marker);
 }
 
+/* Read exactly len bytes from the remote end, stepping the loop while
+ * waiting: some backends (libevent bufferevents) only flush queued writes
+ * from the loop, so a blocking read would hang. */
+static void
+read_exact(struct rig *r, uint8_t *buf, size_t len, const char *what)
+{
+	size_t got = 0;
+	for (int i = 0; i < 200 && got < len; i++) {
+		ssize_t n = recv(r->fd, buf + got, len - got, MSG_DONTWAIT);
+		if (n > 0) {
+			got += (size_t)n;
+			continue;
+		}
+		CHECK(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK),
+		    "%s: %s", what, n < 0 ? strerror(errno) : "EOF");
+		mbt_ev_step(r->ev, 10);
+	}
+	CHECK(got == len, "%s: got %zu of %zu bytes", what, got, len);
+}
+
 /* Bring up a peer with extensions enabled on our side of the socketpair,
  * do the remote handshake, and run until the peer is ACTIVE. `ext_body`
  * is the bencoded extension handshake the remote sends (NULL: a minimal
@@ -192,12 +212,7 @@ rig_open(struct rig *r, const char *ext_body, size_t ext_len)
 	    MBT_SOURCE_TRACKER, &cb, r) == 0, "peer_new");
 
 	/* Read our handshake, answer with one that enables BEP 10. */
-	size_t got = 0;
-	while (got < sizeof(rx)) {
-		ssize_t n = read(r->fd, rx + got, sizeof(rx) - got);
-		CHECK(n > 0, "read handshake");
-		got += (size_t)n;
-	}
+	read_exact(r, rx, sizeof(rx), "read handshake");
 	memcpy(hs, rx, 68);
 	memset(hs + 20, 0, 8);
 	hs[20 + 5] = 0x10;                  /* extension protocol */
@@ -408,27 +423,22 @@ test_bad_ext_handshake(void)
 /* Read one whole message from the remote end; returns its length and copies
  * up to cap bytes of the body (id included) into buf. */
 static size_t
-read_msg(int fd, uint8_t *buf, size_t cap)
+read_msg(struct rig *r, uint8_t *buf, size_t cap)
 {
 	uint8_t hdr[4];
-	size_t got = 0, len;
+	size_t got, len;
 
-	while (got < 4) {
-		ssize_t n = read(fd, hdr + got, 4 - got);
-		CHECK(n > 0, "read length");
-		got += (size_t)n;
-	}
+	read_exact(r, hdr, 4, "read length");
 	len = ((size_t)hdr[0] << 24) | ((size_t)hdr[1] << 16) |
 	      ((size_t)hdr[2] << 8) | hdr[3];
 	for (got = 0; got < len; ) {
 		uint8_t tmp[512];
 		size_t want = len - got < sizeof(tmp) ? len - got : sizeof(tmp);
-		ssize_t n = read(fd, tmp, want);
-		CHECK(n > 0, "read body");
-		for (ssize_t i = 0; i < n; i++)
-			if (got + (size_t)i < cap)
-				buf[got + (size_t)i] = tmp[i];
-		got += (size_t)n;
+		read_exact(r, tmp, want, "read body");
+		for (size_t i = 0; i < want; i++)
+			if (got + i < cap)
+				buf[got + i] = tmp[i];
+		got += want;
 	}
 	return len;
 }
@@ -442,7 +452,7 @@ test_holepunch_advertised(void)
 
 	printf("test_holepunch_advertised\n"); fflush(stdout);
 	rig_open(&r, NULL, 0);
-	size_t n = read_msg(r.fd, buf, sizeof(buf));
+	size_t n = read_msg(&r, buf, sizeof(buf));
 	CHECK(n > 2 && n <= sizeof(buf) && buf[0] == BT_EXTENSION && buf[1] == 0,
 	    "first message is not an extension handshake");
 	CHECK(memmem(buf + 2, n - 2, "12:ut_holepunchi5e", 18) != NULL,
@@ -516,8 +526,8 @@ test_holepunch_send(void)
 	rig_open(&r, hs, strlen(hs));
 	CHECK(mbt_hp_decode(HP_CONNECT_V4, sizeof(HP_CONNECT_V4), &m) == 0, "decode");
 	CHECK(mbt_peer_send_holepunch(r.peer, &m) == 0, "send");
-	(void)read_msg(r.fd, buf, sizeof(buf));     /* our extension handshake */
-	size_t n = read_msg(r.fd, buf, sizeof(buf));
+	(void)read_msg(&r, buf, sizeof(buf));     /* our extension handshake */
+	size_t n = read_msg(&r, buf, sizeof(buf));
 	CHECK(n == 2 + sizeof(HP_CONNECT_V4), "length %zu", n);
 	CHECK(buf[0] == BT_EXTENSION && buf[1] == 9, "header %u %u", buf[0], buf[1]);
 	CHECK(memcmp(buf + 2, HP_CONNECT_V4, sizeof(HP_CONNECT_V4)) == 0, "payload");
