@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 
 #ifdef HAVE_LIBEVENT1
@@ -183,6 +184,10 @@ mbt_conn_new(struct mbt_ev *ev, struct mbt_conn **out, int fd,
 	c->watermark = 1;
 
 	c->fd = fd;
+	/* Bufferevents assume a non-blocking fd (as conn_sd and conn_poll set
+	 * it): on a blocking one a large flush write() blocks the whole loop
+	 * until the peer, often in this same loop, reads. */
+	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
 #ifdef HAVE_LIBEVENT1
 	c->bev = bufferevent_new(fd, conn_lev_on_read, NULL, conn_lev_on_event, c);
 	if (!c->bev) {
