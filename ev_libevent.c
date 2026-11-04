@@ -213,17 +213,37 @@ lev_run(struct mbt_ev *ev)
 }
 
 static void
+lev_step_timeout(int fd, short what, void *arg)
+{
+	(void)fd; (void)what; (void)arg;
+}
+
+/*
+ * One loop iteration, waiting at most timeout_ms. The timeout is a private
+ * timer deleted afterwards, not event_base_loopexit(): a loopexit stays
+ * armed when the iteration ends early on another event, and would then
+ * end a later event_base_dispatch() (mbt_ev_run) for no reason.
+ */
+static void
 lev_step(struct mbt_ev *ev, int timeout_ms)
 {
 	struct ev_lev *l = (struct ev_lev *)ev;
+	struct event *t = NULL;
+
 	if (timeout_ms >= 0) {
 		struct timeval tv = {
 			.tv_sec  = timeout_ms / 1000,
 			.tv_usec = (timeout_ms % 1000) * 1000,
 		};
-		event_base_loopexit(l->base_ev, &tv);
+		t = evtimer_new(l->base_ev, lev_step_timeout, NULL);
+		if (t)
+			evtimer_add(t, &tv);
 	}
 	event_base_loop(l->base_ev, EVLOOP_ONCE);
+	if (t) {
+		evtimer_del(t);
+		event_free(t);
+	}
 }
 
 static void
