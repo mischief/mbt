@@ -165,6 +165,12 @@ may be NULL.
 On success it gets the torrent.
 The session owns the torrent.
 .Pp
+Set
+.Fa no_storage
+to add a torrent with no storage.
+It fetches metadata and then holds until
+.Xr mbt_torrent_set_storage 3 .
+.Pp
 Adding a torrent the session has returns that torrent and ignores
 .Fa cfg .
 Metainfo for a torrent with no metadata supplies its metadata.

@@ -41,6 +41,7 @@ enum {
 	BLOCK_SIZE = 16384,
 	METADATA_BLOCK_SIZE = 16384,
 	METADATA_MAX = 64 * 1024 * 1024,
+	MOVE_BATCH_BYTES = 4 * 1024 * 1024,  /* copied per loop iteration */
 	MAX_PEERS = 50,
 	PIPELINE_DEPTH = 512,  /* default max per-peer pipeline */
 	PIPELINE_INIT = 4,     /* slow-start initial window */
@@ -118,6 +119,7 @@ struct mbt_torrent {
 
 	struct mbt_storage *storage;
 	struct mbt_storage_handle *storage_h; /* NULL until storage opens */
+	struct torrent_move *move;            /* NULL unless a move runs */
 	char *data_dir;
 	mbt_picker_fn picker;
 	void *picker_ctx;
@@ -209,6 +211,19 @@ static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
 
 /* Stop requesting data, and report the first fatal error once. */
+struct torrent_move {
+	struct mbt_storage *dst;
+	struct mbt_storage_handle *h;
+	struct mbt_ev_timer *timer;
+	uint32_t cursor;            /* pieces below this are on dst */
+	uint8_t *buf;
+	char *data_dir;
+	mbt_torrent_move_cb cb;
+	void *arg;
+};
+
+static void move_finish(struct mbt_torrent *t, int err);
+
 static void
 torrent_fail(struct mbt_torrent *t, int err)
 {
@@ -216,6 +231,8 @@ torrent_fail(struct mbt_torrent *t, int err)
 		return;
 	t->error = err;
 	mbt_log_warn(MBT_LOG_TORRENT, "torrent failed: %s", strerror(-err));
+	if (t->move)
+		move_finish(t, err);
 	if (t->cb.on_error)
 		t->cb.on_error(t, err, t->cb_arg);
 }
@@ -1199,6 +1216,13 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 					return;
 				}
 			}
+			/* The move has passed this piece, so it must see the write. */
+			if (t->move && piece < t->move->cursor) {
+				int mrv = t->move->dst->ops->write_piece(t->move->h, piece,
+				                                         pi->data, plen);
+				if (mrv < 0)
+					move_finish(t, mrv);
+			}
 
 			mbt_bitmap_set(t->have, piece);
 			t->have_count++;
@@ -1819,6 +1843,8 @@ torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
 	if (t->error)
 		return;
+	if (!t->storage)
+		return;
 	if (t->piece_count == 0 || mbt_peer_choked(tp->peer) || t->verifying) {
 		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: skip (no_metadata=%d choked=%d verifying=%d)",
 		              t->piece_count == 0, mbt_peer_choked(tp->peer), t->verifying);
@@ -2026,6 +2052,9 @@ mbt_torrent_free(struct mbt_torrent *t)
 	if (!t)
 		return;
 
+	if (t->move)
+		move_finish(t, -ECANCELED);
+
 	/* Free peers */
 	while (!TAILQ_EMPTY(&t->peers)) {
 		struct torrent_peer *tp = TAILQ_FIRST(&t->peers);
@@ -2136,6 +2165,29 @@ metadata_files_free(struct mbt_torrent *t)
 	t->files = NULL;
 	t->file_count = 0;
 	t->total_length = 0;
+}
+
+/* Open storage and start a verify of data already there. */
+static int
+storage_attach(struct mbt_torrent *t)
+{
+	if (t->storage && t->storage->ops->open) {
+		int rv = t->storage->ops->open(t->storage->ctx, t, &t->storage_h);
+
+		if (rv < 0) {
+			mbt_log_warn(MBT_LOG_STORAGE, "storage open failed: %s", strerror(-rv));
+			return rv;
+		}
+	}
+	if (t->storage_h && t->storage->ops->read_piece && !t->verifying) {
+		t->verify_buf = malloc(t->piece_length);
+		if (t->verify_buf) {
+			t->verifying = 1;
+			t->verify_cursor = 0;
+			mbt_ev_timer_new(t->ev, &t->verify_timer, 0, verify_tick, t);
+		}
+	}
+	return 0;
 }
 
 /* Fill the torrent from an info dict. On failure the caller clears it. */
@@ -2323,26 +2375,197 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	/* Allocate have bitmap */
 	mbt_bitmap_new_bits(&t->have, t->piece_count);
 
-	/* Open storage for this torrent */
-	if (t->storage && t->storage->ops->open) {
-		int srv = t->storage->ops->open(t->storage->ctx, t, &t->storage_h);
-		if (srv < 0) {
-			mbt_log_warn(MBT_LOG_STORAGE, "storage open failed: %s", strerror(-srv));
-			t->error = srv;
-			return srv;
-		}
+	rv = storage_attach(t);
+	if (rv < 0) {
+		t->error = rv;
+		return rv;
 	}
-
-	if (t->storage_h && t->storage->ops->read_piece && !t->verifying) {
-		t->verify_buf = malloc(t->piece_length);
-		if (t->verify_buf) {
-			t->verifying = 1;
-			t->verify_cursor = 0;
-			mbt_ev_timer_new(t->ev, &t->verify_timer, 0, verify_tick, t);
-		}
-	}
-
+	if (t->cb.on_metadata)
+		t->cb.on_metadata(t, t->cb_arg);
 	return 0;
+}
+
+int
+mbt_torrent_set_storage(struct mbt_torrent *t, struct mbt_storage *st, const char *data_dir)
+{
+	struct torrent_peer *tp;
+	char *dir = NULL;
+	int rv;
+
+	if (!st)
+		return -EINVAL;
+	if (t->storage)
+		return -EBUSY;
+	if (data_dir && (dir = strdup(data_dir)) == NULL)
+		return -ENOMEM;
+	t->storage = mbt_storage_ref(st);
+	if (t->piece_count > 0 && (rv = storage_attach(t)) < 0) {
+		mbt_storage_unref(t->storage);
+		t->storage = NULL;
+		free(dir);
+		return rv;
+	}
+	if (dir) {
+		free(t->data_dir);
+		t->data_dir = dir;
+	}
+	TAILQ_FOREACH(tp, &t->peers, entry)
+		torrent_drive_peer(t, tp);
+	return 0;
+}
+
+/* --- Moving to another storage --- */
+
+static void
+move_switch(struct mbt_torrent *t, struct torrent_move *m)
+{
+	struct mbt_storage *old = t->storage;
+	struct mbt_storage_handle *old_h = t->storage_h;
+	int rv;
+
+	t->storage = m->dst;
+	t->storage_h = m->h;
+	m->dst = NULL;
+	if (m->data_dir) {
+		free(t->data_dir);
+		t->data_dir = m->data_dir;
+		m->data_dir = NULL;
+	}
+	rv = old->ops->remove(old_h);
+	if (rv < 0)
+		mbt_log_warn(MBT_LOG_STORAGE, "move: cannot delete old data: %s", strerror(-rv));
+	old->ops->close(old_h);
+	mbt_storage_unref(old);
+	if (t->session)
+		mbt_session_save_torrent(t->session, t);
+}
+
+static void
+move_finish(struct mbt_torrent *t, int err)
+{
+	struct torrent_move *m = t->move;
+
+	t->move = NULL;
+	if (m->timer)
+		mbt_ev_timer_free(m->timer);
+	if (err == 0) {
+		move_switch(t, m);
+	} else {
+		mbt_log_warn(MBT_LOG_STORAGE, "move failed: %s", strerror(-err));
+		m->dst->ops->remove(m->h);
+		m->dst->ops->close(m->h);
+	}
+	mbt_storage_unref(m->dst);
+	free(m->buf);
+	free(m->data_dir);
+	m->cb(t, err, m->arg);
+	free(m);
+}
+
+/* Copy one piece, then read it back from dst and check its hash. */
+static int
+move_copy_piece(struct mbt_torrent *t, struct torrent_move *m, uint32_t piece, size_t plen)
+{
+	uint8_t digest[20];
+	SHA1_CTX ctx;
+	int rv;
+
+	rv = t->storage->ops->read_piece(t->storage_h, piece, m->buf, plen);
+	if (rv < 0)
+		return rv;
+	rv = m->dst->ops->write_piece(m->h, piece, m->buf, plen);
+	if (rv < 0)
+		return rv;
+	rv = m->dst->ops->read_piece(m->h, piece, m->buf, plen);
+	if (rv < 0)
+		return rv;
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, m->buf, plen);
+	SHA1Final(digest, &ctx);
+	return memcmp(digest, piece_hash(t, piece), sizeof(digest)) == 0 ? 0 : -EIO;
+}
+
+static void
+move_tick(struct mbt_ev_timer *timer, void *arg)
+{
+	struct mbt_torrent *t = arg;
+	struct torrent_move *m = t->move;
+	size_t copied = 0;
+
+	while (m->cursor < t->piece_count && copied < MOVE_BATCH_BYTES) {
+		uint32_t piece = m->cursor;
+		size_t plen = piece_length_for(t, piece);
+
+		if (mbt_bitmap_isset(t->have, piece) > 0) {
+			int rv = move_copy_piece(t, m, piece, plen);
+
+			if (rv < 0) {
+				move_finish(t, rv);
+				return;
+			}
+			copied += plen;
+		}
+		m->cursor++;
+	}
+	if (m->cursor < t->piece_count) {
+		mbt_ev_timer_mod(timer, 0);
+		return;
+	}
+	move_finish(t, 0);
+}
+
+int
+mbt_torrent_move_storage(struct mbt_torrent *t, struct mbt_storage *dst, const char *data_dir,
+                         mbt_torrent_move_cb cb, void *arg)
+{
+	const struct mbt_storage_ops *src_ops, *dst_ops;
+	struct torrent_move *m;
+	int rv;
+
+	if (!dst || !cb || !t->storage_h || dst == t->storage)
+		return -EINVAL;
+	if (t->error)
+		return t->error;
+	if (t->move || t->verifying)
+		return -EBUSY;
+	src_ops = t->storage->ops;
+	dst_ops = dst->ops;
+	if (!src_ops->read_piece || !src_ops->remove || !dst_ops->open || !dst_ops->write_piece ||
+	    !dst_ops->read_piece || !dst_ops->remove)
+		return -ENOTSUP;
+	if (dst_ops->exists) {
+		rv = dst_ops->exists(dst->ctx, t);
+		if (rv != 0)
+			return rv < 0 ? rv : -EEXIST;
+	}
+	if ((m = calloc(1, sizeof(*m))) == NULL)
+		return -ENOMEM;
+	m->cb = cb;
+	m->arg = arg;
+	m->buf = malloc(t->piece_length);
+	m->data_dir = data_dir ? strdup(data_dir) : NULL;
+	if (!m->buf || (data_dir && !m->data_dir)) {
+		rv = -ENOMEM;
+		goto fail;
+	}
+	rv = dst_ops->open(dst->ctx, t, &m->h);
+	if (rv < 0)
+		goto fail;
+	rv = mbt_ev_timer_new(t->ev, &m->timer, 0, move_tick, t);
+	if (rv < 0) {
+		dst_ops->remove(m->h);
+		dst_ops->close(m->h);
+		goto fail;
+	}
+	m->dst = mbt_storage_ref(dst);
+	t->move = m;
+	return 0;
+
+fail:
+	free(m->buf);
+	free(m->data_dir);
+	free(m);
+	return rv;
 }
 
 int
@@ -2466,6 +2689,8 @@ mbt_torrent_state(struct mbt_torrent *t)
 		return MBT_TORRENT_ERROR;
 	if (t->piece_count == 0)
 		return MBT_TORRENT_INIT;
+	if (!t->storage)
+		return MBT_TORRENT_NO_STORAGE;
 	if (t->verifying)
 		return MBT_TORRENT_VERIFYING;
 	if (t->have_count == t->piece_count)

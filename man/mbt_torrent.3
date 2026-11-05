@@ -27,6 +27,8 @@
 .Nm mbt_torrent_has_piece ,
 .Nm mbt_torrent_piece_size ,
 .Nm mbt_torrent_read_piece ,
+.Nm mbt_torrent_set_storage ,
+.Nm mbt_torrent_move_storage ,
 .Nm mbt_torrent_piece_active ,
 .Nm mbt_torrent_piece_fully_requested ,
 .Nm mbt_torrent_piece_map ,
@@ -88,6 +90,11 @@
 .Fn mbt_torrent_piece_size "struct mbt_torrent *t" "uint32_t piece"
 .Ft int
 .Fn mbt_torrent_read_piece "struct mbt_torrent *t" "uint32_t piece" "void *buf" "size_t len"
+.Ft int
+.Fn mbt_torrent_set_storage "struct mbt_torrent *t" "struct mbt_storage *st" "const char *data_dir"
+.Ft int
+.Fn mbt_torrent_move_storage "struct mbt_torrent *t" "struct mbt_storage *dst" \
+"const char *data_dir" "mbt_torrent_move_cb cb" "void *arg"
 .Ft int
 .Fn mbt_torrent_piece_active "struct mbt_torrent *t" "uint32_t piece"
 .Ft int
@@ -179,6 +186,62 @@ and
 cap per-torrent bandwidth; 0 means unlimited.
 These override the session-level limits set via
 .Xr mbt_session 3 .
+.Ss Storage
+A torrent with no storage fetches metadata and then holds in state
+.Dv MBT_TORRENT_NO_STORAGE .
+It requests no pieces.
+.Fn mbt_torrent_set_storage
+attaches a storage, takes a reference and starts the torrent.
+It returns
+.Er EBUSY
+if the torrent has storage.
+.Fa data_dir
+may be NULL.
+.Pp
+.Fn mbt_torrent_move_storage
+moves a running torrent to
+.Fa dst ,
+which takes a reference.
+It copies each piece in small batches on the event loop.
+It reads each piece back from
+.Fa dst
+and checks its hash.
+Pieces that arrive during the move go to both storages.
+At the end the torrent uses
+.Fa dst ,
+and the data on the old storage is deleted.
+.Fn cb
+then runs with 0.
+.Pp
+After a failure the torrent stays on the old storage with its data.
+The data on
+.Fa dst
+is deleted, and
+.Fn cb
+gets a negative errno.
+Removing the torrent ends the move with
+.Er ECANCELED .
+.Fn cb
+runs once, unless the call itself fails.
+Do not free
+.Fa t
+from
+.Fn cb .
+.Pp
+The call returns
+.Er EBUSY
+during a move or a verify,
+.Er EEXIST
+if
+.Fa dst
+already has data at these paths,
+.Er ENOTSUP
+if a storage lacks an op, and
+.Er EINVAL
+if
+.Fa dst
+is the current storage or the torrent has none.
+Errors are negative.
 .Ss Reading pieces
 .Fn mbt_torrent_piece_size
 returns the bytes in a piece, or 0 for an index out of range.

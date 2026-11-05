@@ -1406,6 +1406,22 @@ session_on_piece_complete(struct mbt_torrent *t, uint32_t piece, void *arg)
 }
 
 static void
+session_on_metadata(struct mbt_torrent *t, void *arg)
+{
+	struct mbt_session *s = arg;
+
+	if (s->cb.on_torrent_metadata)
+		s->cb.on_torrent_metadata(s, t, s->cb.arg);
+}
+
+void
+mbt_session_save_torrent(struct mbt_session *s, struct mbt_torrent *t)
+{
+	if (s->state_ops && s->state_ops->save)
+		s->state_ops->save(s->state_ctx, t);
+}
+
+static void
 session_on_error(struct mbt_torrent *t, int err, void *arg)
 {
 	struct mbt_session *s = arg;
@@ -1430,6 +1446,9 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
 		return -ENOMEM;
 
 	struct mbt_storage *stor = (acfg && acfg->storage) ? acfg->storage : s->default_storage;
+
+	if (acfg && acfg->no_storage)
+		stor = NULL;
 	const char *ddir = (acfg && acfg->data_dir) ? acfg->data_dir : s->default_data_dir;
 	struct mbt_torrent_config tcfg = {
 		.ev = s->ev,
@@ -1453,6 +1472,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
 		.on_complete       = session_on_complete,
 		.on_piece_complete = session_on_piece_complete,
 		.on_error          = session_on_error,
+		.on_metadata       = session_on_metadata,
 	};
 	mbt_torrent_set_callbacks(st->torrent, &tcb, s);
 

@@ -136,6 +136,65 @@ entry_path(const char *dir, const char *name, const char *file, int multi)
 }
 
 static int
+file_exists(void *ctx, struct mbt_torrent *t)
+{
+	struct file_storage *fs = ctx;
+	int fc = mbt_torrent_file_count(t);
+	const char *name = mbt_torrent_name(t);
+
+	for (int i = 0; i < fc; i++) {
+		const struct mbt_file *f = mbt_torrent_file(t, i);
+		char *path;
+		int found;
+
+		if (f->pad || !f->path)
+			continue;
+		path = entry_path(fs->data_dir, name ? name : "download", f->path, fc > 1);
+		if (!path)
+			return -ENOMEM;
+		found = access(path, F_OK) == 0;
+		free(path);
+		if (found)
+			return 1;
+	}
+	return 0;
+}
+
+/* Delete the empty directories above path, up to the data directory. */
+static void
+rmdirs(const char *data_dir, char *path)
+{
+	size_t root = strlen(data_dir);
+	char *slash;
+
+	while ((slash = strrchr(path, '/')) != NULL && (size_t)(slash - path) > root) {
+		*slash = '\0';
+		if (rmdir(path) < 0)
+			return;
+	}
+}
+
+static int
+file_remove(struct mbt_storage_handle *handle)
+{
+	struct file_torrent *h = (struct file_torrent *)handle;
+	int rv = 0;
+
+	for (int i = 0; i < h->count; i++) {
+		char *path = h->entries[i].path;
+
+		if (!path)
+			continue;
+		if (unlink(path) < 0 && errno != ENOENT && rv == 0)
+			rv = -errno;
+		rmdirs(h->fs->data_dir, path);
+		h->entries[i].path = NULL;
+		free(path);
+	}
+	return rv;
+}
+
+static int
 file_open(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out)
 {
 	struct file_storage *fs = ctx;
@@ -300,4 +359,6 @@ static const struct mbt_storage_ops file_ops = {
 	.have_piece  = file_have_piece,
 	.close       = file_close,
 	.destroy     = file_destroy,
+	.remove      = file_remove,
+	.exists      = file_exists,
 };

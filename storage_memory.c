@@ -184,6 +184,17 @@ memory_close(struct mbt_storage_handle *h)
 	m->opened = 0;
 }
 
+static int
+memory_remove(struct mbt_storage_handle *h)
+{
+	struct mbt_storage_memory *m = (struct mbt_storage_memory *)h;
+
+	free(m->data);
+	m->data = NULL;
+	m->total_length = 0;
+	return 0;
+}
+
 static const struct mbt_storage_ops memory_ops = {
 	.open        = memory_open,
 	.write_piece = memory_write_piece,
@@ -191,4 +202,5 @@ static const struct mbt_storage_ops memory_ops = {
 	.have_piece  = memory_have_piece,
 	.close       = memory_close,
 	.destroy     = memory_destroy,
+	.remove      = memory_remove,
 };

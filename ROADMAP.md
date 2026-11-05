@@ -139,7 +139,7 @@
 - [ ] Duplicate paths inside one torrent: rename or refuse
 - [ ] File names over 255 bytes: shorten and keep the extension
 - [ ] BEP 52 v2 and SHA-256 infohash
-- [ ] Move a torrent between storages
+- [x] Move a torrent between storages
 
 ### Longer-term (enterprise/embedding)
 - [ ] Event + policy callback infrastructure on session/tracker configs

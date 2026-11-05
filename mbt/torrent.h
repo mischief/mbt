@@ -56,6 +56,8 @@ struct mbt_torrent_callbacks {
 	void (*on_verify_progress)(struct mbt_torrent *t, uint32_t piece, int have, void *arg);
 	/* Called when resume verify finishes (whether or not torrent is complete) */
 	void (*on_verify_complete)(struct mbt_torrent *t, void *arg);
+	/* The torrent has its metadata. */
+	void (*on_metadata)(struct mbt_torrent *t, void *arg);
 };
 
 /* Lifecycle */
@@ -89,9 +91,29 @@ enum mbt_torrent_state {
 	MBT_TORRENT_STALLED,     /* incomplete but no progress possible */
 	MBT_TORRENT_SEEDING,     /* complete, serving to others */
 	MBT_TORRENT_ERROR,       /* stopped; see mbt_torrent_error */
+	MBT_TORRENT_NO_STORAGE,  /* has metadata, waits for mbt_torrent_set_storage */
 };
 
 MBT_API enum mbt_torrent_state mbt_torrent_state(struct mbt_torrent *t);
+
+/*
+ * Attach storage to a torrent that has none. data_dir may be NULL. A torrent
+ * with no storage fetches metadata and then holds. -EBUSY if it has storage.
+ */
+MBT_API int mbt_torrent_set_storage(struct mbt_torrent *t, struct mbt_storage *st,
+                                    const char *data_dir);
+
+/* err is 0, or -errno with all data still on the old storage. */
+typedef void (*mbt_torrent_move_cb)(struct mbt_torrent *t, int err, void *arg);
+
+/*
+ * Move a running torrent to dst, verify each piece, then delete the old data.
+ * After a failure the old storage stays in use and data on dst is deleted.
+ * cb runs once, unless this call fails. Do not free t from cb. Removing the
+ * torrent ends the move with -ECANCELED. See mbt_torrent(3) for the errors.
+ */
+MBT_API int mbt_torrent_move_storage(struct mbt_torrent *t, struct mbt_storage *dst,
+                                     const char *data_dir, mbt_torrent_move_cb cb, void *arg);
 
 /* First fatal error as -errno, or 0. The torrent then requests no more data. */
 MBT_API int mbt_torrent_error(struct mbt_torrent *t);

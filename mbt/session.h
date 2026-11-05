@@ -23,6 +23,7 @@ struct mbt_state_ops;
 /* Session configuration — caller's policy choices */
 struct mbt_add_torrent_cfg {
 	struct mbt_storage *storage; /* torrent takes a reference; NULL = use default_storage */
+	int no_storage;             /* add with no storage; see mbt_torrent_set_storage */
 	const char *data_dir;       /* passed to mbt_torrent_data_dir(); NULL = unknown */
 };
 
@@ -132,6 +133,7 @@ MBT_API int mbt_session_reannounce(struct mbt_session *s, struct mbt_infohash *i
 struct mbt_session_callbacks {
 	void (*on_torrent_complete)(struct mbt_session *s, struct mbt_torrent *t, void *arg);
 	void (*on_torrent_error)(struct mbt_session *s, struct mbt_torrent *t, int err, void *arg);
+	void (*on_torrent_metadata)(struct mbt_session *s, struct mbt_torrent *t, void *arg);
 	/* LSD: called for each discovered infohash. Return 1 to add torrent + connect, 0 to ignore. */
 	int (*on_lsd_announce)(struct mbt_session *s, struct mbt_infohash *ih,
 	                       const char *addr, uint16_t port, void *arg);

@@ -16,6 +16,10 @@ struct mbt_storage_handle;
  * open sets *out to a handle that is not NULL. The torrent passes this
  * handle to the other calls, and calls close before it drops its reference
  * to the storage. destroy is optional. It runs when the last reference goes.
+ *
+ * remove and exists are optional, and mbt_torrent_move_storage needs remove.
+ * remove deletes the data of an open torrent, and h stays valid for close.
+ * exists returns 1 if data for t is already present, else 0.
  */
 struct mbt_storage_ops {
 	int (*open)(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out);
@@ -26,6 +30,8 @@ struct mbt_storage_ops {
 	int (*have_piece)(struct mbt_storage_handle *h, uint32_t index);  /* 1=have, 0=missing, <0=error */
 	void (*close)(struct mbt_storage_handle *h);
 	void (*destroy)(void *ctx);
+	int (*remove)(struct mbt_storage_handle *h);
+	int (*exists)(void *ctx, struct mbt_torrent *t);
 };
 
 /* A storage holds any number of torrents, if the backend allows it. */
