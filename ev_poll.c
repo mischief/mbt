@@ -321,8 +321,11 @@ mbt_ev_dispatch(struct mbt_ev *ev, struct pollfd *fds, int nfds)
 	uint64_t now = now_us();
 	struct poll_timer *t;
 	SLIST_FOREACH(t, &pev->timers, entry) {
-		if (!t->dead && t->fire_at_us <= now)
+		if (!t->dead && t->fire_at_us <= now) {
+			/* One-shot: only mbt_ev_timer_mod arms it again. */
+			t->fire_at_us = UINT64_MAX;
 			t->cb((struct mbt_ev_timer *)t, t->arg);
+		}
 	}
 
 	int i = 0;

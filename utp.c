@@ -700,8 +700,9 @@ utp_conn_free(struct mbt_conn *c)
 static void
 utp_destroy_cb(struct mbt_ev_timer *t, void *arg)
 {
-	(void)t;
 	struct mbt_utp_sock *s = arg;
+
+	mbt_ev_timer_free(t);
 	s->destroy_timer = NULL;
 	if (s->ctx)
 		utp_ctx_remove(s->ctx, s);

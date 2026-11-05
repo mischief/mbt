@@ -21,10 +21,11 @@ static int stop_count;
 static void
 tick_cb(struct mbt_ev_timer *timer, void *v)
 {
-	(void)timer;
 	stop_count++;
 	if (stop_count >= 3)
 		mbt_ev_stop(ev);
+	else
+		mbt_ev_timer_mod(timer, 100000);
 }
 
 /* Simulate receiving a compact node info message by constructing a fake

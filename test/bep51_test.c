@@ -23,8 +23,9 @@ static int ticks;
 
 static void tick_cb(struct mbt_ev_timer *timer, void *v)
 {
-	(void)timer; (void)v;
+	(void)v;
 	if (++ticks >= 3) mbt_ev_stop(ev);
+	else mbt_ev_timer_mod(timer, 100000);
 }
 
 /* Send a bencoded message to the DHT port */
