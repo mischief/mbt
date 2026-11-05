@@ -29,7 +29,7 @@ path_of(char *p, size_t n, const char *name)
 
 /* Encode a torrent of one short file. */
 static void
-encode(unsigned char **enc, size_t *enc_len)
+encode_priv(unsigned char **enc, size_t *enc_len, int priv)
 {
 	static const uint8_t data[100];
 	struct mbt_metainfo *mi;
@@ -44,8 +44,32 @@ encode(unsigned char **enc, size_t *enc_len)
 	assert(mbt_metainfo_new(&mi) == 0);
 	assert(mbt_metainfo_set_content(mi, path, PIECE_LEN) == 0);
 	assert(mbt_metainfo_add_tracker(mi, TRACKER) == 0);
+	mbt_metainfo_set_private(mi, priv);
 	assert(mbt_metainfo_encode(mi, enc, enc_len) == 0);
 	mbt_metainfo_free(mi);
+}
+
+static void
+encode(unsigned char **enc, size_t *enc_len)
+{
+	encode_priv(enc, enc_len, 0);
+}
+
+/* BEP 27: a private torrent stays on its own trackers. */
+static void
+test_fallback_private(struct mbt_session *s)
+{
+	struct mbt_torrent *t = NULL;
+	unsigned char *enc;
+	size_t enc_len;
+
+	encode_priv(&enc, &enc_len, 1);
+	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL, &t) == 0);
+	assert(mbt_torrent_is_private(t));
+	mbt_session_add_tracker_fallbacks(s, t);
+	assert(mbt_session_torrent_tracker_count(s, t) == 1);
+	assert(mbt_session_remove_torrent(s, mbt_torrent_infohash(t)) == 0);
+	free(enc);
 }
 
 static void
@@ -156,6 +180,7 @@ main(void)
 	test_repeat(s, enc, enc_len);
 	test_magnet_then_metainfo(s, enc, enc_len);
 	test_file_limits(s);
+	test_fallback_private(s);
 	free(enc);
 
 	mbt_session_free(s);

@@ -1734,8 +1734,22 @@ mbt_session_add_tracker(struct mbt_session *s, struct mbt_torrent *t, const char
 void
 mbt_session_add_tracker_fallbacks(struct mbt_session *s, struct mbt_torrent *t)
 {
-	for (int i = 0; mbt_fallback_trackers[i]; i++)
-		mbt_session_add_tracker(s, t, mbt_fallback_trackers[i]);
+	struct session_torrent *st;
+
+	/* BEP 27: a private torrent uses only its own trackers. */
+	if (mbt_torrent_is_private(t))
+		return;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		int before = st->tracker_count;
+
+		if (st->torrent != t)
+			continue;
+		for (int i = 0; mbt_fallback_trackers[i]; i++)
+			(void)mbt_session_add_tracker(s, t, mbt_fallback_trackers[i]);
+		if (st->tracker_count > before)
+			session_do_announce(s, st);
+		return;
+	}
 }
 
 int
