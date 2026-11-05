@@ -143,8 +143,12 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 
 ## DHT
 
-`mbt.dht{port = 0, id = hex}` makes a DHT node on its own, with no session.
-`port` 0 binds a free port. `id` is 40 hex digits, and the default is random.
+`mbt.dht{port = 0, id = hex, verify = fn}` makes a DHT node on its own, with
+no session. `port` 0 binds a free port. `id` is 40 hex digits, and the default
+comes from the machine and port. `verify` is `function(k, sig, payload)` for
+BEP 44 mutable items: return true to accept. It runs at once under libmbt, so
+it must not yield or close the node, and an error rejects. With no `verify`,
+mutable items are refused.
 It stays alive while Lua can reach it. Its lookups need `mbt.run` or
 `mbt.step`.
 
@@ -168,8 +172,22 @@ It stays alive while Lua can reach it. Its lookups need `mbt.run` or
 - `d:close()` frees the node. A pending `d:get_peers` returns
   `nil, "dht closed"`. The `<close>` attribute also closes it.
 
-BEP 44 items are not bound: libmbt stores and serves them, but has no client
-for the network side.
+### BEP 44 items
+
+The node stores items and serves `get` and `put` from other nodes. It checks
+tokens, and leaves signatures to `verify`. These calls use the local store:
+
+- `d:put(value)` stores an immutable item and returns its target in hex.
+- `d:put_mutable{k = ..., sig = ..., seq = ..., v = ..., salt = ...}` stores a
+  mutable item through `verify`, and returns its target.
+- `d:get(target)` returns a table with `v`, and `k` and `seq` if mutable.
+
+There is no client for the network. Build one with `d:query`: send `get` to
+collect a token and `put` with it. These help:
+
+- `mbt.bencode(value)` and `mbt.bdecode(bytes)`.
+- `mbt.sha1(bytes)` returns hex. An immutable target is the sha1 of the
+  bencoded value.
 
 `examples/mbt-dht.lua` is a small lookup tool.
 

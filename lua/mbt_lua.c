@@ -382,6 +382,7 @@ struct ldht {
 	struct cctx *c;
 	struct mbt_dht *d;
 	TAILQ_HEAD(, llookup) pending;
+	bool in_verify;  /* the verify function runs, under libmbt */
 };
 
 /* Push a parsed bencode value. Dict keys and strings stay binary safe. */
@@ -1691,8 +1692,43 @@ l_dht_gc(lua_State *L)
 static int
 l_dht_close(lua_State *L)
 {
-	dht_close(luaL_checkudata(L, 1, DHT_META), true);
+	struct ldht *ld = luaL_checkudata(L, 1, DHT_META);
+
+	if (ld->in_verify)
+		return luaL_error(L, "mbt: cannot close a dht in its verify function");
+	dht_close(ld, true);
 	return 0;
+}
+
+/*
+ * The verify option. libmbt needs its answer at once, so this Lua code runs
+ * under libmbt, on the main thread, and it must not yield. An error rejects.
+ */
+static int
+dht_verify_cb(const uint8_t k[MBT_DHT_PUBKEY_LEN], const uint8_t sig[MBT_DHT_SIG_LEN],
+    const void *buf, size_t buflen, void *arg)
+{
+	struct ldht *ld = arg;
+	lua_State *L = ld->c->L;
+	int top = lua_gettop(L), ok = 0;
+
+	if (!lua_checkstack(L, 8))
+		return 0;
+	lua_getfield(L, LUA_REGISTRYINDEX, SESSIONS_KEY);
+	if (lua_rawgetp(L, -1, ld) == LUA_TUSERDATA) {
+		lua_getiuservalue(L, -1, 1);
+		lua_pushlstring(L, (const char *)k, MBT_DHT_PUBKEY_LEN);
+		lua_pushlstring(L, (const char *)sig, MBT_DHT_SIG_LEN);
+		lua_pushlstring(L, buf, buflen);
+		ld->in_verify = true;
+		if (lua_pcall(L, 3, 1, 0) == LUA_OK)
+			ok = lua_toboolean(L, -1);
+		else
+			report("verify", lua_tostring(L, -1));
+		ld->in_verify = false;
+	}
+	lua_settop(L, top);
+	return ok;
 }
 
 static void
@@ -1705,7 +1741,7 @@ parse_node_id(lua_State *L, int idx, uint8_t id[NODE_ID_LEN])
 	    mbt_hex_decode(id, NODE_ID_LEN, hex) >= 0, idx, "want 40 hex digits");
 }
 
-/* mbt.dht{port = 0, id = hex}: a DHT node of its own, with no session. */
+/* mbt.dht{port = 0, id = hex, verify = fn}: a DHT node with no session. */
 static int
 l_dht(lua_State *L)
 {
@@ -1726,7 +1762,7 @@ l_dht(lua_State *L)
 		}
 		lua_pop(L, 1);
 	}
-	ld = lua_newuserdatauv(L, sizeof(*ld), 0);
+	ld = lua_newuserdatauv(L, sizeof(*ld), 1);
 	memset(ld, 0, sizeof(*ld));
 	ld->c = c;
 	TAILQ_INIT(&ld->pending);
@@ -1738,6 +1774,19 @@ l_dht(lua_State *L)
 	}
 	if (has_id)
 		mbt_dht_set_node_id(ld->d, id);
+	if (lua_istable(L, 1)) {
+		lua_getfield(L, 1, "verify");
+		if (lua_isfunction(L, -1)) {
+			lua_setiuservalue(L, -2, 1);
+			mbt_dht_set_verify(ld->d, dht_verify_cb, ld);
+			lua_getfield(L, LUA_REGISTRYINDEX, SESSIONS_KEY);
+			lua_pushvalue(L, -2);
+			lua_rawsetp(L, -2, ld);
+			lua_pop(L, 1);
+		} else {
+			lua_pop(L, 1);
+		}
+	}
 	return 1;
 }
 
@@ -2023,6 +2072,167 @@ l_dht_send_raw(lua_State *L)
 	if (rv < 0)
 		return fail(L, rv);
 	lua_pushboolean(L, 1);
+	return 1;
+}
+
+/* Encode the Lua value at idx. On success the bytes are on top of the stack. */
+static int
+bencode_push(lua_State *L, int idx)
+{
+	struct mbt_be_value *v = NULL;
+	unsigned char *enc = NULL;
+	size_t len = 0;
+	int rv = be_from_lua(L, idx, 0, &v);
+
+	if (rv < 0)
+		return rv;
+	rv = mbt_be_value_encode(v, &enc, &len);
+	mbt_be_unref(v);
+	if (rv < 0)
+		return rv;
+	lua_pushlstring(L, (const char *)enc, len);
+	free(enc);
+	return 0;
+}
+
+/* mbt.bencode(value): bencoded bytes. */
+static int
+l_bencode(lua_State *L)
+{
+	int rv;
+
+	luaL_checkany(L, 1);
+	if ((rv = bencode_push(L, 1)) < 0)
+		return fail(L, rv);
+	return 1;
+}
+
+/* mbt.bdecode(bytes): the value. */
+static int
+l_bdecode(lua_State *L)
+{
+	size_t len;
+	const char *s = luaL_checklstring(L, 1, &len);
+	struct mbt_be_value *v = NULL;
+	int rv = mbt_be_value_parse((const unsigned char *)s, len, &v);
+
+	if (rv < 0)
+		return fail(L, rv);
+	be_push(L, v);
+	mbt_be_unref(v);
+	return 1;
+}
+
+static void
+push_target(lua_State *L, const uint8_t target[NODE_ID_LEN])
+{
+	char hex[NODE_ID_LEN * 2 + 1];
+
+	mbt_hex_encode((unsigned char *)target, NODE_ID_LEN, hex, sizeof(hex));
+	lua_pushstring(L, hex);
+}
+
+/* mbt.sha1(bytes): the digest in hex. */
+static int
+l_sha1(lua_State *L)
+{
+	size_t len;
+	const char *s = luaL_checklstring(L, 1, &len);
+	uint8_t digest[NODE_ID_LEN];
+
+	mbt_dht_immutable_target(s, len, digest);
+	push_target(L, digest);
+	return 1;
+}
+
+/* d:put(value): keep an immutable item to serve, and return its target. */
+static int
+l_dht_put(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	uint8_t target[NODE_ID_LEN];
+	size_t len;
+	const char *enc;
+	int rv;
+
+	luaL_checkany(L, 2);
+	if ((rv = bencode_push(L, 2)) < 0)
+		return fail(L, rv);
+	enc = lua_tolstring(L, -1, &len);
+	if ((rv = mbt_dht_put_immutable(ld->d, enc, len, NULL, NULL)) < 0)
+		return fail(L, rv);
+	mbt_dht_immutable_target(enc, len, target);
+	push_target(L, target);
+	return 1;
+}
+
+/* d:put_mutable{k, sig, seq, v, salt}: as a put from the network. */
+static int
+l_dht_put_mutable(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	uint8_t target[NODE_ID_LEN];
+	const char *k, *sig, *salt, *enc;
+	size_t klen, siglen, saltlen = 0, len;
+	lua_Integer seq;
+	int rv;
+
+	luaL_checktype(L, 2, LUA_TTABLE);
+	lua_getfield(L, 2, "k");
+	k = luaL_checklstring(L, -1, &klen);
+	lua_getfield(L, 2, "sig");
+	sig = luaL_checklstring(L, -1, &siglen);
+	lua_getfield(L, 2, "seq");
+	seq = luaL_checkinteger(L, -1);
+	lua_getfield(L, 2, "salt");
+	salt = luaL_optlstring(L, -1, NULL, &saltlen);
+	luaL_argcheck(L, klen == MBT_DHT_PUBKEY_LEN && siglen == MBT_DHT_SIG_LEN, 2,
+	    "k must be 32 bytes and sig 64");
+	lua_getfield(L, 2, "v");
+	if ((rv = bencode_push(L, -1)) < 0)
+		return fail(L, rv);
+	enc = lua_tolstring(L, -1, &len);
+	rv = mbt_dht_put_mutable(ld->d, (const uint8_t *)k, (const uint8_t *)sig, seq,
+	    salt, saltlen, enc, len, NULL, NULL);
+	if (rv < 0)
+		return fail(L, rv);
+	mbt_dht_mutable_target((const uint8_t *)k, salt, saltlen, target);
+	push_target(L, target);
+	return 1;
+}
+
+/* Runs inside libmbt, with no Lua code: push the item. */
+static void
+item_push(const uint8_t *value, size_t vlen, int64_t seq, const uint8_t *k, void *arg)
+{
+	lua_State *L = arg;
+	struct mbt_be_value *v = NULL;
+
+	lua_createtable(L, 0, 3);
+	if (mbt_be_value_parse(value, vlen, &v) > 0) {
+		be_push(L, v);
+		mbt_be_unref(v);
+		lua_setfield(L, -2, "v");
+	}
+	if (k != NULL) {
+		lua_pushlstring(L, (const char *)k, MBT_DHT_PUBKEY_LEN);
+		lua_setfield(L, -2, "k");
+		lua_pushinteger(L, seq);
+		lua_setfield(L, -2, "seq");
+	}
+}
+
+/* d:get(target): the stored item as a table with v, and k and seq if mutable. */
+static int
+l_dht_get(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	uint8_t target[NODE_ID_LEN];
+	int rv;
+
+	parse_node_id(L, 2, target);
+	if ((rv = mbt_dht_get_item(ld->d, target, item_push, L)) < 0)
+		return fail(L, rv);
 	return 1;
 }
 
@@ -2451,6 +2661,9 @@ static const luaL_Reg dht_methods[] = {
     {"query", l_dht_query},
     {"send_raw", l_dht_send_raw},
     {"id", l_dht_id},
+    {"put", l_dht_put},
+    {"put_mutable", l_dht_put_mutable},
+    {"get", l_dht_get},
     {"close", l_dht_close},
     {NULL, NULL},
 };
@@ -2468,6 +2681,9 @@ static const luaL_Reg storage_fns[] = {
 static const luaL_Reg module_fns[] = {
     {"session", l_session},
     {"dht", l_dht},
+    {"bencode", l_bencode},
+    {"bdecode", l_bdecode},
+    {"sha1", l_sha1},
     {"run", l_run},
     {"spawn", l_spawn},
     {"sleep", l_sleep},

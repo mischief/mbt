@@ -545,6 +545,60 @@ do
 		assert(#found.r.nodes % 26 == 0)
 		e:close()
 
+		-- BEP 44 items, with the network side in Lua through d:query
+		assert(mbt.bdecode(mbt.bencode({a = 1, b = {"x", 2}})).b[1] == "x")
+		assert(mbt.sha1("abc") == "A9993E364706816ABA3E25717850C26C9CD0D89D")
+		assert(mbt.bencode(print) == nil)
+
+		local here = assert(a:put("stored here"))
+		assert(a:get(here).v == "stored here" and a:get(here).k == nil)
+		assert(here == mbt.sha1(mbt.bencode("stored here")))
+		assert(a:get(string.rep("00", 20)) == nil)
+		local function raw_target(hexstr)
+			return (hexstr:gsub("%x%x", function(x) return string.char(tonumber(x, 16)) end))
+		end
+
+		r = assert(b:query("127.0.0.1", a:port(), "get", {target = raw_target(here)}))
+		assert(r.r.v == "stored here" and #r.r.token > 0)
+
+		local value = {note = "from b", n = 7}
+		is_error(assert(b:query("127.0.0.1", a:port(), "put", {v = value, token = "bad"})), 203)
+		local tok = r.r.token
+		assert(assert(b:query("127.0.0.1", a:port(), "put", {v = value, token = tok})).y == "r")
+		local target = mbt.sha1(mbt.bencode(value))
+		assert(a:get(target).v.note == "from b")
+		is_error(assert(b:query("127.0.0.1", a:port(), "put",
+		    {v = string.rep("x", 1100), token = tok})), 205)
+
+		local k, sig = string.rep("k", 32), string.rep("s", 64)
+		local mut = {v = "one", k = k, sig = sig, seq = 2, token = tok}
+		is_error(assert(b:query("127.0.0.1", a:port(), "put", mut)), 206)
+
+		local seen, accept = nil, true
+		local signer = assert(mbt.dht{verify = function(key, s, payload)
+			seen = payload
+			assert(key == k and s == sig)
+			return accept
+		end})
+		r = assert(b:query("127.0.0.1", signer:port(), "get", {target = raw_target(here)}))
+		mut.token = r.r.token
+		assert(assert(b:query("127.0.0.1", signer:port(), "put", mut)).y == "r")
+		assert(seen == "3:seqi2e1:v3:one")
+		local mtarget = mbt.sha1(k)
+		assert(signer:get(mtarget).v == "one" and signer:get(mtarget).seq == 2)
+		r = assert(b:query("127.0.0.1", signer:port(), "get", {target = raw_target(mtarget)}))
+		assert(r.r.v == "one" and r.r.seq == 2 and r.r.k == k and r.r.sig == sig)
+		mut.seq = 1
+		is_error(assert(b:query("127.0.0.1", signer:port(), "put", mut)), 302)
+		accept = false
+		mut.seq = 3
+		is_error(assert(b:query("127.0.0.1", signer:port(), "put", mut)), 206)
+		assert(signer:put_mutable{k = k, sig = sig, seq = 4, v = "two"} == nil)
+		accept = true
+		assert(signer:put_mutable{k = k, sig = sig, seq = 4, v = "two"} == mtarget)
+		assert(signer:get(mtarget).v == "two")
+		signer:close()
+
 		local lone = assert(mbt.dht())
 		assert(#assert(lone:get_peers(ih)) == 0)
 		lone:close()
