@@ -251,7 +251,6 @@ test_basic(void)
 static struct mbt_conn *large_server_conn;
 static uint8_t large_server_buf[LARGE_SIZE];
 static int large_server_received;
-static int large_client_done;
 
 static void
 large_server_readcb(struct mbt_conn *c, void *arg)
@@ -296,7 +295,6 @@ large_client_eventcb(struct mbt_conn *c, int err, void *arg)
 		if (n <= 0) break;
 		off += (size_t)n;
 	}
-	large_client_done = 1;
 }
 
 static void
@@ -306,7 +304,6 @@ test_large(void)
 
 	large_server_conn     = NULL;
 	large_server_received = 0;
-	large_client_done     = 0;
 	memset(large_server_buf, 0, sizeof(large_server_buf));
 
 	/* Generate deterministic test data */
@@ -650,7 +647,6 @@ test_out_of_order(void)
 /* ---- test_fin: client sends data then closes; server sees EOF ---- */
 
 static struct mbt_conn *fin_server_conn;
-static int fin_server_received;
 static int fin_server_got_eof;
 
 static void
@@ -658,8 +654,7 @@ fin_server_readcb(struct mbt_conn *c, void *arg)
 {
 	(void)arg;
 	char buf[64];
-	ssize_t n = mbt_conn_read(c, buf, sizeof(buf));
-	if (n > 0) fin_server_received += (int)n;
+	(void)mbt_conn_read(c, buf, sizeof(buf));
 }
 
 static void
@@ -703,7 +698,6 @@ test_fin(void)
 	printf("test_fin\n"); fflush(stdout);
 
 	fin_server_conn     = NULL;
-	fin_server_received = 0;
 	fin_server_got_eof  = 0;
 	fin_client_conn     = NULL;
 

@@ -38,7 +38,6 @@ struct mbt_torrent;
 
 static struct mbt_ev *ev;
 static int complete;
-static int timed_out;
 static int pieces_order[NUM_PIECES];
 static int pieces_idx;
 
@@ -49,7 +48,7 @@ static void on_complete(struct mbt_torrent *t, void *arg)
 { (void)t; (void)arg; complete = 1; mbt_ev_stop(ev); }
 
 static void timeout_cb(struct mbt_ev_timer *timer, void *arg)
-{ (void)timer; (void)arg; timed_out = 1; mbt_ev_stop(ev); }
+{ (void)timer; (void)arg; mbt_ev_stop(ev); }
 
 int main(void)
 {

@@ -33,13 +33,11 @@ struct mbt_torrent;
 #define TOTAL_LEN (PIECE_LEN * NUM_PIECES)
 
 static struct mbt_ev *ev;
-static int download_complete;
 
 static void
 on_complete(struct mbt_torrent *t, void *arg)
 {
 	(void)t; (void)arg;
-	download_complete = 1;
 }
 
 static void

@@ -106,7 +106,6 @@ static float dl_rate_kbps;
 #define RATE_SLOTS 5
 static uint64_t rate_slots[RATE_SLOTS];
 static int rate_idx;
-static int quit;
 static char cmdbuf[512];
 static int cmdlen;
 static int mode; /* 0=normal, 1=command input */
@@ -369,7 +368,6 @@ handle_command(void)
 	if (cmdlen == 0) return;
 
 	if (strncmp(cmdbuf, "quit", 4) == 0 || strcmp(cmdbuf, "q") == 0) {
-		quit = 1;
 		mbt_ev_stop(ev);
 	} else {
 		/* Try as .torrent file, magnet, or infohash */
@@ -409,7 +407,7 @@ on_input(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
 		}
 	} else {
 		switch (ch) {
-		case 'q': quit = 1; mbt_ev_stop(ev); return;
+		case 'q': mbt_ev_stop(ev); return;
 		case 'D':
 			debug_mode = !debug_mode;
 			mbt_log_set_debug(debug_mode ? MBT_LOG_ALL : 0);
