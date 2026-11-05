@@ -644,21 +644,17 @@ utp_conn_free(struct mbt_conn *c)
 	if (!s) return;
 
 	/*
-	 * The owning peer/torrent_peer is going away. A CONNECTED socket lingers
-	 * in FIN_SENT to drain its FIN, and keeps processing inbound acks while it
-	 * does -- so clear ALL app callbacks now, or a late ack that advances
-	 * send_una will invoke writecb with a write_arg (the freed torrent_peer)
-	 * and crash. readcb/eventcb are cleared in the FIN branch below too, but
-	 * writecb must be cleared on every path.
+	 * The owner is going away, but the socket can outlive it, in FIN_SENT or
+	 * until destroy_timer fires. Clear every callback on every path: a late
+	 * ack or reset would otherwise call into freed memory.
 	 */
 	s->writecb   = NULL;
 	s->write_arg = NULL;
+	s->readcb    = NULL;
+	s->eventcb   = NULL;
+	s->cb_arg    = NULL;
 
 	if (s->state == UTP_CS_CONNECTED || s->state == UTP_CS_SYN_RECV) {
-		/* Send FIN and wait for remote to ack */
-		s->readcb  = NULL;
-		s->eventcb = NULL;
-		s->cb_arg  = NULL;
 		/* Send FIN: uses current seq_nr */
 		uint8_t buf[UTP_HEADER_SIZE];
 		struct utp_hdr *h = (struct utp_hdr *)buf;
