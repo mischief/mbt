@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <sha1.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "mbt/event.h"
 #include "mbt/session.h"
@@ -20,6 +21,7 @@
 #include "mbt/storage.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "test_util.h"
 
 struct mbt_ev_timer;
 struct mbt_torrent;
@@ -31,6 +33,7 @@ struct mbt_torrent;
 static struct mbt_ev *ev;
 static int complete;
 static uint8_t good_data[TOTAL_LEN];
+static int corrupting; /* off during verify, or the seeder rejects its own data */
 
 static void on_complete(struct mbt_torrent *t, void *arg)
 { (void)t; (void)arg; complete = 1; mbt_ev_stop(ev); }
@@ -50,7 +53,8 @@ static int corrupt_read(struct mbt_storage_handle *h, uint32_t p, void *buf, siz
 	if (off + len > TOTAL_LEN) len = TOTAL_LEN - off;
 	memcpy(buf, good_data + off, len);
 	/* Flip one byte */
-	((uint8_t *)buf)[0] ^= 0xff;
+	if (corrupting)
+		((uint8_t *)buf)[0] ^= 0xff;
 	return 0;
 }
 static int corrupt_write(struct mbt_storage_handle *h, uint32_t p, const void *d, size_t l)
@@ -106,6 +110,10 @@ int main(void)
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
 	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL);
+	struct mbt_torrent *tB = mbt_session_torrent_first(sB);
+	test_wait_verified(ev, tB);
+	assert(mbt_torrent_complete(tB));
+	corrupting = 1;
 
 	/* Leecher: short request timeout to cycle faster */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
@@ -128,13 +136,31 @@ int main(void)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
-	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
-	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB));
+	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu",
+	         hex, mbt_session_listen_port(sB));
 	mbt_session_add_magnet(sL, magnet, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };
 	mbt_torrent_set_callbacks(tL, &cb, NULL);
+
+	/* Only the corrupt peer is connected: wait for a hash failure from it. */
+	time_t end = time(NULL) + 20;
+	int failed = 0;
+	while (!failed) {
+		assert(time(NULL) < end);
+		test_ev_step(ev, 10);
+		for (int i = 0; i < mbt_torrent_peer_count(tL); i++) {
+			struct mbt_peer_stats ps;
+
+			if (mbt_torrent_peer_stats(tL, i, &ps) == 0 && ps.hash_failures > 0)
+				failed = 1;
+		}
+	}
+	assert(!mbt_torrent_complete(tL));
+
+	mbt_session_add_peer(sL, mbt_torrent_infohash(tL), "127.0.0.1",
+	                     mbt_session_listen_port(sA), MBT_SOURCE_MANUAL, 0);
 
 	struct mbt_ev_timer *to;
 	mbt_ev_timer_new(ev, &to, 30 * 1000000ULL, timeout_cb, NULL);
