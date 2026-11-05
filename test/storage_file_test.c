@@ -80,31 +80,31 @@ int main(void)
 	assert(t);
 
 	/* Write pieces through ops (must open first to populate file table) */
-	struct mbt_storage stor = mbt_storage_file_new(tmpdir);
-	const struct mbt_storage_ops *ops = stor.ops;
-	void *sctx = stor.ctx;
-	rv = ops->open(sctx, t);
+	struct mbt_storage *stor = mbt_storage_file_new(tmpdir);
+	const struct mbt_storage_ops *ops = stor->ops;
+	struct mbt_storage_handle *h = NULL;
+	rv = ops->open(stor->ctx, t, &h);
 	assert(rv == 0);
 	for (int i = 0; i < NUM_PIECES; i++) {
-		rv = ops->write_piece(sctx, i, data + i * PIECE_LEN, PIECE_LEN);
+		rv = ops->write_piece(h, i, data + i * PIECE_LEN, PIECE_LEN);
 		assert(rv == 0);
 	}
 
 	/* Read back and verify */
 	uint8_t buf[PIECE_LEN];
 	for (int i = 0; i < NUM_PIECES; i++) {
-		rv = ops->read_piece(sctx, i, buf, PIECE_LEN);
+		rv = ops->read_piece(h, i, buf, PIECE_LEN);
 		assert(rv == 0);
 		assert(memcmp(buf, data + i * PIECE_LEN, PIECE_LEN) == 0);
 	}
-	ops->close(sctx);
-	mbt_storage_file_free(&stor);
+	ops->close(h);
+	mbt_storage_unref(stor);
 
 	fprintf(stderr, "storage_file_test: PASS\n");
 
 	/* Cleanup */
 	mbt_session_free(session);
-	mbt_storage_file_free(&cfg.default_storage);
+	mbt_storage_unref(cfg.default_storage);
 	mbt_ev_destroy(ev);
 
 	char fpath[256];

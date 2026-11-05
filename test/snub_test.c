@@ -41,14 +41,14 @@ static void timeout_cb(struct mbt_ev_timer *t, void *a)
  * that returns data for have_piece (so it advertises HAVE_ALL) but
  * read_piece returns nothing (so REQUEST is never fulfilled).
  */
-static int dead_open(void *ctx, struct mbt_torrent *t)
-{ (void)ctx;(void)t; return 0; }
-static void dead_close(void *ctx) { (void)ctx; }
-static int dead_have(void *ctx, uint32_t p) { (void)ctx;(void)p; return 1; }
-static int dead_read(void *ctx, uint32_t p, void *buf, size_t len)
-{ (void)ctx;(void)p;(void)buf;(void)len; return -1; /* never deliver */ }
-static int dead_write(void *ctx, uint32_t p, const void *d, size_t l)
-{ (void)ctx;(void)p;(void)d;(void)l; return 0; }
+static int dead_open(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out)
+{ (void)t; *out = ctx; return 0; }
+static void dead_close(struct mbt_storage_handle *h) { (void)h; }
+static int dead_have(struct mbt_storage_handle *h, uint32_t p) { (void)h;(void)p; return 1; }
+static int dead_read(struct mbt_storage_handle *h, uint32_t p, void *buf, size_t len)
+{ (void)h;(void)p;(void)buf;(void)len; return -1; /* never deliver */ }
+static int dead_write(struct mbt_storage_handle *h, uint32_t p, const void *d, size_t l)
+{ (void)h;(void)p;(void)d;(void)l; return 0; }
 
 static const struct mbt_storage_ops dead_ops = {
 	.open = dead_open, .close = dead_close,
@@ -92,8 +92,10 @@ int main(void)
 	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL);
 
 	/* Seeder B: dead (advertises pieces but never sends data) */
+	static char dead_handle;
+	struct mbt_storage *dead_storage = mbt_storage_new(&dead_ops, &dead_handle);
 	struct mbt_session_config cfgB = {
-		.ev = ev, .default_storage = { &dead_ops, NULL }, .listen_port = 0,
+		.ev = ev, .default_storage = dead_storage, .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
@@ -140,6 +142,7 @@ int main(void)
 	mbt_ev_timer_free(to);
 	mbt_session_free(sA);
 	mbt_session_free(sB);
+	mbt_storage_unref(dead_storage);
 	mbt_session_free(sL);
 	mbt_ev_destroy(ev);
 	mbt_storage_memory_destroy(memA);

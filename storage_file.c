@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: ISC
+#include <sys/queue.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -16,24 +17,29 @@
 struct mbt_torrent;
 
 /*
- * File storage backend.
- * ctx = struct file_storage *, created by mbt_storage_file_new(data_dir).
- *
+ * ctx is a struct file_storage. Each open torrent has a struct file_torrent.
  * Single-file: data_dir/name
  * Multi-file: data_dir/torrent_name/path/to/file
  */
 
 struct file_entry {
 	int fd;
+	char *path;
 	uint64_t offset;
 	uint64_t length;
 };
 
-struct file_storage {
-	char *data_dir;
+struct file_torrent {
+	SLIST_ENTRY(file_torrent) next;
+	struct file_storage *fs;
 	struct file_entry *entries;
 	int count;
 	uint32_t piece_length;
+};
+
+struct file_storage {
+	char *data_dir;
+	SLIST_HEAD(, file_torrent) handles;
 };
 
 static const struct mbt_storage_ops file_ops;
@@ -63,88 +69,155 @@ mkdirs(const char *path)
 	return 0;
 }
 
-struct mbt_storage
+struct mbt_storage *
 mbt_storage_file_new(const char *data_dir)
 {
 	struct file_storage *fs = calloc(1, sizeof(*fs));
-	if (fs) {
-		fs->data_dir = strdup(data_dir);
-		if (!fs->data_dir) { free(fs); fs = NULL; }
+	struct mbt_storage *s;
+
+	if (!fs)
+		return NULL;
+	SLIST_INIT(&fs->handles);
+	fs->data_dir = strdup(data_dir);
+	s = fs->data_dir ? mbt_storage_new(&file_ops, fs) : NULL;
+	if (!s) {
+		free(fs->data_dir);
+		free(fs);
 	}
-	return (struct mbt_storage){ .ops = fs ? &file_ops : NULL, .ctx = fs };
+	return s;
 }
 
-void
-mbt_storage_file_free(struct mbt_storage *s)
+static void
+file_destroy(void *ctx)
 {
-	struct file_storage *fs = s->ctx;
-	if (!fs) return;
+	struct file_storage *fs = ctx;
+
 	free(fs->data_dir);
 	free(fs);
-	s->ops = NULL;
-	s->ctx = NULL;
 }
 
-int
-mbt_storage_file_open(void *ctx, struct mbt_torrent *t)
+static void
+handle_free(struct file_torrent *h)
+{
+	for (int i = 0; i < h->count; i++) {
+		if (h->entries[i].fd >= 0)
+			close(h->entries[i].fd);
+		free(h->entries[i].path);
+	}
+	free(h->entries);
+	free(h);
+}
+
+static int
+path_in_use(struct file_storage *fs, const char *path)
+{
+	struct file_torrent *h;
+
+	SLIST_FOREACH(h, &fs->handles, next)
+		for (int i = 0; i < h->count; i++)
+			if (strcmp(h->entries[i].path, path) == 0)
+				return 1;
+	return 0;
+}
+
+static char *
+entry_path(const char *dir, const char *name, const char *file, int multi)
+{
+	size_t n = strlen(dir) + strlen(name) + strlen(file) + 3;
+	char *path = malloc(n);
+
+	if (!path)
+		return NULL;
+	if (multi)
+		snprintf(path, n, "%s/%s/%s", dir, name, file);
+	else
+		snprintf(path, n, "%s/%s", dir, file);
+	return path;
+}
+
+static int
+file_open(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out)
 {
 	struct file_storage *fs = ctx;
 	const char *dir = fs->data_dir;
 	int fc = mbt_torrent_file_count(t);
 	const char *name = mbt_torrent_name(t);
-
-	if (fs->entries)
-		return 0;
+	struct file_torrent *h;
+	int rv;
 
 	if (fc == 0)
 		return -EINVAL;
 
-	fs->entries = calloc(fc, sizeof(struct file_entry));
-	if (!fs->entries)
+	h = calloc(1, sizeof(*h));
+	if (!h)
 		return -ENOMEM;
-	fs->count = fc;
-	fs->piece_length = mbt_torrent_piece_length(t);
+	h->fs = fs;
+	h->piece_length = mbt_torrent_piece_length(t);
+	h->entries = calloc(fc, sizeof(struct file_entry));
+	if (!h->entries) {
+		free(h);
+		return -ENOMEM;
+	}
 
 	for (int i = 0; i < fc; i++) {
 		const struct mbt_file *f = mbt_torrent_file(t, i);
-		char path[256];
+		struct file_entry *e = &h->entries[i];
 
-		if (fc == 1)
-			snprintf(path, sizeof(path), "%s/%s", dir, f->path);
-		else
-			snprintf(path, sizeof(path), "%s/%s/%s", dir,
-			         name ? name : "download", f->path);
+		e->fd = -1;
+		h->count = i + 1;
+		if (!f->path) {
+			rv = -EINVAL;
+			goto fail;
+		}
+		e->path = entry_path(dir, name ? name : "download", f->path, fc > 1);
+		if (!e->path) {
+			rv = -ENOMEM;
+			goto fail;
+		}
+		if (path_in_use(fs, e->path)) {
+			mbt_log_warn(MBT_LOG_STORAGE, "%s: in use by another torrent", e->path);
+			rv = -EEXIST;
+			goto fail;
+		}
 
-		int rv = mkdirs(path);
+		rv = mkdirs(e->path);
 		if (rv < 0) {
-			mbt_log_warn(MBT_LOG_STORAGE, "mkdir for %s: %s", path, strerror(-rv));
-			return rv;
+			mbt_log_warn(MBT_LOG_STORAGE, "mkdir for %s: %s", e->path, strerror(-rv));
+			goto fail;
 		}
 
-		fs->entries[i].fd = open(path, O_RDWR | O_CREAT, 0644);
-		if (fs->entries[i].fd < 0) {
-			mbt_log_warn(MBT_LOG_STORAGE, "open %s: %s", path, strerror(errno));
-			return -errno;
+		e->fd = open(e->path, O_RDWR | O_CREAT, 0644);
+		if (e->fd < 0) {
+			rv = -errno;
+			mbt_log_warn(MBT_LOG_STORAGE, "open %s: %s", e->path, strerror(-rv));
+			goto fail;
 		}
 
-		fs->entries[i].offset = f->offset;
-		fs->entries[i].length = f->length;
+		e->offset = f->offset;
+		e->length = f->length;
 	}
 
+	SLIST_INSERT_HEAD(&fs->handles, h, next);
+	*out = (struct mbt_storage_handle *)h;
 	mbt_log_info(MBT_LOG_STORAGE, "opened %d file(s) in %s", fc, dir);
 	return 0;
+
+fail:
+	handle_free(h);
+	return rv;
 }
 
-int
-mbt_storage_file_write_piece(void *ctx, uint32_t index, const void *data, size_t len)
+static int
+file_write_piece(struct mbt_storage_handle *handle, uint32_t index,
+                 const void *data, size_t len)
 {
-	struct file_storage *fs = ctx;
-	uint64_t piece_offset = (uint64_t)index * fs->piece_length;
+	struct file_torrent *h = (struct file_torrent *)handle;
+	uint64_t piece_offset = (uint64_t)index * h->piece_length;
 	const uint8_t *p = data;
 	size_t remaining = len;
 
-	for (int i = 0; i < fs->count && remaining > 0; i++) {
-		struct file_entry *e = &fs->entries[i];
+	for (int i = 0; i < h->count && remaining > 0; i++) {
+		struct file_entry *e = &h->entries[i];
 		uint64_t file_end = e->offset + e->length;
 
 		if (piece_offset >= file_end) continue;
@@ -165,16 +238,16 @@ mbt_storage_file_write_piece(void *ctx, uint32_t index, const void *data, size_t
 	return 0;
 }
 
-int
-mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, size_t len)
+static int
+file_read_piece(struct mbt_storage_handle *handle, uint32_t index, void *buf, size_t len)
 {
-	struct file_storage *fs = ctx;
-	uint64_t piece_offset = (uint64_t)index * fs->piece_length;
+	struct file_torrent *h = (struct file_torrent *)handle;
+	uint64_t piece_offset = (uint64_t)index * h->piece_length;
 	uint8_t *p = buf;
 	size_t remaining = len;
 
-	for (int i = 0; i < fs->count && remaining > 0; i++) {
-		struct file_entry *e = &fs->entries[i];
+	for (int i = 0; i < h->count && remaining > 0; i++) {
+		struct file_entry *e = &h->entries[i];
 		uint64_t file_end = e->offset + e->length;
 
 		if (piece_offset >= file_end) continue;
@@ -196,31 +269,28 @@ mbt_storage_file_read_piece(void *ctx, uint32_t index, void *buf, size_t len)
 	return 0;
 }
 
-int
-mbt_storage_file_have_piece(void *ctx, uint32_t index)
+static int
+file_have_piece(struct mbt_storage_handle *handle, uint32_t index)
 {
-	(void)ctx;
+	(void)handle;
 	(void)index;
 	return 0;
 }
 
-void
-mbt_storage_file_close(void *ctx)
+static void
+file_close(struct mbt_storage_handle *handle)
 {
-	struct file_storage *fs = ctx;
-	if (!fs || !fs->entries) return;
-	for (int i = 0; i < fs->count; i++)
-		if (fs->entries[i].fd >= 0)
-			close(fs->entries[i].fd);
-	free(fs->entries);
-	fs->entries = NULL;
-	fs->count = 0;
+	struct file_torrent *h = (struct file_torrent *)handle;
+
+	SLIST_REMOVE(&h->fs->handles, h, file_torrent, next);
+	handle_free(h);
 }
 
 static const struct mbt_storage_ops file_ops = {
-	.open        = mbt_storage_file_open,
-	.write_piece = mbt_storage_file_write_piece,
-	.read_piece  = mbt_storage_file_read_piece,
-	.have_piece  = mbt_storage_file_have_piece,
-	.close       = mbt_storage_file_close,
+	.open        = file_open,
+	.write_piece = file_write_piece,
+	.read_piece  = file_read_piece,
+	.have_piece  = file_have_piece,
+	.close       = file_close,
+	.destroy     = file_destroy,
 };

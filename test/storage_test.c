@@ -12,10 +12,11 @@
 static void
 test_storage_ops_exist(void)
 {
-	struct mbt_storage s = mbt_storage_file_new("/tmp");
-	const struct mbt_storage_ops *ops = s.ops;
+	struct mbt_storage *s = mbt_storage_file_new("/tmp");
+	assert(s);
+	const struct mbt_storage_ops *ops = s->ops;
 	assert(ops);
-	mbt_storage_file_free(&s);
+	mbt_storage_unref(s);
 	assert(ops->open);
 	assert(ops->write_piece);
 	assert(ops->read_piece);

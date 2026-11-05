@@ -22,7 +22,7 @@ struct mbt_state_ops;
 
 /* Session configuration — caller's policy choices */
 struct mbt_add_torrent_cfg {
-	struct mbt_storage storage; /* zero = use session default_storage */
+	struct mbt_storage *storage; /* torrent takes a reference; NULL = use default_storage */
 	const char *data_dir;       /* passed to mbt_torrent_data_dir(); NULL = unknown */
 };
 
@@ -30,7 +30,7 @@ struct mbt_session_config {
 	struct mbt_ev *ev;
 
 	/* default storage inherited by all torrents; override per-torrent via mbt_add_torrent_cfg */
-	struct mbt_storage default_storage;
+	struct mbt_storage *default_storage; /* session takes a reference */
 	const char *default_data_dir; /* passed to mbt_torrent_data_dir() for all torrents */
 
 	/* optional persistence layer */

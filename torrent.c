@@ -115,7 +115,8 @@ struct mbt_torrent {
 	struct mbt_session *session; /* owning session (NULL if standalone) */
 	uint8_t peer_id[20];
 
-	struct mbt_storage storage;
+	struct mbt_storage *storage;
+	struct mbt_storage_handle *storage_h; /* NULL until storage opens */
 	char *data_dir;
 	mbt_picker_fn picker;
 	void *picker_ctx;
@@ -405,7 +406,7 @@ verify_tick(struct mbt_ev_timer *timer, void *arg)
 		uint32_t i = t->verify_cursor++;
 		size_t plen = piece_length_for(t, i);
 
-		int rv = t->storage.ops->read_piece(t->storage.ctx, i, t->verify_buf, plen);
+		int rv = t->storage->ops->read_piece(t->storage_h, i, t->verify_buf, plen);
 		if (rv >= 0) {
 			SHA1_CTX ctx;
 			uint8_t digest[20];
@@ -1177,8 +1178,8 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			if (tp && tp->failures > 0) tp->failures--;
 			tp->hash_failures = 0;
 
-			if (t->storage.ops && t->storage.ops->write_piece)
-				t->storage.ops->write_piece(t->storage.ctx, piece, pi->data, plen);
+			if (t->storage_h && t->storage->ops->write_piece)
+				t->storage->ops->write_piece(t->storage_h, piece, pi->data, plen);
 
 			piece_info_free_one(t, pi);
 			bucket_piece_complete(t, piece);
@@ -1367,7 +1368,7 @@ torrent_peer_writecb(struct mbt_conn *c, void *arg)
 		uint8_t *buf = malloc(plen);
 		if (!buf)
 			break;
-		int rv = t->storage.ops->read_piece(t->storage.ctx, pr->piece, buf, plen);
+		int rv = t->storage->ops->read_piece(t->storage_h, pr->piece, buf, plen);
 		if (rv < 0) {
 			free(buf);
 			TAILQ_REMOVE(&tp->pending_sends, pr, entry);
@@ -1406,7 +1407,7 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	if (mbt_bitmap_isset(t->have, piece) <= 0)
 		return;
 
-	if (!t->storage.ops || !t->storage.ops->read_piece)
+	if (!t->storage_h || !t->storage->ops->read_piece)
 		return;
 
 	/* Read full piece from storage, then send the requested block */
@@ -1422,7 +1423,7 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	if (!buf)
 		return;
 
-	int rv = t->storage.ops->read_piece(t->storage.ctx, piece, buf, plen);
+	int rv = t->storage->ops->read_piece(t->storage_h, piece, buf, plen);
 	if (rv < 0) {
 		free(buf);
 		return;
@@ -1962,7 +1963,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->ev = cfg->ev;
 	t->ih = mbt_infohash_ref(cfg->ih);
 	memcpy(t->peer_id, cfg->peer_id, 20);
-	t->storage = cfg->storage;
+	t->storage = mbt_storage_ref(cfg->storage);
 	if (cfg->data_dir)
 		t->data_dir = strdup(cfg->data_dir);
 	t->picker = cfg->picker ? cfg->picker : mbt_picker_rarest;
@@ -2034,8 +2035,9 @@ mbt_torrent_free(struct mbt_torrent *t)
 	mbt_infohash_unref(t->ih);
 	mbt_ratelimit_free(t->upload_limit);
 	mbt_ratelimit_free(t->download_limit);
-	if (t->storage.ops && t->storage.ops->close)
-		t->storage.ops->close(t->storage.ctx);
+	if (t->storage_h && t->storage->ops->close)
+		t->storage->ops->close(t->storage_h);
+	mbt_storage_unref(t->storage);
 	free(t);
 }
 
@@ -2196,15 +2198,15 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	mbt_bitmap_new_bits(&t->have, t->piece_count);
 
 	/* Open storage for this torrent */
-	if (t->storage.ops && t->storage.ops->open) {
-		int srv = t->storage.ops->open(t->storage.ctx, t);
+	if (t->storage && t->storage->ops->open) {
+		int srv = t->storage->ops->open(t->storage->ctx, t, &t->storage_h);
 		if (srv < 0) {
 			mbt_log_warn(MBT_LOG_STORAGE, "storage open failed: %s", strerror(-srv));
 			return srv;
 		}
 	}
 
-	if (t->storage.ops && t->storage.ops->read_piece && !t->verifying) {
+	if (t->storage_h && t->storage->ops->read_piece && !t->verifying) {
 		t->verify_buf = malloc(t->piece_length);
 		if (t->verify_buf) {
 			t->verifying = 1;

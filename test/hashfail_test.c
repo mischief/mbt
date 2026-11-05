@@ -39,13 +39,13 @@ static void timeout_cb(struct mbt_ev_timer *t, void *a)
 { (void)t; (void)a; mbt_ev_stop(ev); }
 
 /* Corrupt storage: returns data with one byte flipped per piece */
-static int corrupt_open(void *ctx, struct mbt_torrent *t)
-{ (void)ctx; (void)t; return 0; }
-static void corrupt_close(void *ctx) { (void)ctx; }
-static int corrupt_have(void *ctx, uint32_t p) { (void)ctx; (void)p; return 1; }
-static int corrupt_read(void *ctx, uint32_t p, void *buf, size_t len)
+static int corrupt_open(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out)
+{ (void)t; *out = ctx; return 0; }
+static void corrupt_close(struct mbt_storage_handle *h) { (void)h; }
+static int corrupt_have(struct mbt_storage_handle *h, uint32_t p) { (void)h; (void)p; return 1; }
+static int corrupt_read(struct mbt_storage_handle *h, uint32_t p, void *buf, size_t len)
 {
-	(void)ctx;
+	(void)h;
 	size_t off = (size_t)p * PIECE_LEN;
 	if (off + len > TOTAL_LEN) len = TOTAL_LEN - off;
 	memcpy(buf, good_data + off, len);
@@ -53,8 +53,8 @@ static int corrupt_read(void *ctx, uint32_t p, void *buf, size_t len)
 	((uint8_t *)buf)[0] ^= 0xff;
 	return 0;
 }
-static int corrupt_write(void *ctx, uint32_t p, const void *d, size_t l)
-{ (void)ctx; (void)p; (void)d; (void)l; return 0; }
+static int corrupt_write(struct mbt_storage_handle *h, uint32_t p, const void *d, size_t l)
+{ (void)h; (void)p; (void)d; (void)l; return 0; }
 
 static const struct mbt_storage_ops corrupt_ops = {
 	.open = corrupt_open, .close = corrupt_close,
@@ -98,8 +98,10 @@ int main(void)
 	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL);
 
 	/* Seeder B: corrupt data */
+	static char corrupt_handle;
+	struct mbt_storage *corrupt_storage = mbt_storage_new(&corrupt_ops, &corrupt_handle);
 	struct mbt_session_config cfgB = {
-		.ev = ev, .default_storage = { &corrupt_ops, NULL }, .listen_port = 0,
+		.ev = ev, .default_storage = corrupt_storage, .listen_port = 0,
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
@@ -145,6 +147,7 @@ int main(void)
 	mbt_ev_timer_free(to);
 	mbt_session_free(sA);
 	mbt_session_free(sB);
+	mbt_storage_unref(corrupt_storage);
 	mbt_session_free(sL);
 	mbt_ev_destroy(ev);
 	mbt_storage_memory_destroy(memA);

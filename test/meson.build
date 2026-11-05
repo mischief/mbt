@@ -59,6 +59,9 @@ test('e2e_tcp', e2e_test, timeout: 15, env: {'MBT_E2E_TRANSPORT': 'tcp'})
 storage_file_test = executable('storage_file_test', 'storage_file_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('storage_file', storage_file_test)
 
+storage_shared_test = executable('storage_shared_test', 'storage_shared_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('storage_shared', storage_shared_test, timeout: 60)
+
 peerdb_test = executable('peerdb_test', 'peerdb_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('peerdb', peerdb_test)
 

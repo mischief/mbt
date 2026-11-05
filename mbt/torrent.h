@@ -38,7 +38,7 @@ struct mbt_torrent_config {
 	struct mbt_ev *ev;
 	struct mbt_infohash *ih;
 	const uint8_t *peer_id;            /* 20 bytes */
-	struct mbt_storage storage;        /* ops + ctx; zero = no storage */
+	struct mbt_storage *storage;       /* torrent takes a reference; NULL = no storage */
 	const char *data_dir;              /* stored for mbt_torrent_data_dir(); may be NULL */
 	mbt_picker_fn picker;
 	void *picker_ctx;

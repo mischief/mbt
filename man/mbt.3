@@ -101,7 +101,7 @@ Piece data is written and read through a pluggable
 .Vt struct mbt_storage_ops
 interface.
 The built-in
-.Fn mbt_storage_file
+.Fn mbt_storage_file_new
 backend writes to the filesystem.
 Custom backends can target any block device or memory buffer.
 .Ss Portability
@@ -125,8 +125,7 @@ Minimal download client:
 #include <mbt/session.h>
 
 struct mbt_session_config cfg = {
-    .storage_ops = &mbt_storage_file_ops,
-    .storage_path = ".",
+    .default_storage = mbt_storage_file_new("."),
 };
 
 struct mbt_session *s = mbt_session_new(&cfg);

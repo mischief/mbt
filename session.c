@@ -101,7 +101,7 @@ STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 struct mbt_session {
 	struct mbt_ev *ev;
 
-	struct mbt_storage default_storage;
+	struct mbt_storage *default_storage;
 	const char *default_data_dir;
 	const struct mbt_state_ops *state_ops;
 	void *state_ctx;
@@ -846,7 +846,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	}
 
 	s->ev = cfg->ev;
-	s->default_storage = cfg->default_storage;
+	s->default_storage = mbt_storage_ref(cfg->default_storage);
 	s->default_data_dir = cfg->default_data_dir;
 	s->state_ops = cfg->state_ops;
 	s->state_ctx = cfg->state_ctx;
@@ -983,6 +983,7 @@ mbt_session_free(struct mbt_session *s)
 
 	mbt_ratelimit_free(s->upload_limit);
 	mbt_ratelimit_free(s->download_limit);
+	mbt_storage_unref(s->default_storage);
 	if (s->state_ops && s->state_ops->close)
 		s->state_ops->close(s->state_ctx);
 	free(s);
@@ -1012,7 +1013,9 @@ return -ENOSYS; /* no built-in backend */
 		.listen_port = 6881,
 	};
 
-	return mbt_session_new(out, &cfg);
+	rv = mbt_session_new(out, &cfg);
+	mbt_storage_unref(cfg.default_storage);
+	return rv;
 }
 
 int
@@ -1355,11 +1358,13 @@ session_state_restore_cb(const struct mbt_state_entry *e, void *arg)
 	struct mbt_session *s = arg;
 	if (!e->metadata || e->metadata_len == 0)
 		return 0;
+	struct mbt_storage *own = e->data_dir ? mbt_storage_file_new(e->data_dir) : NULL;
 	struct mbt_add_torrent_cfg cfg = {
 		.data_dir = e->data_dir,
-		.storage  = e->data_dir ? mbt_storage_file_new(e->data_dir) : s->default_storage,
+		.storage  = own,
 	};
 	int rv = mbt_session_add_torrent_buf(s, e->metadata, e->metadata_len, &cfg);
+	mbt_storage_unref(own);
 	if (rv < 0)
 		mbt_log_warn(MBT_LOG_SESSION, "state restore: failed to add torrent: %s", strerror(-rv));
 	return 0; /* continue enumeration even on error */
@@ -1403,7 +1408,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih, struct 
 	if (!st)
 		return -ENOMEM;
 
-	struct mbt_storage stor = (acfg && acfg->storage.ops) ? acfg->storage : s->default_storage;
+	struct mbt_storage *stor = (acfg && acfg->storage) ? acfg->storage : s->default_storage;
 	const char *ddir = (acfg && acfg->data_dir) ? acfg->data_dir : s->default_data_dir;
 	struct mbt_torrent_config tcfg = {
 		.ev = s->ev,
