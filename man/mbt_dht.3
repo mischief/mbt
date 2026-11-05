@@ -9,6 +9,9 @@
 .Nm mbt_dht_announce ,
 .Nm mbt_dht_node_count ,
 .Nm mbt_dht_foreach_node ,
+.Nm mbt_dht_node_id ,
+.Nm mbt_dht_query ,
+.Nm mbt_dht_send_raw ,
 .Nm mbt_dht_port ,
 .Nm mbt_dht_set_node_id ,
 .Nm mbt_dht_set_verify ,
@@ -46,6 +49,28 @@
 .Ft int
 .Fn mbt_dht_put_mutable "struct mbt_dht *d" "const uint8_t k[32]" "const uint8_t sig[64]" "int64_t seq" "const char *salt" "size_t salt_len" "const void *v" "size_t vlen" "mbt_dht_done_cb done_cb" "void *arg"
 .Sh DESCRIPTION
+.Fn mbt_dht_query
+sends a raw KRPC query to an IP literal, for tests and tools.
+.Fa args
+is the
+.Dq a
+dictionary, sent as it is.
+.Fa cb
+gets the whole reply, which can be an error message, and is valid only during
+the call.
+It gets
+.Er ETIMEDOUT
+after 5 seconds, and
+.Er ECANCELED
+from
+.Fn mbt_dht_free .
+Errors are negative.
+.Pp
+.Fn mbt_dht_send_raw
+sends bytes as they are.
+.Fn mbt_dht_node_id
+returns our 20 byte node id.
+.Pp
 .Fn mbt_dht_foreach_node
 calls
 .Fa cb

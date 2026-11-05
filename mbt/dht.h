@@ -36,6 +36,21 @@ MBT_API int mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_
 typedef void (*mbt_dht_node_cb)(const uint8_t id[20], const char *addr, uint16_t port, void *arg);
 MBT_API void mbt_dht_foreach_node(struct mbt_dht *d, mbt_dht_node_cb cb, void *arg);
 
+/* Our node ID, 20 bytes. */
+MBT_API const uint8_t *mbt_dht_node_id(struct mbt_dht *d);
+
+/*
+ * Raw KRPC, for tests and tools. reply is the whole message, "r" or "e", and
+ * valid only during cb. err is 0, -ETIMEDOUT, or -ECANCELED from mbt_dht_free.
+ * addr is an IP literal. args is the "a" dict, sent as it is.
+ */
+struct mbt_be_value;
+typedef void (*mbt_dht_query_cb)(struct mbt_be_value *reply, int err, void *arg);
+MBT_API int mbt_dht_query(struct mbt_dht *d, const char *addr, uint16_t port, const char *q,
+                          struct mbt_be_value *args, mbt_dht_query_cb cb, void *arg);
+MBT_API int mbt_dht_send_raw(struct mbt_dht *d, const char *addr, uint16_t port,
+                             const void *data, size_t len);
+
 /* Number of nodes in routing table */
 MBT_API int mbt_dht_node_count(struct mbt_dht *d);
 

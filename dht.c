@@ -48,6 +48,9 @@ struct mbt_ev_timer;
 #define NODE6_COMPACT_LEN 38  /* 20 id + 16 ip + 2 port */
 #define MAX_LOOKUP_NODES 64  /* nodes tracked per lookup */
 #define LOOKUP_TIMEOUT_US (10 * 1000000ULL) /* 10s per lookup */
+#define QUERY_TIMEOUT_US (5 * 1000000ULL)   /* 5s per raw query */
+#define LOOKUP_TICK_US (500 * 1000ULL)
+#define LOOKUP_NODE_TIMEOUT_SEC 2           /* then a node counts as silent */
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
 
@@ -81,6 +84,7 @@ struct dht_node {
 	struct sockaddr_storage addr;
 	time_t last_seen;
 	int pinged;
+	int verified;            /* it spoke to us under this id */
 	SLIST_ENTRY(dht_node) entry;
 };
 
@@ -98,7 +102,8 @@ struct lookup_node {
 	uint8_t token[TOKEN_LEN]; /* token from get_peers response */
 	int token_len;
 	int queried;
-	int responded;
+	int responded;     /* also set for a node that stayed silent */
+	time_t sent;
 };
 
 struct dht_lookup {
@@ -111,9 +116,23 @@ struct dht_lookup {
 	mbt_dht_done_cb done_cb;
 	void *arg;
 	struct mbt_ev_timer *timer;
+	struct mbt_ev_timer *tick;
+	struct mbt_dht *d;
+};
+
+/* A pending mbt_dht_query. */
+struct dht_query {
+	SLIST_ENTRY(dht_query) entry;
+	struct mbt_dht *d;
+	uint8_t txn[TXN_LEN];
+	struct sockaddr_storage addr;
+	struct mbt_ev_timer *timer;
+	mbt_dht_query_cb cb;
+	void *arg;
 };
 
 struct mbt_dht {
+	SLIST_HEAD(, dht_query) queries;
 	struct mbt_ev *ev;
 	struct mbt_udp_mux *mux;   /* UDP socket, shared with uTP or owned */
 	int owns_mux;              /* free mux in dht_free if we created it */
@@ -181,20 +200,23 @@ static void
 random_bytes(uint8_t *buf, size_t len)
 {
 	for (size_t i = 0; i < len; i++)
-		buf[i] = rand() & 0xff;
+		buf[i] = mbt_random32() & 0xff;
 }
 
+/* Stable per machine and port: several nodes on one machine must differ. */
 static void
-dht_init_node_id(uint8_t *id)
+dht_init_node_id(uint8_t *id, uint16_t port)
 {
 	FILE *fp = fopen("/etc/machine-id", "r");
 	if (fp) {
 		char buf[64] = {0};
 		if (fread(buf, 1, 32, fp) == 32) {
-			/* SHA1(machine-id) → stable 20-byte node ID */
 			SHA1_CTX ctx;
+			uint8_t pb[2] = {(uint8_t)(port >> 8), (uint8_t)port};
+
 			SHA1Init(&ctx);
 			SHA1Update(&ctx, (uint8_t *)buf, 32);
+			SHA1Update(&ctx, pb, sizeof(pb));
 			SHA1Final(id, &ctx);
 			fclose(fp);
 			return;
@@ -411,8 +433,51 @@ routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage 
 	}
 }
 
+/* Drop nodes at addr under an id other than id. NULL drops all of them. */
+static void
+routing_drop_addr(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *id)
+{
+	for (struct dht_bucket *b = d->buckets; b; b = b->next) {
+		struct dht_node *n, *tmp;
+
+		SLIST_FOREACH_SAFE(n, &b->nodes, entry, tmp) {
+			if (!sa_equal(&n->addr, addr) ||
+			    (id && memcmp(n->id, id, DHT_PEER_ID_LEN) == 0))
+				continue;
+			SLIST_REMOVE(&b->nodes, n, dht_node, entry);
+			b->count--;
+			free(n);
+		}
+	}
+}
+
+/*
+ * A message from addr proves its id. That replaces a placeholder from
+ * bootstrap. Our own id at addr means we reached ourselves: returns 1.
+ */
 static int
-routing_closest(struct mbt_dht *d, const uint8_t *target, struct dht_node *out, int max)
+routing_heard(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr)
+{
+	struct dht_bucket *b;
+	struct dht_node *n;
+
+	if (memcmp(id, d->id, DHT_PEER_ID_LEN) == 0) {
+		routing_drop_addr(d, addr, NULL);
+		return 1;
+	}
+	routing_drop_addr(d, addr, id);
+	routing_add(d, id, addr);
+	b = routing_bucket_for(d, id);
+	SLIST_FOREACH(n, &b->nodes, entry)
+		if (memcmp(n->id, id, DHT_PEER_ID_LEN) == 0)
+			n->verified = 1;
+	return 0;
+}
+
+/* Tell others only about nodes that spoke to us. */
+static int
+routing_closest(struct mbt_dht *d, const uint8_t *target, struct dht_node *out, int max,
+                int verified_only)
 {
 	/* Collect all nodes, sort by XOR distance to target */
 	struct dht_node *all[256];
@@ -421,6 +486,8 @@ routing_closest(struct mbt_dht *d, const uint8_t *target, struct dht_node *out, 
 	for (struct dht_bucket *b = d->buckets; b && total < 256; b = b->next) {
 		struct dht_node *n;
 		SLIST_FOREACH(n, &b->nodes, entry) {
+			if (verified_only && !n->verified)
+				continue;
 			if (total < 256) all[total++] = n;
 		}
 	}
@@ -566,7 +633,9 @@ lookup_add_node(struct dht_lookup *lk, const uint8_t *id, const struct sockaddr_
 {
 	/* Dedup */
 	for (int i = 0; i < lk->node_count; i++)
-		if (memcmp(lk->nodes[i].id, id, 20) == 0) return;
+		if (memcmp(lk->nodes[i].id, id, 20) == 0 ||
+		    sa_equal(&lk->nodes[i].addr, addr))
+			return;
 
 	if (lk->node_count >= MAX_LOOKUP_NODES) return;
 	struct lookup_node *ln = &lk->nodes[lk->node_count++];
@@ -575,6 +644,22 @@ lookup_add_node(struct dht_lookup *lk, const uint8_t *id, const struct sockaddr_
 	ln->queried = 0;
 	ln->responded = 0;
 	ln->token_len = 0;
+}
+
+static void
+lookup_finish(struct dht_lookup *lk)
+{
+	if (lk->done_cb)
+		lk->done_cb(lk->arg);
+	if (lk->timer) {
+		mbt_ev_timer_free(lk->timer);
+		lk->timer = NULL;
+	}
+	if (lk->tick) {
+		mbt_ev_timer_free(lk->tick);
+		lk->tick = NULL;
+	}
+	lk->active = 0;
 }
 
 static void
@@ -596,6 +681,7 @@ lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 
 		lk->nodes[best].queried = 1;
 		lk->pending++;
+		lk->nodes[best].sent = time(NULL);
 		dht_send_get_peers(d, &lk->nodes[best].addr, lk->target);
 		{ char _b[64]; mbt_log_debug(MBT_LOG_DHT, "get_peers sent to %s",
 		              sa_str(&lk->nodes[best].addr, _b, sizeof(_b))); }
@@ -605,27 +691,36 @@ lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 	/* If nothing left to query and no pending, lookup is done */
 	if (sent == 0 && lk->pending == 0) {
 		mbt_log_debug(MBT_LOG_DHT, "lookup complete, %d nodes queried", lk->node_count);
-		if (lk->done_cb)
-			lk->done_cb(lk->arg);
-		if (lk->timer) {
-			mbt_ev_timer_free(lk->timer);
-			lk->timer = NULL;
-		}
-		lk->active = 0;
+		lookup_finish(lk);
 	}
 }
 
 static void
 lookup_timeout_cb(struct mbt_ev_timer *timer, void *v)
 {
-	struct dht_lookup *lk = v;
 	(void)timer;
 	mbt_log_debug(MBT_LOG_DHT, "lookup timed out");
-	if (lk->done_cb)
-		lk->done_cb(lk->arg);
-	mbt_ev_timer_free(lk->timer);
-	lk->timer = NULL;
-	lk->active = 0;
+	lookup_finish(v);
+}
+
+/* A silent node must not hold the lookup until its overall timeout. */
+static void
+lookup_tick_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct dht_lookup *lk = v;
+	time_t now = time(NULL);
+
+	for (int i = 0; i < lk->node_count; i++) {
+		struct lookup_node *ln = &lk->nodes[i];
+
+		if (ln->queried && !ln->responded && now - ln->sent >= LOOKUP_NODE_TIMEOUT_SEC) {
+			ln->responded = 1;
+			lk->pending--;
+		}
+	}
+	lookup_advance(lk->d, lk);
+	if (lk->tick)
+		mbt_ev_timer_mod(timer, LOOKUP_TICK_US);
 }
 
 /* --- Receive handler --- */
@@ -646,6 +741,8 @@ parse_compact_nodes(struct mbt_dht *d, const uint8_t *data, size_t len, struct d
 		if (a4->sin_addr.s_addr == 0 || a4->sin_port == 0)
 			continue;
 
+		if (memcmp(p, d->id, DHT_PEER_ID_LEN) == 0)
+			continue;
 		routing_add(d, p, &addr);
 		if (lk)
 			lookup_add_node(lk, p, &addr);
@@ -669,6 +766,8 @@ parse_compact_nodes6(struct mbt_dht *d, const uint8_t *data, size_t len, struct 
 		if (a6->sin6_port == 0) continue;
 		if (memcmp(&a6->sin6_addr, &in6addr_any, 16) == 0) continue;
 
+		if (memcmp(p, d->id, DHT_PEER_ID_LEN) == 0)
+			continue;
 		routing_add(d, p, &addr);
 		if (lk)
 			lookup_add_node(lk, p, &addr);
@@ -702,6 +801,38 @@ parse_compact_peers(const uint8_t *data, size_t len,
 }
 
 static void
+query_finish(struct dht_query *q, struct mbt_be_value *reply, int err)
+{
+	SLIST_REMOVE(&q->d->queries, q, dht_query, entry);
+	mbt_ev_timer_free(q->timer);
+	q->cb(reply, err, q->arg);
+	free(q);
+}
+
+static void
+query_timeout_cb(struct mbt_ev_timer *timer, void *v)
+{
+	(void)timer;
+	query_finish(v, NULL, -ETIMEDOUT);
+}
+
+static void
+query_reply(struct mbt_dht *d, struct mbt_be_value *msg, const struct sockaddr_storage *from)
+{
+	struct mbt_be_value *t = mbt_be_find(msg, "t");
+	struct dht_query *q;
+
+	if (!t || t->type != BE_STRING || t->string.len != TXN_LEN)
+		return;
+	SLIST_FOREACH(q, &d->queries, entry) {
+		if (sa_equal(&q->addr, from) && memcmp(q->txn, t->string.buf, TXN_LEN) == 0) {
+			query_finish(q, msg, 0);
+			return;
+		}
+	}
+}
+
+static void
 dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
            const struct sockaddr_storage *fromp)
 {
@@ -717,6 +848,9 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 
 	char type = *(char *)y->string.buf;
 
+	if (type == 'r' || type == 'e')
+		query_reply(d, msg, &from);
+
 	if (type == 'r') {
 		/* Response */
 		struct mbt_be_value *r = mbt_be_find(msg, "r");
@@ -724,8 +858,9 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 
 		/* Extract sender's node ID and add to routing table */
 		struct mbt_be_value *rid = mbt_be_find(r, "id");
-		if (rid && rid->type == BE_STRING && rid->string.len == 20)
-			routing_add(d, rid->string.buf, &from);
+		if (rid && rid->type == BE_STRING && rid->string.len == 20 &&
+		    routing_heard(d, rid->string.buf, &from))
+			goto out;
 
 		/* Check for nodes (find_node or get_peers response) */
 		struct mbt_be_value *nodes = mbt_be_find(r, "nodes");
@@ -792,8 +927,9 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 
 		/* Add querying node to routing table */
 		struct mbt_be_value *qid = mbt_be_find(a, "id");
-		if (qid && qid->type == BE_STRING && qid->string.len == 20)
-			routing_add(d, qid->string.buf, &from);
+		if (qid && qid->type == BE_STRING && qid->string.len == 20 &&
+		    routing_heard(d, qid->string.buf, &from))
+			goto out;
 
 		if (mbt_be_streq(q, "ping")) {
 			/* Respond to ping */
@@ -815,7 +951,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			if (!target_v || target_v->type != BE_STRING || target_v->string.len != 20)
 				goto out;
 			struct dht_node closest[K];
-			int n = routing_closest(d, target_v->string.buf, closest, K);
+			int n = routing_closest(d, target_v->string.buf, closest, K, 1);
 			uint8_t compact[K * NODE_COMPACT_LEN];
 			uint8_t compact6[K * NODE6_COMPACT_LEN];
 			int n4 = 0, n6 = 0;
@@ -895,7 +1031,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			if (!found_stored) {
 				/* Return closest nodes */
 				struct dht_node closest[K];
-				int n = routing_closest(d, ih_v->string.buf, closest, K);
+				int n = routing_closest(d, ih_v->string.buf, closest, K, 1);
 				uint8_t compact_nodes[K * NODE_COMPACT_LEN];
 				uint8_t compact_nodes6[K * NODE6_COMPACT_LEN];
 				int cn4 = 0, cn6 = 0;
@@ -1007,7 +1143,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			}
 			/* Closest nodes to target */
 			struct dht_node closest[K];
-			int nclosest = routing_closest(d, tgt->string.buf, closest, K);
+			int nclosest = routing_closest(d, tgt->string.buf, closest, K, 1);
 			uint8_t compact[K * 26];
 			int clen = 0;
 			for (int i = 0; i < nclosest; i++) {
@@ -1049,7 +1185,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			uint8_t tok[4]; make_txn(d, tok);
 			if (mbt_be_dict_append_string(rb, "token", tok, 4) < 0) goto out;
 			struct dht_node closest[K];
-			int nc2 = routing_closest(d, tgt->string.buf, closest, K);
+			int nc2 = routing_closest(d, tgt->string.buf, closest, K, 1);
 			uint8_t cn[K * NODE_COMPACT_LEN]; int cl = 0;
 			for (int j = 0; j < nc2; j++) {
 				if (closest[j].addr.ss_family != AF_INET) continue;
@@ -1222,12 +1358,12 @@ mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
 	SLIST_INIT(&d->buckets->nodes);
 	d->bucket_count = 1;
 
-	/* Derive stable node ID from machine-id, or fall back to random */
-	dht_init_node_id(d->id);
-
 	/* Use the shared mux for UDP (uTP may share this socket). */
 	d->mux = mux;
 	d->owns_mux = 0;
+
+	/* Derive stable node ID from machine-id, or fall back to random */
+	dht_init_node_id(d->id, mbt_udp_mux_port(mux));
 	mbt_udp_mux_set_dht(mux, dht_mux_handler, d);
 
 	/* Refresh timer — first fire at 5s to populate routing table quickly */
@@ -1253,9 +1389,14 @@ void
 mbt_dht_free(struct mbt_dht *d)
 {
 	if (!d) return;
-	for (int i = 0; i < MAX_LOOKUPS; i++)
+	while (!SLIST_EMPTY(&d->queries))
+		query_finish(SLIST_FIRST(&d->queries), NULL, -ECANCELED);
+	for (int i = 0; i < MAX_LOOKUPS; i++) {
 		if (d->lookups[i].timer)
 			mbt_ev_timer_free(d->lookups[i].timer);
+		if (d->lookups[i].tick)
+			mbt_ev_timer_free(d->lookups[i].tick);
+	}
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
 	if (d->token_timer) mbt_ev_timer_free(d->token_timer);
 	for (int i = 0; i < DHT_MAX_ITEMS; i++) {
@@ -1356,10 +1497,11 @@ mbt_dht_get_peers(struct mbt_dht *d, struct mbt_infohash *ih,
 	lk->peers_cb = peers_cb;
 	lk->done_cb = done_cb;
 	lk->arg = arg;
+	lk->d = d;
 
 	/* Seed lookup with closest nodes from routing table */
 	struct dht_node closest[K];
-	int n = routing_closest(d, lk->target, closest, K);
+	int n = routing_closest(d, lk->target, closest, K, 0);
 	for (int i = 0; i < n; i++)
 		lookup_add_node(lk, closest[i].id, &closest[i].addr);
 
@@ -1369,6 +1511,7 @@ mbt_dht_get_peers(struct mbt_dht *d, struct mbt_infohash *ih,
 
 	/* Set timeout */
 	mbt_ev_timer_new(d->ev, &lk->timer, LOOKUP_TIMEOUT_US, lookup_timeout_cb, lk);
+	mbt_ev_timer_new(d->ev, &lk->tick, LOOKUP_TICK_US, lookup_tick_cb, lk);
 
 	/* Start querying */
 	lookup_advance(d, lk);
@@ -1396,6 +1539,82 @@ mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen_por
 	}
 	mbt_log_info(MBT_LOG_DHT, "announced to %d nodes", sent);
 	return 0;
+}
+
+static int
+parse_literal(const char *addr, uint16_t port, struct sockaddr_storage *sa)
+{
+	struct sockaddr_in *s4 = (struct sockaddr_in *)sa;
+	struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)sa;
+
+	memset(sa, 0, sizeof(*sa));
+	if (inet_pton(AF_INET6, addr, &s6->sin6_addr) > 0) {
+		s6->sin6_family = AF_INET6;
+		s6->sin6_port = htons(port);
+		return 0;
+	}
+	if (inet_pton(AF_INET, addr, &s4->sin_addr) > 0) {
+		s4->sin_family = AF_INET;
+		s4->sin_port = htons(port);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+const uint8_t *
+mbt_dht_node_id(struct mbt_dht *d)
+{
+	return d->id;
+}
+
+int
+mbt_dht_send_raw(struct mbt_dht *d, const char *addr, uint16_t port, const void *data, size_t len)
+{
+	struct sockaddr_storage sa;
+	int rv = parse_literal(addr, port, &sa);
+
+	return rv < 0 ? rv : dht_send(d, &sa, data, len);
+}
+
+int
+mbt_dht_query(struct mbt_dht *d, const char *addr, uint16_t port, const char *qname,
+              struct mbt_be_value *args, mbt_dht_query_cb cb, void *arg)
+{
+	_cleanup_be_ struct mbt_be_value *msg = NULL;
+	unsigned char *enc;
+	size_t enc_len;
+	struct dht_query *q;
+	int rv;
+
+	if ((q = calloc(1, sizeof(*q))) == NULL)
+		return -ENOMEM;
+	q->d = d;
+	q->cb = cb;
+	q->arg = arg;
+	make_txn(d, q->txn);
+	if ((rv = parse_literal(addr, port, &q->addr)) < 0)
+		goto fail;
+	rv = -ENOMEM;
+	if (mbt_be_dict_new(&msg) < 0 ||
+	    mbt_be_dict_append_string(msg, "t", q->txn, TXN_LEN) < 0 ||
+	    mbt_be_dict_append_string(msg, "y", "q", 1) < 0 ||
+	    mbt_be_dict_append_string(msg, "q", qname, strlen(qname)) < 0 ||
+	    mbt_be_dict_append(msg, "a", args) < 0 ||
+	    mbt_be_value_encode(msg, &enc, &enc_len) < 0)
+		goto fail;
+	rv = dht_send(d, &q->addr, enc, enc_len);
+	free(enc);
+	if (rv < 0)
+		goto fail;
+	rv = mbt_ev_timer_new(d->ev, &q->timer, QUERY_TIMEOUT_US, query_timeout_cb, q);
+	if (rv < 0)
+		goto fail;
+	SLIST_INSERT_HEAD(&d->queries, q, entry);
+	return 0;
+
+fail:
+	free(q);
+	return rv;
 }
 
 void
