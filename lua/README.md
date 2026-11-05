@@ -157,6 +157,14 @@ It stays alive while Lua can reach it. Its lookups need `mbt.run` or
   time.
 - `d:announce(infohash, port)` announces to the nodes that the last get_peers
   for this infohash reached.
+- `d:id()` returns our node id in hex.
+- `d:query(addr, port, name[, args])` sends a raw KRPC query to an IP address,
+  waits inside a coroutine, and returns the whole reply as a table: bencode
+  strings stay binary, so `reply.r.id` is 20 bytes. An error reply has
+  `y == "e"`. No reply in 5 seconds returns nil, a message and an errno.
+  `args` becomes the `a` dict, a table with `[1]` becomes a list.
+  `args.id` defaults to our id, and `id = false` leaves it out.
+- `d:send_raw(addr, port, bytes)` sends bytes as they are.
 - `d:close()` frees the node. A pending `d:get_peers` returns
   `nil, "dht closed"`. The `<close>` attribute also closes it.
 

@@ -19,6 +19,7 @@
 #include <lauxlib.h>
 #include <lua.h>
 
+#include "mbt/be.h"
 #include "mbt/dht.h"
 #include "mbt/event.h"
 #include "mbt/hex.h"
@@ -38,6 +39,7 @@
 #define STORAGE_META "mbt.storage"
 #define DHT_META "mbt.dht"
 #define NODE_ID_LEN 20
+#define BE_LUA_MAX_DEPTH 32
 #define RUN_STEP_MS 100
 
 #define TORRENT_FAILED "torrent failed"
@@ -371,6 +373,9 @@ struct llookup {
 	struct lpeer *peers;
 	size_t count, cap;
 	const char *err;
+	bool is_query;                /* d:query, with reply or errnum */
+	struct mbt_be_value *reply;
+	int errnum;
 };
 
 struct ldht {
@@ -378,6 +383,38 @@ struct ldht {
 	struct mbt_dht *d;
 	TAILQ_HEAD(, llookup) pending;
 };
+
+/* Push a parsed bencode value. Dict keys and strings stay binary safe. */
+static void
+be_push(lua_State *L, struct mbt_be_value *v)
+{
+	struct mbt_be_value *e;
+	lua_Integer i = 0;
+
+	luaL_checkstack(L, 4, "bencode too deep");
+	switch (v->type) {
+	case BE_STRING:
+		lua_pushlstring(L, (const char *)v->string.buf, v->string.len);
+		break;
+	case BE_INTEGER:
+		lua_pushinteger(L, v->integer);
+		break;
+	case BE_LIST:
+		lua_newtable(L);
+		TAILQ_FOREACH(e, &v->listhead, next) {
+			be_push(L, e);
+			lua_rawseti(L, -2, ++i);
+		}
+		break;
+	default:
+		lua_newtable(L);
+		TAILQ_FOREACH(e, &v->listhead, next) {
+			be_push(L, e);
+			lua_setfield(L, -2, e->key);
+		}
+		break;
+	}
+}
 
 static void
 deliver_lookup(struct cctx *c, struct llookup *l)
@@ -390,6 +427,14 @@ deliver_lookup(struct cctx *c, struct llookup *l)
 		lua_pushnil(co);
 		lua_pushstring(co, l->err);
 		n = 2;
+	} else if (l->errnum != 0) {
+		lua_pushnil(co);
+		lua_pushstring(co, strerror(l->errnum));
+		lua_pushinteger(co, l->errnum);
+		n = 3;
+	} else if (l->is_query) {
+		be_push(co, l->reply);
+		mbt_be_unref(l->reply);
 	} else {
 		lua_createtable(co, (int)l->count, 0);
 		for (size_t i = 0; i < l->count; i++) {
@@ -1823,6 +1868,176 @@ l_dht_get_peers(lua_State *L)
 	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
 }
 
+/* Convert a Lua value at idx. Tables with [1] are lists, others are dicts. */
+static int
+be_from_lua(lua_State *L, int idx, int depth, struct mbt_be_value **out)
+{
+	int rv;
+
+	idx = lua_absindex(L, idx);
+	if (depth > BE_LUA_MAX_DEPTH || !lua_checkstack(L, 4))
+		return -EINVAL;
+	switch (lua_type(L, idx)) {
+	case LUA_TNUMBER:
+		if (!lua_isinteger(L, idx))
+			return -EINVAL;
+		return mbt_be_integer_new(out, lua_tointeger(L, idx));
+	case LUA_TSTRING: {
+		size_t len;
+		const char *s = lua_tolstring(L, idx, &len);
+
+		return mbt_be_string_new(out, s, len);
+	}
+	case LUA_TTABLE:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	lua_rawgeti(L, idx, 1);
+	bool is_list = !lua_isnil(L, -1);
+	lua_pop(L, 1);
+	if ((rv = is_list ? mbt_be_list_new(out) : mbt_be_dict_new(out)) < 0)
+		return rv;
+	if (is_list) {
+		for (lua_Integer i = 1; lua_rawgeti(L, idx, i) != LUA_TNIL; i++) {
+			struct mbt_be_value *e = NULL;
+
+			rv = be_from_lua(L, -1, depth + 1, &e);
+			lua_pop(L, 1);
+			if (rv < 0)
+				goto fail;
+			mbt_be_list_append(*out, e);
+			mbt_be_unref(e);
+		}
+		lua_pop(L, 1);
+		return 0;
+	}
+	lua_pushnil(L);
+	while (lua_next(L, idx) != 0) {
+		struct mbt_be_value *e = NULL;
+
+		if (lua_type(L, -2) != LUA_TSTRING) {
+			lua_pop(L, 2);
+			rv = -EINVAL;
+			goto fail;
+		}
+		rv = be_from_lua(L, -1, depth + 1, &e);
+		if (rv == 0) {
+			rv = mbt_be_dict_append(*out, (char *)lua_tostring(L, -2), e);
+			mbt_be_unref(e);
+		}
+		lua_pop(L, 1);
+		if (rv < 0) {
+			lua_pop(L, 1);
+			goto fail;
+		}
+	}
+	return 0;
+
+fail:
+	mbt_be_unref(*out);
+	*out = NULL;
+	return rv;
+}
+
+/* Runs inside libmbt: keep a reference to the reply. */
+static void
+query_cb(struct mbt_be_value *reply, int err, void *arg)
+{
+	struct llookup *l = arg;
+
+	l->errnum = -err;
+	l->reply = reply != NULL ? mbt_be_ref(reply) : NULL;
+	lookup_queue(l);
+}
+
+/*
+ * d:query(addr, port, name, args): park until the reply, and return it as a
+ * table. args.id defaults to our id. args.id = false leaves it out.
+ */
+static int
+l_dht_query(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	const char *addr = luaL_checkstring(L, 2);
+	lua_Integer port = luaL_checkinteger(L, 3);
+	const char *name = luaL_checkstring(L, 4);
+	struct mbt_be_value *args = NULL;
+	struct llookup *l;
+	int rv;
+
+	luaL_argcheck(L, port > 0 && port <= UINT16_MAX, 3, "bad port");
+	if (lua_isnoneornil(L, 5)) {
+		lua_settop(L, 4);
+		lua_newtable(L);
+	}
+	luaL_checktype(L, 5, LUA_TTABLE);
+	lua_getfield(L, 5, "id");
+	if (lua_isnil(L, -1)) {
+		lua_pushlstring(L, (const char *)mbt_dht_node_id(ld->d), NODE_ID_LEN);
+		lua_setfield(L, 5, "id");
+	} else if (lua_isboolean(L, -1) && !lua_toboolean(L, -1)) {
+		lua_pushnil(L);
+		lua_setfield(L, 5, "id");
+	}
+	lua_pop(L, 1);
+	if ((rv = be_from_lua(L, 5, 0, &args)) < 0)
+		return fail(L, rv);
+	if ((l = calloc(1, sizeof(*l))) == NULL) {
+		mbt_be_unref(args);
+		return luaL_error(L, "mbt: out of memory");
+	}
+	if (wait_begin(ld->c, L, &l->w) < 0) {
+		mbt_be_unref(args);
+		free(l);
+		return luaL_error(L, "mbt: call query inside mbt.run");
+	}
+	l->ld = ld;
+	l->is_query = true;
+	TAILQ_INSERT_TAIL(&ld->pending, l, entries);
+	rv = mbt_dht_query(ld->d, addr, (uint16_t)port, name, args, query_cb, l);
+	mbt_be_unref(args);
+	if (rv < 0) {
+		TAILQ_REMOVE(&ld->pending, l, entries);
+		luaL_unref(ld->c->L, LUA_REGISTRYINDEX, l->w.ref);
+		free(l);
+		return fail(L, rv);
+	}
+	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
+}
+
+/* d:send_raw(addr, port, bytes): send with no reply expected. */
+static int
+l_dht_send_raw(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	const char *addr = luaL_checkstring(L, 2);
+	lua_Integer port = luaL_checkinteger(L, 3);
+	size_t len;
+	const char *data = luaL_checklstring(L, 4, &len);
+	int rv;
+
+	luaL_argcheck(L, port > 0 && port <= UINT16_MAX, 3, "bad port");
+	rv = mbt_dht_send_raw(ld->d, addr, (uint16_t)port, data, len);
+	if (rv < 0)
+		return fail(L, rv);
+	lua_pushboolean(L, 1);
+	return 1;
+}
+
+/* d:id(): our node id in hex. */
+static int
+l_dht_id(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	char hex[NODE_ID_LEN * 2 + 1];
+
+	mbt_hex_encode((unsigned char *)mbt_dht_node_id(ld->d), NODE_ID_LEN, hex, sizeof(hex));
+	lua_pushstring(L, hex);
+	return 1;
+}
+
 /* d:announce(infohash, port): uses the tokens of the last get_peers. */
 static int
 l_dht_announce(lua_State *L)
@@ -2233,6 +2448,9 @@ static const luaL_Reg dht_methods[] = {
     {"bootstrap", l_dht_bootstrap},
     {"get_peers", l_dht_get_peers},
     {"announce", l_dht_announce},
+    {"query", l_dht_query},
+    {"send_raw", l_dht_send_raw},
+    {"id", l_dht_id},
     {"close", l_dht_close},
     {NULL, NULL},
 };
@@ -2289,6 +2507,8 @@ ctx_gc(lua_State *L)
 	}
 	while ((l = TAILQ_FIRST(&c->lookups)) != NULL) {
 		TAILQ_REMOVE(&c->lookups, l, entries);
+		if (l->reply != NULL)
+			mbt_be_unref(l->reply);
 		free(l->peers);
 		free(l);
 	}

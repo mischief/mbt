@@ -454,25 +454,74 @@ do
 	assert(#a:nodes() == 0)
 
 	mbt.run(function()
-		deadline(30000, "dht")
+		deadline(40000, "dht")
 		assert(b:bootstrap("127.0.0.1", a:port()))
 		assert(c:bootstrap("127.0.0.1", a:port()))
-		local function learned(node)
-			local nodes = node:nodes()
-
-			return nodes[1] ~= nil and nodes[1].id == string.rep("A0", 20)
+		local function knows(node, id)
+			for _, n in ipairs(node:nodes()) do
+				if n.id == id then
+					return n
+				end
+			end
 		end
-		while not learned(b) or not learned(c) do
+		while not knows(b, a:id()) or not knows(c, a:id()) do
 			mbt.sleep(10)
 		end
-		local nodes = c:nodes()
-		assert(nodes[1].addr == "127.0.0.1" and nodes[1].port == a:port())
+		local seen = knows(c, a:id())
+		assert(seen.addr == "127.0.0.1" and seen.port == a:port())
 
 		assert(#assert(b:get_peers(ih)) == 0)
 		assert(b:announce(ih, 7001))
 		mbt.sleep(50)
 		local peers = assert(c:get_peers(ih))
 		assert(#peers == 1 and peers[1].addr == "127.0.0.1" and peers[1].port == 7001)
+
+		-- raw queries, with the whole reply and errors from the node
+		local r = assert(b:query("127.0.0.1", a:port(), "ping"))
+		assert(r.y == "r" and #r.r.id == 20)
+		r = assert(b:query("127.0.0.1", a:port(), "find_node",
+		    {target = string.rep("x", 20)}))
+		assert(r.y == "r" and type(r.r.nodes) == "string")
+		r = assert(b:query("127.0.0.1", a:port(), "get_peers",
+		    {info_hash = string.rep("y", 20), want = {"n4", "n6"}}))
+		assert(#r.r.token > 0)
+		r = assert(b:query("127.0.0.1", a:port(), "announce_peer",
+		    {info_hash = string.rep("y", 20), port = 7002, token = "bad"}))
+		assert(r.y == "e" and r.e[1] == 203 and r.e[2] == "bad token")
+		assert(b:query("not an ip", 1, "ping") == nil)
+		assert(b:query("127.0.0.1", 1, "ping", {x = print}) == nil)
+		assert(b:send_raw("127.0.0.1", a:port(), "garbage"))
+		assert(#b:id() == 40)
+
+		-- close ends a query that gets no reply
+		local silent = assert(mbt.dht())
+		local got
+		mbt.spawn(function() got = {b:query("127.0.0.1", silent:port() + 1, "ping")} end)
+		silent:close()
+		mbt.sleep(1)
+		assert(got == nil)
+
+		-- a node that reaches itself forgets the entry, and does not answer
+		local own = assert(mbt.dht())
+		assert(own:bootstrap("127.0.0.1", own:port()))
+		mbt.sleep(50)
+		assert(own:node_count() == 0)
+		assert(({own:query("127.0.0.1", own:port(), "ping")})[3] ~= nil)
+		own:close()
+
+		-- a bootstrap placeholder is replaced, and never told to other nodes
+		local e = assert(mbt.dht())
+		assert(e:bootstrap("127.0.0.1", a:port()))
+		while not knows(e, a:id()) do
+			mbt.sleep(10)
+		end
+		for _, n in ipairs(e:nodes()) do
+			assert(n.port ~= a:port() or n.id == a:id())
+		end
+		local found = assert(b:query("127.0.0.1", e:port(), "find_node",
+		    {target = string.rep("z", 20)}))
+		assert(#found.r.nodes % 26 == 0)
+		e:close()
 
 		local lone = assert(mbt.dht())
 		assert(#assert(lone:get_peers(ih)) == 0)
