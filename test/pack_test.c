@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -137,9 +138,42 @@ test_roundtrip(void)
 	assert(l2 == 16384);
 }
 
+/* Overflow stops the cursor and reports once. It never aborts. */
+static void
+test_overflow(void)
+{
+	uint8_t buf[5] = {0}, out[8];
+	struct mbt_packer pk;
+	struct mbt_unpacker up;
+
+	mbt_pack_init(&pk, buf, sizeof(buf));
+	mbt_pack_u32(&pk, 0x01020304);
+	mbt_pack_u32(&pk, 0x05060708);
+	mbt_pack_u8(&pk, 9);
+	assert(pk.err);
+	assert(mbt_pack_end(&pk) == 0);
+	assert(buf[4] == 0);
+
+	mbt_pack_init(&pk, buf, sizeof(buf));
+	mbt_pack_mem(&pk, out, sizeof(out));
+	assert(pk.err && mbt_pack_end(&pk) == 0);
+
+	mbt_unpack_init(&up, buf, 3);
+	assert(mbt_unpack_u32(&up) == 0);
+	assert(up.err);
+	assert(mbt_unpack_u8(&up) == 0);
+	assert(mbt_unpack_end(&up) == 0);
+
+	mbt_unpack_init(&up, buf, 3);
+	memset(out, 0xff, sizeof(out));
+	mbt_unpack_mem(&up, out, sizeof(out));
+	assert(up.err && out[0] == 0);
+}
+
 int
 main(void)
 {
+	test_overflow();
 	test_pack_byte();
 	test_pack_uint32();
 	test_pack_raw();
