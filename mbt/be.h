@@ -24,7 +24,8 @@ struct mbt_be_value
 	int type;
 	int n_ref;
 	struct mbt_be_value *up;
-	char *key;
+	char *key;       /* NUL-terminated, but a key can hold NUL: see key_len */
+	size_t key_len;
 	/* Parsed dict values only: encoded bytes, relative to the start of the dict. */
 	size_t src_off, src_len;
 	TAILQ_ENTRY(mbt_be_value) next;
@@ -50,6 +51,8 @@ MBT_API void mbt_be_unrefp(struct mbt_be_value **v);
 
 MBT_API int mbt_be_dict_new(struct mbt_be_value **out);
 MBT_API int mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value);
+MBT_API int mbt_be_dict_append_key(struct mbt_be_value *dict, const void *key, size_t key_len,
+                                   struct mbt_be_value *value);
 MBT_API int mbt_be_dict_append_number(struct mbt_be_value *dict, char *key, int64_t num);
 MBT_API int mbt_be_dict_append_string(struct mbt_be_value *dict, char *key, const void *buf, size_t len);
 MBT_API int mbt_be_string_new(struct mbt_be_value **out, const void *buf, size_t len);

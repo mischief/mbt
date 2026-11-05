@@ -410,8 +410,9 @@ be_push(lua_State *L, struct mbt_be_value *v)
 	default:
 		lua_newtable(L);
 		TAILQ_FOREACH(e, &v->listhead, next) {
+			lua_pushlstring(L, e->key, e->key_len);
 			be_push(L, e);
-			lua_setfield(L, -2, e->key);
+			lua_rawset(L, -3);
 		}
 		break;
 	}
@@ -1973,7 +1974,10 @@ be_from_lua(lua_State *L, int idx, int depth, struct mbt_be_value **out)
 		}
 		rv = be_from_lua(L, -1, depth + 1, &e);
 		if (rv == 0) {
-			rv = mbt_be_dict_append(*out, (char *)lua_tostring(L, -2), e);
+			size_t key_len;
+			const char *key = lua_tolstring(L, -2, &key_len);
+
+			rv = mbt_be_dict_append_key(*out, key, key_len, e);
 			mbt_be_unref(e);
 		}
 		lua_pop(L, 1);

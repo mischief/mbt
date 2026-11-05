@@ -508,7 +508,7 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 	if (mi->is_private)
 		if (mbt_be_dict_append_number(info, "private", 1) < 0) return -ENOMEM;
 
-	/* Encode info dict separately to compute infohash (before append sets key) */
+	/* Encode info dict separately to compute infohash */
 	if (!mi->raw_info) {
 		unsigned char *info_enc;
 		size_t info_enc_len;

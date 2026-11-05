@@ -212,6 +212,18 @@ be_value_parse_number(const unsigned char *buf, size_t sz, struct mbt_be_value *
 
 static int be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct mbt_be_value **out);
 
+/* BEP 3 order: raw bytes, and a prefix sorts first. */
+static int
+key_cmp(const struct mbt_be_value *a, const struct mbt_be_value *b)
+{
+	size_t n = a->key_len < b->key_len ? a->key_len : b->key_len;
+	int rv = memcmp(a->key, b->key, n);
+
+	if (rv != 0)
+		return rv;
+	return a->key_len < b->key_len ? -1 : a->key_len > b->key_len;
+}
+
 static void
 be_insert(struct mbt_be_value *v, struct mbt_be_value *val)
 {
@@ -219,7 +231,7 @@ be_insert(struct mbt_be_value *v, struct mbt_be_value *val)
 		/* Insert sorted by key (BEP 3 requirement) */
 		struct mbt_be_value *cur, *prev = NULL;
 		TAILQ_FOREACH(cur, &v->listhead, next) {
-			if (cur->key && strcmp(val->key, cur->key) < 0)
+			if (cur->key && key_cmp(val, cur) < 0)
 				break;
 			prev = cur;
 		}
@@ -327,6 +339,7 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 
 		/* kidnap key */
 		inner->key = (char *)key->string.buf;
+		inner->key_len = key->string.len;
 		key->string.buf = NULL;
 		mbt_be_unref(key);
 		inner->src_off = (size_t)chr;
@@ -463,7 +476,7 @@ mbt_be_find(struct mbt_be_value *be, const char *key)
 		return NULL;
 
 	TAILQ_FOREACH(inner, &be->listhead, next){
-		if(strcmp(key, inner->key) == 0)
+		if(strlen(key) == inner->key_len && memcmp(key, inner->key, inner->key_len) == 0)
 			return inner;
 	}
 
@@ -479,13 +492,24 @@ mbt_be_dict_new(struct mbt_be_value **out)
 int
 mbt_be_dict_append(struct mbt_be_value *dict, char *key, struct mbt_be_value *value)
 {
+	return mbt_be_dict_append_key(dict, key, strlen(key), value);
+}
+
+int
+mbt_be_dict_append_key(struct mbt_be_value *dict, const void *key, size_t key_len,
+                       struct mbt_be_value *value)
+{
 	char *k;
 
-	k = strdup(key);
+	k = malloc(key_len + 1);
 	if(!k)
 		return -ENOMEM;
+	memcpy(k, key, key_len);
+	k[key_len] = '\0';
 
+	free(value->key);
 	value->key = k;
+	value->key_len = key_len;
 
 	be_insert(dict, value);
 
@@ -557,10 +581,12 @@ mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val)
 	be_insert(list, val);
 }
 
+/* The key of root belongs to its parent, not to the encoded value. */
 struct encode_state
 {
 	char *ptr;
 	size_t len;
+	struct mbt_be_value *root;
 };
 
 static int
@@ -570,12 +596,12 @@ encode_getsize_cb(struct mbt_be_value *v, void *arg)
 	char buf[16];
 	int slen;
 
-	if(v->key){
+	if(v->key && v != e->root){
 		/* size:string */
-		slen = snprintf(buf, sizeof(buf), "%lu", strlen(v->key));
+		slen = snprintf(buf, sizeof(buf), "%zu", v->key_len);
 		e->len += slen;
 		e->len += 1;
-		e->len += strlen(v->key);
+		e->len += v->key_len;
 	}
 
 	switch(v->type){
@@ -613,10 +639,12 @@ encode_cb(struct mbt_be_value *v, void *arg)
 	struct encode_state *e = arg;
 	int slen;
 
-	if(v->key){
+	if(v->key && v != e->root){
 		/* size:string */
-		slen = sprintf(e->ptr, "%lu:%s", strlen(v->key), v->key);
+		slen = sprintf(e->ptr, "%zu:", v->key_len);
 		e->ptr += slen;
+		memcpy(e->ptr, v->key, v->key_len);
+		e->ptr += v->key_len;
 	}
 
 	switch(v->type){
@@ -657,7 +685,7 @@ encode_cb(struct mbt_be_value *v, void *arg)
 int
 mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len)
 {
-	struct encode_state e = {0};
+	struct encode_state e = {.root = v};
 	unsigned char *buf;
 
 	mbt_be_walk(v, encode_getsize_cb, &e);

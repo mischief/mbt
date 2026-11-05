@@ -5,6 +5,8 @@
 #include <string.h>
 #include <sys/types.h>
 
+#include <sys/queue.h>
+
 #include "mbt/be.h"
 
 #ifndef __AFL_FUZZ_TESTCASE_LEN
@@ -18,6 +20,39 @@
 #endif
 
 __AFL_FUZZ_INIT()
+
+/* Encoding must parse back to the same bytes, for a value and for its children. */
+static void
+check_one(struct mbt_be_value *v)
+{
+	struct mbt_be_value *again = NULL;
+	unsigned char *first = NULL, *second = NULL;
+	size_t first_len = 0, second_len = 0;
+
+	if(mbt_be_value_encode(v, &first, &first_len) < 0)
+		abort();
+	if(mbt_be_value_parse(first, first_len, &again) != (int)first_len)
+		abort();
+	if(mbt_be_value_encode(again, &second, &second_len) < 0)
+		abort();
+	if(first_len != second_len || memcmp(first, second, first_len) != 0)
+		abort();
+	mbt_be_unref(again);
+	free(first);
+	free(second);
+}
+
+static void
+check_encode(struct mbt_be_value *be)
+{
+	struct mbt_be_value *inner;
+
+	check_one(be);
+	if(be->type != BE_LIST && be->type != BE_DICTIONARY)
+		return;
+	TAILQ_FOREACH(inner, &be->listhead, next)
+		check_one(inner);
+}
 
 int
 main(int argc, char *argv[])
@@ -51,7 +86,8 @@ main(int argc, char *argv[])
 
 		be = NULL;
 		rv = mbt_be_value_parse(in, len, &be);
-		(void)rv;
+		if(rv > 0 && be)
+			check_encode(be);
 		if(be)
 			mbt_be_unref(be);
 		free(in);

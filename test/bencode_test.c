@@ -84,6 +84,50 @@ test_truncated(void)
 }
 
 static void
+check_encoded(struct mbt_be_value *v, const char *want)
+{
+	unsigned char *out;
+	size_t len;
+
+	assert(mbt_be_value_encode(v, &out, &len) == 0);
+	assert(len == strlen(want) && memcmp(out, want, len) == 0);
+	free(out);
+}
+
+/* A value encodes alone: its key belongs to the dict that holds it. */
+static void
+test_encode_child(void)
+{
+	static const char s[] = "d1:ad1:bi1ee1:cl1:xe1:d3:yyye";
+	struct mbt_be_value *be;
+
+	assert(parse(s, strlen(s), &be) == (int)strlen(s));
+	check_encoded(be, s);
+	check_encoded(mbt_be_find(be, "a"), "d1:bi1ee");
+	check_encoded(mbt_be_find(be, "c"), "l1:xe");
+	check_encoded(mbt_be_find(be, "d"), "3:yyy");
+	mbt_be_unref(be);
+}
+
+/* Keys are bytes, and a key with a NUL differs from its prefix. */
+static void
+test_binary_keys(void)
+{
+	static const char s[] = "d1:ai1e3:a\0bi2ee";
+	size_t len = sizeof(s) - 1;
+	struct mbt_be_value *be;
+	unsigned char *out;
+	size_t out_len;
+
+	assert(parse(s, len, &be) == (int)len);
+	assert(mbt_be_find(be, "a")->integer == 1);
+	assert(mbt_be_value_encode(be, &out, &out_len) == 0);
+	assert(out_len == len && memcmp(out, s, len) == 0);
+	free(out);
+	mbt_be_unref(be);
+}
+
+static void
 test_big_string(void)
 {
 	size_t len = BIG_STR + 16;
@@ -322,6 +366,8 @@ int
 main(void)
 {
 	test_truncated();
+	test_encode_child();
+	test_binary_keys();
 	test_big_string();
 	test_value_span();
 	test_info_marker_in_comment();
