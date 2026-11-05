@@ -575,6 +575,17 @@ do
 		assert(r.r.num == 100)
 		store:close()
 
+		-- silent nodes cost a lookup little more than one node timeout
+		local slowpoke = assert(mbt.dht())
+		for p = 1, 6 do
+			assert(slowpoke:bootstrap("127.0.0.1", 1000 + p))
+		end
+		local t0 = mbt.now_ms()
+		assert(slowpoke:get_peers(string.rep("31", 20)))
+		local took = mbt.now_ms() - t0
+		assert(took < 4000, took)
+		slowpoke:close()
+
 		-- a lookup across many nodes tells only the closest ones
 		local crowd = {}
 		for i = 1, 30 do

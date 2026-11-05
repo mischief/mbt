@@ -50,14 +50,15 @@ struct mbt_ev_timer;
 #define MAX_LOOKUP_NODES 64  /* nodes tracked per lookup */
 #define LOOKUP_TIMEOUT_US (10 * 1000000ULL) /* 10s per lookup */
 #define QUERY_TIMEOUT_US (5 * 1000000ULL)   /* 5s per raw query */
-#define LOOKUP_TICK_US (500 * 1000ULL)
+#define LOOKUP_TICK_US (100 * 1000ULL)
 #define DHT_ERR_PROTOCOL 203
 #define DHT_ERR_METHOD 204
 #define DHT_ERR_TOO_BIG 205
 #define DHT_ERR_SIGNATURE 206
 #define DHT_ERR_SALT 207
 #define DHT_ERR_SEQ 302
-#define LOOKUP_NODE_TIMEOUT_SEC 2           /* then a node counts as silent */
+#define LOOKUP_NODE_SLOW_MS 500             /* then a query stops holding a slot */
+#define LOOKUP_NODE_TIMEOUT_MS 2000         /* then a node counts as silent */
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
 
@@ -82,6 +83,15 @@ sa_equal(const struct sockaddr_storage *a, const struct sockaddr_storage *b)
 	struct sockaddr_in *b4 = (struct sockaddr_in *)b;
 	return a4->sin_port == b4->sin_port &&
 	       a4->sin_addr.s_addr == b4->sin_addr.s_addr;
+}
+
+static uint64_t
+mono_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
 /* --- Data structures --- */
@@ -111,7 +121,8 @@ struct lookup_node {
 	int queried;
 	int responded;     /* also set for a node that stayed silent */
 	int silent;
-	time_t sent;
+	int slow;          /* still may answer, but no longer in lk->pending */
+	uint64_t sent_ms;
 	uint8_t txn[TXN_LEN];
 };
 
@@ -776,7 +787,7 @@ lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 			break;
 		ln->queried = 1;
 		lk->pending++;
-		ln->sent = time(NULL);
+		ln->sent_ms = mono_ms();
 		dht_send_get_peers(d, &ln->addr, lk->target, ln->txn);
 		{ char _b[64]; mbt_log_debug(MBT_LOG_DHT, "get_peers sent to %s",
 		              sa_str(&ln->addr, _b, sizeof(_b))); }
@@ -801,15 +812,20 @@ static void
 lookup_tick_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct dht_lookup *lk = v;
-	time_t now = time(NULL);
+	uint64_t now = mono_ms();
 
 	for (int i = 0; i < lk->node_count; i++) {
 		struct lookup_node *ln = &lk->nodes[i];
 
-		if (ln->queried && !ln->responded && now - ln->sent >= LOOKUP_NODE_TIMEOUT_SEC) {
+		if (!ln->queried || ln->responded)
+			continue;
+		if (!ln->slow && now - ln->sent_ms >= LOOKUP_NODE_SLOW_MS) {
+			ln->slow = 1;
+			lk->pending--;
+		}
+		if (now - ln->sent_ms >= LOOKUP_NODE_TIMEOUT_MS) {
 			ln->responded = 1;
 			ln->silent = 1;
-			lk->pending--;
 		}
 	}
 	lookup_advance(lk->d, lk);
@@ -1104,7 +1120,8 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				    sa_equal(&d->lookups[i].nodes[j].addr, &from) &&
 				    memcmp(d->lookups[i].nodes[j].txn, rt->string.buf, TXN_LEN) == 0) {
 					d->lookups[i].nodes[j].responded = 1;
-					d->lookups[i].pending--;
+					if (!d->lookups[i].nodes[j].slow)
+						d->lookups[i].pending--;
 					/* Update node ID from response */
 					if (rid && rid->type == BE_STRING && rid->string.len == 20)
 						memcpy(d->lookups[i].nodes[j].id, rid->string.buf, 20);
