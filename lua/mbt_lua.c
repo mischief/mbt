@@ -1918,6 +1918,9 @@ l_dht_get_peers(lua_State *L)
 	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
 }
 
+/* mbt.empty_list: a table with no [1] encodes as a dict, so a list needs this. */
+static const char empty_list_key;
+
 /* Convert a Lua value at idx. Tables with [1] are lists, others are dicts. */
 static int
 be_from_lua(lua_State *L, int idx, int depth, struct mbt_be_value **out)
@@ -1938,6 +1941,10 @@ be_from_lua(lua_State *L, int idx, int depth, struct mbt_be_value **out)
 
 		return mbt_be_string_new(out, s, len);
 	}
+	case LUA_TLIGHTUSERDATA:
+		if (lua_touserdata(L, idx) != (void *)&empty_list_key)
+			return -EINVAL;
+		return mbt_be_list_new(out);
 	case LUA_TTABLE:
 		break;
 	default:
@@ -2111,7 +2118,7 @@ l_bencode(lua_State *L)
 	return 1;
 }
 
-/* mbt.bdecode(bytes): the value. */
+/* mbt.bdecode(bytes): the value, and how many bytes it used. */
 static int
 l_bdecode(lua_State *L)
 {
@@ -2124,7 +2131,8 @@ l_bdecode(lua_State *L)
 		return fail(L, rv);
 	be_push(L, v);
 	mbt_be_unref(v);
-	return 1;
+	lua_pushinteger(L, rv);
+	return 2;
 }
 
 static void
@@ -2820,5 +2828,7 @@ luaopen_mbt(lua_State *L)
 	luaL_newlib(L, module_fns);
 	luaL_newlib(L, storage_fns);
 	lua_setfield(L, -2, "storage");
+	lua_pushlightuserdata(L, (void *)&empty_list_key);
+	lua_setfield(L, -2, "empty_list");
 	return 1;
 }

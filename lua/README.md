@@ -185,7 +185,12 @@ tokens, and leaves signatures to `verify`. These calls use the local store:
 There is no client for the network. Build one with `d:query`: send `get` to
 collect a token and `put` with it. These help:
 
-- `mbt.bencode(value)` and `mbt.bdecode(bytes)`.
+- `mbt.bencode(value)` returns bytes. A table with `[1]` is a list, and other
+  tables are dicts, so an empty table is an empty dict. Use `mbt.empty_list`
+  for an empty list, also inside other values and in `d:query` args.
+- `mbt.bdecode(bytes)` returns the value and the number of bytes it used, so
+  data can follow it, as in a BEP 9 message. An empty list decodes to an empty
+  table.
 - `mbt.sha1(bytes)` returns hex. An immutable target is the sha1 of the
   bencoded value.
 

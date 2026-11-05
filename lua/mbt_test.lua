@@ -549,6 +549,12 @@ do
 		assert(mbt.bdecode(mbt.bencode({a = 1, b = {"x", 2}})).b[1] == "x")
 		assert(mbt.sha1("abc") == "A9993E364706816ABA3E25717850C26C9CD0D89D")
 		assert(mbt.bencode(print) == nil)
+		assert(mbt.bencode(mbt.empty_list) == "le")
+		assert(mbt.bencode({}) == "de")
+		assert(mbt.bencode({a = mbt.empty_list, b = {mbt.empty_list}}) == "d1:ale1:blleee")
+		local decoded, used = mbt.bdecode("d1:ai1eeTRAILING")
+		assert(decoded.a == 1 and used == 8)
+		assert(mbt.bdecode("garbage") == nil)
 		assert(mbt.bencode(mbt.bdecode("d3:a\0bi1e1:ai2ee")) == "d1:ai2e3:a\0bi1ee")
 
 		local here = assert(a:put("stored here"))
