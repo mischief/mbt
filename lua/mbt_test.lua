@@ -523,6 +523,62 @@ do
 		mbt.sleep(1)
 		assert(got == nil)
 
+		-- the peer store: one entry per address, newest kept, and it expires
+		local store = assert(mbt.dht{peer_ttl = 1})
+		local function announce(hash, peer_port)
+			local g = assert(b:query("127.0.0.1", store:port(), "get_peers", {info_hash = hash}))
+			r = assert(b:query("127.0.0.1", store:port(), "announce_peer",
+			    {info_hash = hash, port = peer_port, token = g.r.token}))
+			assert(r.y == "r")
+		end
+		local function values(hash)
+			local g = assert(b:query("127.0.0.1", store:port(), "get_peers", {info_hash = hash}))
+			return g.r.values or {}
+		end
+		local function port_of(v)
+			local p1, p2 = v:byte(5, 6)
+			return p1 * 256 + p2
+		end
+		local hash = string.rep("h", 20)
+
+		announce(hash, 5000)
+		announce(hash, 5000)
+		assert(#values(hash) == 1)
+		for p = 5001, 5008 do
+			announce(hash, p)
+		end
+		assert(#values(hash) == 8)
+		for _, v in ipairs(values(hash)) do
+			assert(port_of(v) ~= 5000)
+		end
+		for i = 1, 65 do
+			announce(string.format("%020d", i), 6000)
+		end
+		assert(#values(string.format("%020d", 65)) == 1)
+		mbt.sleep(2100)
+		assert(#values(string.format("%020d", 65)) == 0)
+		assert(assert(b:query("127.0.0.1", store:port(), "sample_infohashes",
+		    {target = hash})).r.num == 0)
+		store:close()
+
+		-- a lookup across many nodes tells only the closest ones
+		local crowd = {}
+		for i = 1, 30 do
+			crowd[i] = assert(mbt.dht())
+			assert(crowd[i]:bootstrap("127.0.0.1", a:port()))
+		end
+		mbt.sleep(300)
+		local far = string.rep("7A", 20)
+		assert(crowd[1]:get_peers(far))
+		local told = assert(crowd[1]:announce(far, 7444))
+		assert(told >= 1 and told <= 8, told)
+		mbt.sleep(100)
+		local got_peers = assert(crowd[30]:get_peers(far))
+		assert(#got_peers == 1 and got_peers[1].port == 7444)
+		for i = 1, 30 do
+			crowd[i]:close()
+		end
+
 		-- a node that reaches itself forgets the entry, and does not answer
 		local own = assert(mbt.dht())
 		assert(own:bootstrap("127.0.0.1", own:port()))

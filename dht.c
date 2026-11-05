@@ -110,6 +110,7 @@ struct lookup_node {
 	int token_len;
 	int queried;
 	int responded;     /* also set for a node that stayed silent */
+	int silent;
 	time_t sent;
 	uint8_t txn[TXN_LEN];
 };
@@ -153,12 +154,18 @@ struct mbt_dht {
 
 	/* Peer storage: announced peers for infohashes we've seen */
 #define DHT_MAX_STORED 64
+#define DHT_STORED_PEERS 8
+#define DHT_PEER_TTL_SEC (2 * 60 * 60)
 	struct {
 		uint8_t infohash[20];
-		struct sockaddr_storage peers[8];
+		struct {
+			struct sockaddr_storage addr;
+			time_t at;
+		} peers[DHT_STORED_PEERS];
 		int peer_count;
 	} stored[DHT_MAX_STORED];
 	int stored_count;
+	int peer_ttl;              /* seconds an announce lasts */
 
 	/* Active lookups */
 	struct dht_lookup lookups[MAX_LOOKUPS];
@@ -672,8 +679,25 @@ lookup_add_node(struct dht_lookup *lk, const uint8_t *id, const struct sockaddr_
 		    sa_equal(&lk->nodes[i].addr, addr))
 			return;
 
-	if (lk->node_count >= MAX_LOOKUP_NODES) return;
-	struct lookup_node *ln = &lk->nodes[lk->node_count++];
+	struct lookup_node *ln;
+
+	if (lk->node_count < MAX_LOOKUP_NODES) {
+		ln = &lk->nodes[lk->node_count++];
+	} else {
+		/* Full: a closer node replaces the farthest one not in flight. */
+		int worst = -1;
+
+		for (int i = 0; i < lk->node_count; i++) {
+			if (lk->nodes[i].queried && !lk->nodes[i].responded)
+				continue;
+			if (worst < 0 || closer_to(lk->target, lk->nodes[i].id, lk->nodes[worst].id) > 0)
+				worst = i;
+		}
+		if (worst < 0 || closer_to(lk->target, id, lk->nodes[worst].id) >= 0)
+			return;
+		ln = &lk->nodes[worst];
+		memset(ln, 0, sizeof(*ln));
+	}
 	memcpy(ln->id, id, 20);
 	ln->addr = *addr;
 	ln->queried = 0;
@@ -697,35 +721,59 @@ lookup_finish(struct dht_lookup *lk)
 	lk->active = 0;
 }
 
+/* Fill order with the usable nodes, closest to the target first. */
+static int
+lookup_rank(struct dht_lookup *lk, int *order)
+{
+	int n = 0;
+
+	for (int i = 0; i < lk->node_count; i++) {
+		int at = n++;
+
+		if (lk->nodes[i].silent) {
+			n--;
+			continue;
+		}
+		while (at > 0 && closer_to(lk->target, lk->nodes[i].id,
+		    lk->nodes[order[at - 1]].id) < 0) {
+			order[at] = order[at - 1];
+			at--;
+		}
+		order[at] = i;
+	}
+	return n;
+}
+
+/* A lookup ends when the K closest live nodes have all answered. */
 static void
 lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 {
-	/* Send get_peers to the ALPHA closest un-queried nodes */
-	int sent = 0;
-	for (int i = 0; i < lk->node_count && sent < ALPHA; i++) {
+	int order[MAX_LOOKUP_NODES];
+	int n = lookup_rank(lk, order);
+	int answered = 0, waiting = 0;
+
+	for (int i = 0; i < n && answered < K; i++) {
+		struct lookup_node *ln = &lk->nodes[order[i]];
+
+		if (ln->responded) {
+			answered++;
+			continue;
+		}
+		waiting = 1;
+		if (ln->queried || lk->pending >= ALPHA)
+			continue;
 		if (!mbt_ratelimit_allow(d->send_limit, 1))
 			break;
-		/* Find closest un-queried */
-		int best = -1;
-		for (int j = 0; j < lk->node_count; j++) {
-			if (lk->nodes[j].queried) continue;
-			if (best < 0 || closer_to(lk->target, lk->nodes[j].id, lk->nodes[best].id) < 0)
-				best = j;
-		}
-		if (best < 0) break;
-
-		lk->nodes[best].queried = 1;
+		ln->queried = 1;
 		lk->pending++;
-		lk->nodes[best].sent = time(NULL);
-		dht_send_get_peers(d, &lk->nodes[best].addr, lk->target, lk->nodes[best].txn);
+		ln->sent = time(NULL);
+		dht_send_get_peers(d, &ln->addr, lk->target, ln->txn);
 		{ char _b[64]; mbt_log_debug(MBT_LOG_DHT, "get_peers sent to %s",
-		              sa_str(&lk->nodes[best].addr, _b, sizeof(_b))); }
-		sent++;
+		              sa_str(&ln->addr, _b, sizeof(_b))); }
 	}
 
-	/* If nothing left to query and no pending, lookup is done */
-	if (sent == 0 && lk->pending == 0) {
-		mbt_log_debug(MBT_LOG_DHT, "lookup complete, %d nodes queried", lk->node_count);
+	if (!waiting) {
+		mbt_log_debug(MBT_LOG_DHT, "lookup complete, %d nodes known", lk->node_count);
 		lookup_finish(lk);
 	}
 }
@@ -750,6 +798,7 @@ lookup_tick_cb(struct mbt_ev_timer *timer, void *v)
 
 		if (ln->queried && !ln->responded && now - ln->sent >= LOOKUP_NODE_TIMEOUT_SEC) {
 			ln->responded = 1;
+			ln->silent = 1;
 			lk->pending--;
 		}
 	}
@@ -886,6 +935,85 @@ query_reply(struct mbt_dht *d, struct mbt_be_value *msg, const struct sockaddr_s
 			return;
 		}
 	}
+}
+
+/* Drop announces past their time, and infohashes left with no peers. */
+static void
+stored_expire(struct mbt_dht *d)
+{
+	time_t now = time(NULL);
+
+	for (int i = 0; i < d->stored_count; ) {
+		int kept = 0;
+
+		for (int j = 0; j < d->stored[i].peer_count; j++) {
+			if (now - d->stored[i].peers[j].at < d->peer_ttl)
+				d->stored[i].peers[kept++] = d->stored[i].peers[j];
+		}
+		d->stored[i].peer_count = kept;
+		if (kept == 0)
+			d->stored[i] = d->stored[--d->stored_count];
+		else
+			i++;
+	}
+}
+
+static time_t
+stored_newest(struct mbt_dht *d, int slot)
+{
+	time_t newest = 0;
+
+	for (int j = 0; j < d->stored[slot].peer_count; j++)
+		if (d->stored[slot].peers[j].at > newest)
+			newest = d->stored[slot].peers[j].at;
+	return newest;
+}
+
+/* Keep the newest announces: when full, the oldest gives way. */
+static void
+stored_put(struct mbt_dht *d, const uint8_t *infohash, const struct sockaddr_storage *addr)
+{
+	int slot = -1, target;
+
+	stored_expire(d);
+	for (int i = 0; i < d->stored_count; i++) {
+		if (memcmp(d->stored[i].infohash, infohash, 20) == 0) {
+			slot = i;
+			break;
+		}
+	}
+	if (slot < 0) {
+		if (d->stored_count < DHT_MAX_STORED) {
+			slot = d->stored_count++;
+		} else {
+			slot = 0;
+			for (int i = 1; i < d->stored_count; i++)
+				if (stored_newest(d, i) < stored_newest(d, slot))
+					slot = i;
+		}
+		memcpy(d->stored[slot].infohash, infohash, 20);
+		d->stored[slot].peer_count = 0;
+	}
+
+	target = -1;
+	for (int j = 0; j < d->stored[slot].peer_count; j++) {
+		if (sa_equal(&d->stored[slot].peers[j].addr, addr)) {
+			target = j;
+			break;
+		}
+	}
+	if (target < 0) {
+		if (d->stored[slot].peer_count < DHT_STORED_PEERS) {
+			target = d->stored[slot].peer_count++;
+		} else {
+			target = 0;
+			for (int j = 1; j < DHT_STORED_PEERS; j++)
+				if (d->stored[slot].peers[j].at < d->stored[slot].peers[target].at)
+					target = j;
+		}
+	}
+	d->stored[slot].peers[target].addr = *addr;
+	d->stored[slot].peers[target].at = time(NULL);
 }
 
 static void
@@ -1056,6 +1184,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 
 		} else if (mbt_be_streq(q, "get_peers")) {
 			/* Check if we have stored peers for this infohash */
+			stored_expire(d);
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
 			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.len != 20) {
 				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
@@ -1078,7 +1207,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 					_cleanup_be_ struct mbt_be_value *vals = NULL;
 					if (mbt_be_list_new(&vals) < 0) goto out;
 					for (int j = 0; j < d->stored[i].peer_count; j++) {
-						struct sockaddr_storage *pa = &d->stored[i].peers[j];
+						struct sockaddr_storage *pa = &d->stored[i].peers[j].addr;
 						if (pa->ss_family == AF_INET6) {
 							uint8_t cp6[18];
 							memcpy(cp6, &((struct sockaddr_in6 *)pa)->sin6_addr, 16);
@@ -1161,26 +1290,12 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			mbt_hex_encode(ih_v->string.buf, 20, ih_hex, sizeof(ih_hex));
 			mbt_log_debug(MBT_LOG_DHT, "announce %s port %hu from %s", ih_hex, aport,
 			              sa_str(&from, _qaddr, sizeof(_qaddr)));
-			/* Find or create storage slot */
-			int slot = -1;
-			for (int i = 0; i < d->stored_count; i++) {
-				if (memcmp(d->stored[i].infohash, ih_v->string.buf, 20) == 0)
-					{ slot = i; break; }
-			}
-			if (slot < 0 && d->stored_count < DHT_MAX_STORED) {
-				slot = d->stored_count++;
-				memcpy(d->stored[slot].infohash, ih_v->string.buf, 20);
-				d->stored[slot].peer_count = 0;
-			}
-			if (slot >= 0 && d->stored[slot].peer_count < 8) {
-				struct sockaddr_storage pa = from;
-				/* Override port with announced port */
-				if (pa.ss_family == AF_INET6)
-					((struct sockaddr_in6 *)&pa)->sin6_port = htons(aport);
-				else
-					((struct sockaddr_in *)&pa)->sin_port = htons(aport);
-				d->stored[slot].peers[d->stored[slot].peer_count++] = pa;
-			}
+			struct sockaddr_storage pa = from;
+			if (pa.ss_family == AF_INET6)
+				((struct sockaddr_in6 *)&pa)->sin6_port = htons(aport);
+			else
+				((struct sockaddr_in *)&pa)->sin_port = htons(aport);
+			stored_put(d, ih_v->string.buf, &pa);
 			/* Respond */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
@@ -1195,6 +1310,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			free(enc);
 		} else if (mbt_be_streq(q, "sample_infohashes")) {
 			/* BEP 51: return sample of stored infohashes */
+			stored_expire(d);
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
 			if (!tgt || tgt->type != BE_STRING || tgt->string.len != 20) {
 				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
@@ -1463,6 +1579,8 @@ mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
 	d->mux = mux;
 	d->owns_mux = 0;
 
+	d->peer_ttl = DHT_PEER_TTL_SEC;
+
 	/* Derive stable node ID from machine-id, or fall back to random */
 	dht_init_node_id(d->id, mbt_udp_mux_port(mux));
 	mbt_udp_mux_set_dht(mux, dht_mux_handler, d);
@@ -1630,11 +1748,17 @@ mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen_por
 		return -EINVAL;
 	}
 
+	/* The closest nodes that gave a token are the ones a search will reach. */
+	int order[MAX_LOOKUP_NODES];
+	int n = lookup_rank(lk, order);
 	int sent = 0;
-	for (int i = 0; i < lk->node_count; i++) {
-		if (lk->nodes[i].token_len > 0) {
-			dht_send_announce(d, &lk->nodes[i].addr, ih->hash_sha1, listen_port,
-			                  lk->nodes[i].token, lk->nodes[i].token_len);
+
+	for (int i = 0; i < n && sent < K; i++) {
+		struct lookup_node *ln = &lk->nodes[order[i]];
+
+		if (ln->token_len > 0) {
+			dht_send_announce(d, &ln->addr, ih->hash_sha1, listen_port, ln->token,
+			                  ln->token_len);
 			sent++;
 		}
 	}
@@ -1757,6 +1881,12 @@ uint16_t
 mbt_dht_port(struct mbt_dht *d)
 {
 	return mbt_udp_mux_port(d->mux);
+}
+
+void
+mbt_dht_set_peer_ttl(struct mbt_dht *d, int seconds)
+{
+	d->peer_ttl = seconds;
 }
 
 void

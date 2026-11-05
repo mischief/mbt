@@ -17,6 +17,7 @@
 .Nm mbt_dht_mutable_target ,
 .Nm mbt_dht_port ,
 .Nm mbt_dht_set_node_id ,
+.Nm mbt_dht_set_peer_ttl ,
 .Nm mbt_dht_set_verify ,
 .Nm mbt_dht_get_immutable ,
 .Nm mbt_dht_put_immutable ,
@@ -52,6 +53,11 @@
 .Ft int
 .Fn mbt_dht_put_mutable "struct mbt_dht *d" "const uint8_t k[32]" "const uint8_t sig[64]" "int64_t seq" "const char *salt" "size_t salt_len" "const void *v" "size_t vlen" "mbt_dht_done_cb done_cb" "void *arg"
 .Sh DESCRIPTION
+.Fn mbt_dht_set_peer_ttl
+sets how long an announce from another node lasts, by default two hours.
+A node keeps 8 peers for each of 64 infohashes, and the oldest give way.
+Announce again each hour.
+.Pp
 .Fn mbt_dht_query
 sends a raw KRPC query to an IP literal, for tests and tools.
 .Fa args
