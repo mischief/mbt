@@ -8,6 +8,7 @@
 
 #include "mbt/event.h"
 #include "ev_sd_internal.h"
+#include "banned.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;

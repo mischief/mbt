@@ -10,6 +10,7 @@
 
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
+#include "banned.h"
 
 struct mbt_torrent;
 

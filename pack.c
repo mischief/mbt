@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include "mbt/pack.h"
+#include "banned.h"
 
 extern inline void   mbt_pack_init(struct mbt_packer *pk, void *buf, size_t len);
 extern inline void   mbt_pack_u8(struct mbt_packer *pk, uint8_t v);

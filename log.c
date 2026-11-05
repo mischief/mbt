@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "mbt/log.h"
+#include "banned.h"
 
 static mbt_log_fn log_cb = NULL;
 static void *log_arg = NULL;

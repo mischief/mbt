@@ -7,6 +7,8 @@
 
 #include "mbt/magnet.h"
 #include "mbt/infohash.h"
+#include "parse.h"
+#include "banned.h"
 
 /* Percent-decode in-place. Returns decoded length. */
 static size_t
@@ -45,7 +47,8 @@ parse_peer(const char *s, struct mbt_magnet_peer *p)
 			return -EINVAL;
 		memcpy(p->addr, s + 1, len);
 		p->addr[len] = '\0';
-		p->port = (uint16_t)atoi(close + 2);
+		if (mbt_parse_port(close + 2, '\0', &p->port) < 0)
+			return -EINVAL;
 	} else {
 		/* ipv4:port or hostname:port */
 		colon = strrchr(s, ':');
@@ -56,7 +59,8 @@ parse_peer(const char *s, struct mbt_magnet_peer *p)
 			return -EINVAL;
 		memcpy(p->addr, s, len);
 		p->addr[len] = '\0';
-		p->port = (uint16_t)atoi(colon + 1);
+		if (mbt_parse_port(colon + 1, '\0', &p->port) < 0)
+			return -EINVAL;
 	}
 
 	return 0;

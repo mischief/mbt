@@ -36,6 +36,7 @@
 #include "mbt/picker.h"
 #include "mbt/storage.h"
 #include "mbt/timers.h"
+#include "cleanup.h"
 
 #define TORRENT_FILE_MAX (64 * 1024 * 1024)
 
@@ -44,6 +45,7 @@ static int session_state_restore_cb(const struct mbt_state_entry *e, void *arg);
 /* --- Torrent list entry --- */
 
 #include "mbt/peerdb.h"
+#include "banned.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;
@@ -1614,15 +1616,13 @@ int
 mbt_session_add_torrent_file(struct mbt_session *s, const char *path,
     struct mbt_add_torrent_cfg *cfg, struct mbt_torrent **out)
 {
-	unsigned char *buf = NULL;
+	autofree unsigned char *buf = NULL;
 	size_t len = 0;
 	int rv = read_torrent_file(path, &buf, &len);
 
 	if (rv < 0)
 		return rv;
-	rv = mbt_session_add_torrent_buf(s, buf, len, cfg, out);
-	free(buf);
-	return rv;
+	return mbt_session_add_torrent_buf(s, buf, len, cfg, out);
 }
 
 int

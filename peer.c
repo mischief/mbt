@@ -21,6 +21,7 @@
 #include "mbt/holepunch.h"
 #include "internal.h"
 #include "version.h"
+#include "banned.h"
 
 struct mbt_bitmap;
 struct mbt_ev_timer;

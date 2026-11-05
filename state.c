@@ -14,6 +14,7 @@
 #include "mbt/torrent.h"
 #include "mbt/infohash.h"
 #include "mbt/be.h"
+#include "banned.h"
 
 struct mbt_torrent;
 

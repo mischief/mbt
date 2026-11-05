@@ -13,6 +13,7 @@
 #include "mbt/dht.h"
 #include "mbt/infohash.h"
 #include "mbt/log.h"
+#include "banned.h"
 
 static struct mbt_ev *ev;
 static int peer_count;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include "mbt/conn.h"
+#include "banned.h"
 
 void
 mbt_conn_set_callbacks(struct mbt_conn *c, mbt_conn_read_cb readcb,

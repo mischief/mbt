@@ -7,6 +7,7 @@
 #include "mbt/torrent.h"
 #include "mbt/bitmap.h"
 #include "mbt/peer.h"
+#include "banned.h"
 
 struct mbt_torrent;
 

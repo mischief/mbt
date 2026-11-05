@@ -14,6 +14,8 @@
 #include "mbt/event.h"
 #include "mbt/tracker_server.h"
 #include "mbt/log.h"
+#include "tools/args.h"
+#include "banned.h"
 
 static struct mbt_ev *ev;
 
@@ -28,8 +30,8 @@ int main(int argc, char *argv[])
 
 	while ((ch = getopt(argc, argv, "hu:H:")) != -1) {
 		switch (ch) {
-		case 'u': udp_port = atoi(optarg); use_udp = 1; break;
-		case 'H': http_port = atoi(optarg); use_http = 1; break;
+		case 'u': udp_port = mbt_arg_int(optarg, 0, UINT16_MAX); use_udp = 1; break;
+		case 'H': http_port = mbt_arg_int(optarg, 0, UINT16_MAX); use_http = 1; break;
 		case 'h':
 		default:
 			fprintf(stderr, "usage: mbt-tracker [-u udp_port] [-H http_port]\n");

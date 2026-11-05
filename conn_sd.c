@@ -14,6 +14,7 @@
 #include "sdbuf.h"
 /* Access the underlying sd_event* from our ev_sd backend */
 #include "ev_sd_internal.h"
+#include "banned.h"
 
 struct mbt_ev;
 struct sdbuf;

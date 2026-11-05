@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 
 #include "mbt/resolve.h"
+#include "banned.h"
 
 struct mbt_ev;
 

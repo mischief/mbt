@@ -34,6 +34,7 @@
 #include "net.h"
 #include "udp_mux.h"
 #include "internal.h"
+#include "banned.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;
@@ -997,6 +998,8 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		if (routing_heard(d, qid->string.buf, &from))
 			goto out;
 
+		struct dht_node closest[K];
+
 		if (mbt_be_streq(q, "ping")) {
 			/* Respond to ping */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
@@ -1018,12 +1021,11 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
 			}
-			struct dht_node closest[K];
-			int n = routing_closest(d, target_v->string.buf, closest, K, 1);
+			int nclose = routing_closest(d, target_v->string.buf, closest, K, 1);
 			uint8_t compact[K * NODE_COMPACT_LEN];
 			uint8_t compact6[K * NODE6_COMPACT_LEN];
 			int n4 = 0, n6 = 0;
-			for (int i = 0; i < n; i++) {
+			for (int i = 0; i < nclose; i++) {
 				if (closest[i].addr.ss_family == AF_INET6) {
 					memcpy(compact6 + n6*38, closest[i].id, 20);
 					memcpy(compact6 + n6*38 + 20, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_addr, 16);
@@ -1100,12 +1102,11 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			}
 			if (!found_stored) {
 				/* Return closest nodes */
-				struct dht_node closest[K];
-				int n = routing_closest(d, ih_v->string.buf, closest, K, 1);
+				int nclose = routing_closest(d, ih_v->string.buf, closest, K, 1);
 				uint8_t compact_nodes[K * NODE_COMPACT_LEN];
 				uint8_t compact_nodes6[K * NODE6_COMPACT_LEN];
 				int cn4 = 0, cn6 = 0;
-				for (int i = 0; i < n; i++) {
+				for (int i = 0; i < nclose; i++) {
 					if (closest[i].addr.ss_family == AF_INET6) {
 						memcpy(compact_nodes6 + cn6*38, closest[i].id, 20);
 						memcpy(compact_nodes6 + cn6*38 + 20, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_addr, 16);
@@ -1211,7 +1212,6 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				}
 			}
 			/* Closest nodes to target */
-			struct dht_node closest[K];
 			int nclosest = routing_closest(d, tgt->string.buf, closest, K, 1);
 			uint8_t compact[K * 26];
 			int clen = 0;
@@ -1256,7 +1256,6 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			uint8_t tok[TOKEN_LEN];
 			dht_make_token(d, &from, tok);
 			if (mbt_be_dict_append_string(rb, "token", tok, TOKEN_LEN) < 0) goto out;
-			struct dht_node closest[K];
 			int nc2 = routing_closest(d, tgt->string.buf, closest, K, 1);
 			uint8_t cn[K * NODE_COMPACT_LEN]; int cl = 0;
 			for (int j = 0; j < nc2; j++) {

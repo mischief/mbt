@@ -28,6 +28,7 @@
 #include "mbt/event.h"
 #include "mbt/log.h"
 #include "internal.h"
+#include "banned.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;

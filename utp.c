@@ -31,6 +31,7 @@
 #include <sys/queue.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include "banned.h"
 
 /* ---- constants ---- */
 

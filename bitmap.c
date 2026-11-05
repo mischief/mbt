@@ -8,6 +8,7 @@
 #include <sys/types.h>
 
 #include "mbt/bitmap.h"
+#include "banned.h"
 
 /* Reverse bit order within a byte (MSB-first wire format → LSB-first ctz) */
 static inline uint8_t bitrev8(uint8_t b) {

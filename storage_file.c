@@ -14,6 +14,8 @@
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
 #include "mbt/log.h"
+#include "cleanup.h"
+#include "banned.h"
 
 struct mbt_torrent;
 
@@ -154,7 +156,7 @@ marker_path(struct file_storage *fs, struct mbt_torrent *t)
 static int
 file_mark(void *ctx, struct mbt_torrent *t, int on)
 {
-	char *path = marker_path(ctx, t);
+	autofree char *path = marker_path(ctx, t);
 	int fd, rv = 0;
 
 	if (!path)
@@ -168,7 +170,6 @@ file_mark(void *ctx, struct mbt_torrent *t, int on)
 		else
 			close(fd);
 	}
-	free(path);
 	return rv;
 }
 
@@ -179,29 +180,23 @@ file_exists(void *ctx, struct mbt_torrent *t)
 	struct file_storage *fs = ctx;
 	int fc = mbt_torrent_file_count(t);
 	const char *name = mbt_torrent_name(t);
-	char *marker = marker_path(fs, t);
-	int crashed;
+	autofree char *marker = marker_path(fs, t);
 
 	if (!marker)
 		return -ENOMEM;
-	crashed = access(marker, F_OK) == 0;
-	free(marker);
-	if (crashed)
+	if (access(marker, F_OK) == 0)
 		return 0;
 
 	for (int i = 0; i < fc; i++) {
 		const struct mbt_file *f = mbt_torrent_file(t, i);
-		char *path;
-		int found;
+		autofree char *path = NULL;
 
 		if (f->pad || !f->path)
 			continue;
 		path = entry_path(fs->data_dir, name ? name : "download", f->path, fc > 1);
 		if (!path)
 			return -ENOMEM;
-		found = access(path, F_OK) == 0;
-		free(path);
-		if (found)
+		if (access(path, F_OK) == 0)
 			return 1;
 	}
 	return 0;

@@ -17,6 +17,21 @@ checkargs = '''
 -Wno-unused-result
 -Wno-gnu-statement-expression-from-macro-expansion
 -Wno-gnu-include-next
+-Wnull-dereference
+-Warray-bounds
+-Wfloat-equal
+-Wformat
+-Wformat-security
+-Wuninitialized
+-Wshadow
+-Wimplicit-fallthrough
+-Wswitch
+-Wstrict-prototypes
+-Wmissing-prototypes
+-Wmissing-declarations
+-Wvla
+-Walloca
+-Wshift-overflow
 '''.split()
 foreach a : checkargs
   if cc.has_argument(a)
@@ -157,7 +172,8 @@ endif
 libmbt = library('mbt', bt_src, dependencies: deps, install: true,
                  include_directories: mbt_inc,
                  soversion: 0,
-                 c_args: ['-fvisibility=hidden', '-DMBT_BUILDING'],
+                 c_args: ['-fvisibility=hidden', '-DMBT_BUILDING'] +
+                         cc.get_supported_arguments('-Wframe-larger-than=8192'),
                  link_args: libmbt_link_args,
                  link_depends: libmbt_link_depends)
 

@@ -14,6 +14,8 @@
 #include <err.h>
 
 #include "mbt/metainfo.h"
+#include "tools/args.h"
+#include "banned.h"
 
 /* --- show --- */
 
@@ -96,7 +98,7 @@ cmd_create(int argc, char **argv)
 		switch (ch) {
 		case 'o': output = optarg; break;
 		case 't': tracker = optarg; break;
-		case 'p': piece_kib = atoi(optarg); break;
+		case 'p': piece_kib = mbt_arg_int(optarg, 1, 1 << 20); break;
 		default:
 			fprintf(stderr, "create: [-o out.torrent] [-t tracker] [-p piece_kib] <path>\n");
 			return 1;

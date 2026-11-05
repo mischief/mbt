@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "mbt/ratelimit.h"
+#include "banned.h"
 
 struct mbt_ratelimit {
 	uint64_t rate;      /* bytes per second (0 = unlimited) */

@@ -9,6 +9,7 @@
 
 #include "mbt/compat.h"
 #include "mbt/event.h"
+#include "banned.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;

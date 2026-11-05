@@ -19,6 +19,8 @@
 
 #include "net.h"
 #include "mbt/event.h"
+#include "parse.h"
+#include "banned.h"
 
 static int
 make_nonblock(int fd)
@@ -252,7 +254,13 @@ mbt_parse_endpoint(const char *str, uint16_t default_port,
 		char *colon = strrchr(host, ':');
 		if (colon) { *colon = '\0'; portstr = colon + 1; }
 	}
-	if (portstr) port = atoi(portstr);
+	if (portstr) {
+		uint16_t parsed;
+
+		if (mbt_parse_port(portstr, '\0', &parsed) < 0)
+			return -EINVAL;
+		port = parsed;
+	}
 
 	struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)out;
 	struct sockaddr_in *s4 = (struct sockaddr_in *)out;

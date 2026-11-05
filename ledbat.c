@@ -8,6 +8,7 @@
 #include "ledbat.h"
 
 #include <stdlib.h>   /* abs */
+#include "banned.h"
 
 void
 ledbat_init(struct ledbat *l, uint32_t init_cwnd, uint32_t min_cwnd,

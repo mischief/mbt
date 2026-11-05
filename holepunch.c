@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 
 #include "mbt/holepunch.h"
+#include "banned.h"
 
 enum {
 	HP_ADDR_V4 = 0x00,

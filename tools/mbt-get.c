@@ -16,6 +16,8 @@
 #include "mbt/log.h"
 #include "mbt/picker.h"
 #include "mbt/storage.h"
+#include "tools/args.h"
+#include "banned.h"
 
 struct mbt_torrent;
 
@@ -192,19 +194,19 @@ main(int argc, char *argv[])
 			use_pcp = 1;
 			break;
 		case 'l':
-			listen_port = atoi(optarg);
+			listen_port = mbt_arg_int(optarg, 0, UINT16_MAX);
 			break;
 		case 'o':
 			download_dir = optarg;
 			break;
 		case 'p':
-			max_peers = atoi(optarg);
+			max_peers = mbt_arg_int(optarg, 0, 1 << 16);
 			break;
 		case 'W':
-			utp_window = atoi(optarg);
+			utp_window = mbt_arg_int(optarg, 0, 1024);
 			break;
 		case 'r':
-			dl_rate = (uint64_t)atoi(optarg) * 1024;
+			dl_rate = (uint64_t)mbt_arg_int(optarg, 0, INT32_MAX) * 1024;
 			break;
 		case 's':
 			if (strcmp(optarg, "rarest") == 0)

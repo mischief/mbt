@@ -14,6 +14,8 @@
 #include "mbt/event.h"
 #include "mbt/pcp.h"
 #include "mbt/log.h"
+#include "tools/args.h"
+#include "banned.h"
 
 struct mbt_ev_timer;
 
@@ -54,8 +56,8 @@ main(int argc, char *argv[])
 		switch (ch) {
 		case 'g': gateway = optarg; break;
 		case 'k': keep_running = 1; break;
-		case 'l': lifetime = atoi(optarg); break;
-		case 'p': port = atoi(optarg); break;
+		case 'l': lifetime = mbt_arg_int(optarg, 0, INT32_MAX); break;
+		case 'p': port = mbt_arg_int(optarg, 0, UINT16_MAX); break;
 		case 't':
 			if (strcmp(optarg, "udp") == 0) protocol = 17;
 			else if (strcmp(optarg, "tcp") == 0) protocol = 6;

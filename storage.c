@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "mbt/storage.h"
+#include "banned.h"
 
 struct mbt_storage *
 mbt_storage_new(const struct mbt_storage_ops *ops, void *ctx)

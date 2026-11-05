@@ -10,6 +10,8 @@
 #include "mbt/dht.h"
 #include "mbt/event.h"
 #include "mbt/log.h"
+#include "tools/args.h"
+#include "banned.h"
 
 static void usage(const char *prog)
 {
@@ -27,7 +29,7 @@ int main(int argc, char *argv[])
 
 	while ((ch = getopt(argc, argv, "p:b:dh")) != -1) {
 		switch (ch) {
-		case 'p': port = atoi(optarg); break;
+		case 'p': port = mbt_arg_int(optarg, 0, UINT16_MAX); break;
 		case 'b': bootstrap = optarg; break;
 		case 'd': debug = 1; break;
 		default: usage(argv[0]);
@@ -54,7 +56,7 @@ int main(int argc, char *argv[])
 	const char *colon = strrchr(bootstrap, ':');
 	if (colon) {
 		snprintf(host, sizeof(host), "%.*s", (int)(colon - bootstrap), bootstrap);
-		bport = atoi(colon + 1);
+		bport = mbt_arg_int(colon + 1, 1, UINT16_MAX);
 	} else {
 		snprintf(host, sizeof(host), "%s", bootstrap);
 	}

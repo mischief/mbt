@@ -19,6 +19,8 @@
 #include "mbt/infohash.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "cleanup.h"
+#include "banned.h"
 
 #define MAX_TRACKERS 16
 #define MAX_FILES 4096
@@ -288,11 +290,16 @@ collect_files(const char *base, const char *rel, struct mbt_metainfo *mi)
 		struct dirent *ent;
 		while ((ent = readdir(d))) {
 			if (ent->d_name[0] == '.') continue;
-			char subrel[4096];
+			/* The heap: this recurses once per directory level. */
+			size_t n = strlen(rel) + strlen(ent->d_name) + 2;
+			autofree char *subrel = malloc(n);
+
+			if (!subrel)
+				break;
 			if (rel[0])
-				snprintf(subrel, sizeof(subrel), "%s/%s", rel, ent->d_name);
+				snprintf(subrel, n, "%s/%s", rel, ent->d_name);
 			else
-				snprintf(subrel, sizeof(subrel), "%s", ent->d_name);
+				snprintf(subrel, n, "%s", ent->d_name);
 			collect_files(base, subrel, mi);
 		}
 		closedir(d);

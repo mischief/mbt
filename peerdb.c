@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "mbt/peerdb.h"
+#include "banned.h"
 
 #define PEERDB_INIT_CAP 64
 #define PEERDB_LOAD_NUM 3

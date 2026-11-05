@@ -6,6 +6,7 @@
 
 #include "mbt/infohash.h"
 #include "mbt/hex.h"
+#include "banned.h"
 
 int
 mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str)

@@ -19,6 +19,8 @@
 #include "mbt/resolve.h"
 #include "internal.h"
 #include "mbt/log.h"
+#include "parse.h"
+#include "banned.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;
@@ -273,7 +275,8 @@ parse_udp_url(const char *url, char *host, size_t hostlen, uint16_t *port)
 		if (hlen >= hostlen) return -ENAMETOOLONG;
 		memcpy(host, h + 1, hlen);
 		host[hlen] = '\0';
-		*port = (uint16_t)atoi(end + 2);
+		if (mbt_parse_port(end + 2, '/', port) < 0)
+			return -EINVAL;
 	} else {
 		/* IPv4 or hostname: host:port */
 		const char *slash = strchr(h, '/');
@@ -284,7 +287,8 @@ parse_udp_url(const char *url, char *host, size_t hostlen, uint16_t *port)
 		if (hlen >= hostlen) return -ENAMETOOLONG;
 		memcpy(host, h, hlen);
 		host[hlen] = '\0';
-		*port = (uint16_t)atoi(colon + 1);
+		if (mbt_parse_port(colon + 1, '/', port) < 0)
+			return -EINVAL;
 	}
 	return 0;
 }

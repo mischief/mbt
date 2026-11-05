@@ -5,6 +5,7 @@
 #include <errno.h>
 
 #include "mbt/ringbuf.h"
+#include "banned.h"
 
 #define RINGBUF_MIN	1460	/* 1 MSS */
 

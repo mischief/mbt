@@ -33,6 +33,7 @@ evtimer_new(struct event_base *base, void (*cb)(int, short, void *), void *arg)
 #include "mbt/event.h"
 
 #include "ev_lev_internal.h"
+#include "banned.h"
 
 struct ev_lev_io {
 	struct mbt_ev *ev;

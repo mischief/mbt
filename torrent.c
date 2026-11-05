@@ -30,6 +30,7 @@
 #include "mbt/peer_source.h"
 #include "mbt/storage.h"
 #include "mbt/timers.h"
+#include "banned.h"
 
 struct mbt_bitmap;
 struct mbt_conn;
@@ -708,7 +709,7 @@ torrent_pex_cb(struct mbt_ev_timer *timer, void *v)
 	uint8_t added_f[50];   /* BEP 11 per-peer flags, parallel to added */
 	int count = 0;
 	struct torrent_peer *tp;
-	for (struct torrent_peer *tp = TAILQ_FIRST(&t->peers); tp && count < 50; tp = TAILQ_NEXT(tp, entry)) {
+	for (tp = TAILQ_FIRST(&t->peers); tp && count < 50; tp = TAILQ_NEXT(tp, entry)) {
 		if (!tp->peer) continue;
 		const char *addr = mbt_peer_addr(tp->peer);
 		uint16_t port = mbt_peer_port(tp->peer);

@@ -23,6 +23,7 @@
 #include "mbt/tracker.h"
 #include "mbt/storage.h"
 #include "mbt/log.h"
+#include "banned.h"
 
 struct mbt_ev_io;
 struct mbt_ev_timer;

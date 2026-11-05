@@ -11,6 +11,7 @@
 #include <sys/queue.h>
 
 #include "mbt/be.h"
+#include "banned.h"
 
 enum {
 	/* Digits of a string length, and the colon. */
@@ -585,6 +586,7 @@ mbt_be_list_append(struct mbt_be_value *list, struct mbt_be_value *val)
 struct encode_state
 {
 	char *ptr;
+	char *end;      /* one past the buffer */
 	size_t len;
 	struct mbt_be_value *root;
 };
@@ -641,7 +643,7 @@ encode_cb(struct mbt_be_value *v, void *arg)
 
 	if(v->key && v != e->root){
 		/* size:string */
-		slen = sprintf(e->ptr, "%zu:", v->key_len);
+		slen = snprintf(e->ptr, (size_t)(e->end - e->ptr), "%zu:", v->key_len);
 		e->ptr += slen;
 		memcpy(e->ptr, v->key, v->key_len);
 		e->ptr += v->key_len;
@@ -650,7 +652,7 @@ encode_cb(struct mbt_be_value *v, void *arg)
 	switch(v->type){
 	case BE_STRING:
 		/* size:string */
-		slen = sprintf(e->ptr, "%zu:", v->string.len);
+		slen = snprintf(e->ptr, (size_t)(e->end - e->ptr), "%zu:", v->string.len);
 		e->ptr += slen;
 		memcpy(e->ptr, v->string.buf, v->string.len);
 		e->ptr += v->string.len;
@@ -658,7 +660,7 @@ encode_cb(struct mbt_be_value *v, void *arg)
 
 	case BE_INTEGER:
 		/* i1234e */
-		slen = sprintf(e->ptr, "i%llde", v->integer);
+		slen = snprintf(e->ptr, (size_t)(e->end - e->ptr), "i%llde", v->integer);
 		e->ptr += slen;
 		break;
 
@@ -695,6 +697,7 @@ mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len)
 		return -ENOMEM;
 
 	e.ptr = (char*)buf;
+	e.end = e.ptr + e.len + 1;
 
 	mbt_be_walk(v, encode_cb, &e);
 

@@ -14,6 +14,7 @@
 #include "mbt/session.h"
 #include "mbt/storage.h"
 #include "mbt/log.h"
+#include "banned.h"
 
 struct mbt_session;
 

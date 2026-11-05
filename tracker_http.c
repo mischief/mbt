@@ -12,6 +12,7 @@
 #include "mbt/tracker.h"
 #include "mbt/be.h"
 #include "mbt/log.h"
+#include "banned.h"
 
 /* URL-encode binary data (infohash, peer_id) */
 static size_t

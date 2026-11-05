@@ -11,6 +11,7 @@
 #include "mbt/event.h"
 #include "mbt/http_curl.h"
 #include "mbt/log.h"
+#include "banned.h"
 
 #define HTTP_TIMEOUT_SEC 15L
 #define HTTP_MAX_REDIRECTS 5L

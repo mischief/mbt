@@ -8,6 +8,7 @@
 
 #include <sdbuf.h>
 #include "mbt/event.h"
+#include "banned.h"
 
 struct buf
 {

@@ -10,6 +10,7 @@
 #include "mbt/conn.h"
 #include "mbt/event.h"
 #include "sdbuf.h"
+#include "banned.h"
 
 struct conn_poll {
 	struct mbt_conn base;

@@ -21,22 +21,13 @@
 #include "mbt/event.h"
 #include "mbt/log.h"
 #include "net.h"
+#include "parse.h"
+#include "banned.h"
 
 #define HTTP_MAX_CONNS 256
 #define HTTP_CONN_TIMEOUT_USEC (10 * 1000000ULL)
 
-/* Forward declarations from tracker_store.c */
-struct ts_torrent;
-struct mbt_ev;
-struct mbt_ev_io;
-struct mbt_tracker_store;
-
-struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
-struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
-void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
-                                const struct sockaddr_storage *addr, int is_seeder);
-int mbt_tracker_store_get_peers_v4(struct ts_torrent *t, const struct sockaddr_storage *exclude,
-                                uint8_t *compact_out, int max_peers);
+#include "tracker_store.h"
 
 struct mbt_tracker_http {
 	struct mbt_ev *ev;
@@ -97,6 +88,8 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	uint16_t peer_port = 0;
 	int64_t left = -1;
 	int compact = 1;
+	long long num;
+	uint16_t port_v;
 	int numwant = 50;
 
 	char *param, *saveptr;
@@ -111,13 +104,13 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 		if (strcmp(key, "info_hash") == 0)
 			urldecode_infohash(val, info_hash);
 		else if (strcmp(key, "port") == 0)
-			peer_port = htons((uint16_t)atoi(val));
+			peer_port = mbt_parse_port(val, '\0', &port_v) == 0 ? htons(port_v) : 0;
 		else if (strcmp(key, "left") == 0)
-			left = atoll(val);
+			left = mbt_parse_int(val, 0, INT64_MAX, '\0', &num) == 0 ? num : -1;
 		else if (strcmp(key, "compact") == 0)
-			compact = atoi(val);
+			compact = mbt_parse_int(val, 0, 1, '\0', &num) == 0 ? (int)num : 1;
 		else if (strcmp(key, "numwant") == 0)
-			numwant = atoi(val);
+			numwant = mbt_parse_int(val, 0, 50, '\0', &num) == 0 ? (int)num : 50;
 	}
 	free(qs_copy);
 

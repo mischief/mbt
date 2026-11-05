@@ -14,6 +14,7 @@
 
 #include "mbt/resolve.h"
 #include "mbt/event.h"
+#include "banned.h"
 
 #define MAX_FDS 8
 

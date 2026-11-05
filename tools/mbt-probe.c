@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "mbt/hex.h"
+#include "banned.h"
 
 #define HANDSHAKE_SIZE 68
 

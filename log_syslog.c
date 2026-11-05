@@ -2,6 +2,7 @@
 #include <syslog.h>
 #include <stdarg.h>
 #include "mbt/log.h"
+#include "banned.h"
 
 static int
 level_to_syslog(enum mbt_log_level level)

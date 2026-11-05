@@ -13,6 +13,7 @@
 
 #include "mbt/resolve.h"
 #include "mbt/event.h"
+#include "banned.h"
 
 struct mbt_resolve {
 	struct mbt_ev *ev;

@@ -36,6 +36,7 @@ struct conn_lev {
 
 /* Access the underlying event_base from our ev_libevent backend */
 #include "ev_lev_internal.h"
+#include "banned.h"
 
 static void
 conn_lev_on_read(struct bufferevent *bev, void *v)

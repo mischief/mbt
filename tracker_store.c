@@ -3,6 +3,7 @@
  * tracker_store.c — shared peer storage for tracker servers (IPv4 + IPv6)
  */
 #include <sys/queue.h>
+#include "tracker_store.h"
 #include "mbt/compat.h"
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,7 @@
 
 #include "mbt/log.h"
 #include "mbt/tracker_server.h"
+#include "banned.h"
 
 #define MAX_PEERS_PER_TORRENT 200
 #define MAX_TORRENTS 4096

@@ -4,6 +4,7 @@
 #include <errno.h>
 
 #include "mbt/hex.h"
+#include "banned.h"
 
 static int
 mchrtobin(char h, unsigned char *out)

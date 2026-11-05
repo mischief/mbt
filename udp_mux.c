@@ -10,6 +10,7 @@
 #include "net.h"
 #include "mbt/log.h"
 #include "mbt/ratelimit.h"
+#include "banned.h"
 
 /*
  * Many uTP peers are multiplexed onto one shared UDP socket, so datagrams pile

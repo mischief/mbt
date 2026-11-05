@@ -17,6 +17,7 @@
 #include "mbt/log.h"
 #include "mbt/infohash.h"
 #include "mbt/lsd.h"
+#include "banned.h"
 
 void
 mbt_lsd_freep(struct mbt_lsd **v)
