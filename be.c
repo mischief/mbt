@@ -690,6 +690,169 @@ encode_cb(struct mbt_be_value *v, void *arg)
 	return 0;
 }
 
+void
+mbt_bew_init(struct mbt_bew *w, void *buf, size_t len)
+{
+	memset(w, 0, sizeof(*w));
+	w->start = w->p = buf;
+	w->end = w->start + len;
+}
+
+static int
+bew_fail(struct mbt_bew *w, int err)
+{
+	if(w->err == 0)
+		w->err = err;
+	return w->err;
+}
+
+static int
+bew_put(struct mbt_bew *w, const void *data, size_t len)
+{
+	if(w->err < 0)
+		return w->err;
+	if((size_t)(w->end - w->p) < len)
+		return bew_fail(w, -EMSGSIZE);
+	memcpy(w->p, data, len);
+	w->p += len;
+	return 0;
+}
+
+/* A value in a dict must follow its key. */
+static int
+bew_value(struct mbt_bew *w)
+{
+	if(w->err < 0)
+		return w->err;
+	if(w->depth > 0){
+		if(w->level[w->depth - 1].is_dict && !w->level[w->depth - 1].want_value)
+			return bew_fail(w, -EINVAL);
+		w->level[w->depth - 1].want_value = 0;
+	}
+	return 0;
+}
+
+static int
+bew_open(struct mbt_bew *w, char c, int is_dict)
+{
+	int rv = bew_value(w);
+
+	if(rv < 0)
+		return rv;
+	if(w->depth >= MBT_BEW_MAX_DEPTH)
+		return bew_fail(w, -ERANGE);
+	w->level[w->depth].is_dict = is_dict;
+	w->level[w->depth].want_value = 0;
+	w->level[w->depth].last_key = NULL;
+	w->depth++;
+	return bew_put(w, &c, 1);
+}
+
+int
+mbt_bew_dict(struct mbt_bew *w)
+{
+	ASSERT_RETURN(w, -EINVAL);
+	return bew_open(w, 'd', 1);
+}
+
+int
+mbt_bew_list(struct mbt_bew *w)
+{
+	ASSERT_RETURN(w, -EINVAL);
+	return bew_open(w, 'l', 0);
+}
+
+int
+mbt_bew_end(struct mbt_bew *w)
+{
+	ASSERT_RETURN(w, -EINVAL);
+	if(w->err < 0)
+		return w->err;
+	if(w->depth == 0 || w->level[w->depth - 1].want_value)
+		return bew_fail(w, -EINVAL);
+	w->depth--;
+	return bew_put(w, "e", 1);
+}
+
+int
+mbt_bew_str(struct mbt_bew *w, const void *data, size_t len)
+{
+	char hdr[24];
+	int n, rv;
+
+	ASSERT_RETURN(w, -EINVAL);
+	ASSERT_RETURN(data || len == 0, -EINVAL);
+	if((rv = bew_value(w)) < 0)
+		return rv;
+	n = snprintf(hdr, sizeof(hdr), "%zu:", len);
+	if((rv = bew_put(w, hdr, (size_t)n)) < 0)
+		return rv;
+	return bew_put(w, data, len);
+}
+
+int
+mbt_bew_key(struct mbt_bew *w, const char *key)
+{
+	char hdr[24];
+	int n, rv;
+	size_t len;
+
+	ASSERT_RETURN(w && key, -EINVAL);
+	if(w->err < 0)
+		return w->err;
+	if(w->depth == 0 || !w->level[w->depth - 1].is_dict ||
+	    w->level[w->depth - 1].want_value)
+		return bew_fail(w, -EINVAL);
+	if(w->level[w->depth - 1].last_key &&
+	    strcmp(w->level[w->depth - 1].last_key, key) >= 0)
+		return bew_fail(w, -EILSEQ);
+	len = strlen(key);
+	n = snprintf(hdr, sizeof(hdr), "%zu:", len);
+	if((rv = bew_put(w, hdr, (size_t)n)) < 0)
+		return rv;
+	if((rv = bew_put(w, key, len)) < 0)
+		return rv;
+	w->level[w->depth - 1].last_key = key;
+	w->level[w->depth - 1].want_value = 1;
+	return 0;
+}
+
+int
+mbt_bew_int(struct mbt_bew *w, int64_t v)
+{
+	char num[24];
+	int n, rv;
+
+	ASSERT_RETURN(w, -EINVAL);
+	if((rv = bew_value(w)) < 0)
+		return rv;
+	n = snprintf(num, sizeof(num), "i%llde", (long long)v);
+	return bew_put(w, num, (size_t)n);
+}
+
+int
+mbt_bew_raw(struct mbt_bew *w, const void *data, size_t len)
+{
+	int rv;
+
+	ASSERT_RETURN(w && data, -EINVAL);
+	if((rv = bew_value(w)) < 0)
+		return rv;
+	return bew_put(w, data, len);
+}
+
+int
+mbt_bew_finish(struct mbt_bew *w, size_t *out)
+{
+	ASSERT_RETURN(w && out, -EINVAL);
+	if(w->err == 0 && (w->depth != 0 || w->p == w->start))
+		w->err = -EINVAL;
+	if(w->err < 0)
+		return w->err;
+	*out = (size_t)(w->p - w->start);
+	return 0;
+}
+
 int
 mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len)
 {

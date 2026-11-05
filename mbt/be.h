@@ -38,6 +38,36 @@ struct mbt_be_value
 
 MBT_API int mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out);
 
+/*
+ * Bencode writer: a cursor over a caller's buffer, with no allocation. Keys
+ * must come in sorted order. The first failure stays in err, later calls do
+ * nothing, and mbt_bew_finish reports it: -EMSGSIZE for a small buffer, -EILSEQ
+ * for keys out of order, -ERANGE for deep nesting, -EINVAL for misuse.
+ */
+#define MBT_BEW_MAX_DEPTH 8
+
+struct mbt_bew {
+	unsigned char *start, *p, *end;
+	int err;
+	int depth;
+	struct {
+		int is_dict;
+		int want_value;
+		const char *last_key; /* the caller's string, valid until the next key */
+	} level[MBT_BEW_MAX_DEPTH];
+};
+
+MBT_API void mbt_bew_init(struct mbt_bew *w, void *buf, size_t len);
+MBT_API int mbt_bew_dict(struct mbt_bew *w);
+MBT_API int mbt_bew_list(struct mbt_bew *w);
+MBT_API int mbt_bew_end(struct mbt_bew *w);
+MBT_API int mbt_bew_key(struct mbt_bew *w, const char *key);
+MBT_API int mbt_bew_str(struct mbt_bew *w, const void *data, size_t len);
+MBT_API int mbt_bew_int(struct mbt_bew *w, int64_t v);
+/* One value that is already bencoded. */
+MBT_API int mbt_bew_raw(struct mbt_bew *w, const void *data, size_t len);
+MBT_API int mbt_bew_finish(struct mbt_bew *w, size_t *out) __attribute__((warn_unused_result));
+
 MBT_API int mbt_be_pp(struct mbt_be_value *be, void *arg);
 
 MBT_API void mbt_be_walk(struct mbt_be_value *be, int (*cb)(struct mbt_be_value *be, void *arg), void *arg);

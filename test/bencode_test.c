@@ -127,6 +127,57 @@ test_binary_keys(void)
 	mbt_be_unref(be);
 }
 
+/* The writer gives what the tree encoder gives, and reports misuse. */
+static void
+test_writer(void)
+{
+	unsigned char buf[128];
+	struct mbt_bew w;
+	size_t len;
+
+	mbt_bew_init(&w, buf, sizeof(buf));
+	mbt_bew_dict(&w);
+	mbt_bew_key(&w, "a");
+	mbt_bew_list(&w);
+	mbt_bew_int(&w, -5);
+	mbt_bew_str(&w, "xy", 2);
+	mbt_bew_end(&w);
+	mbt_bew_key(&w, "b");
+	mbt_bew_raw(&w, "d1:ci1ee", 8);
+	mbt_bew_end(&w);
+	assert(mbt_bew_finish(&w, &len) == 0);
+	assert(len == strlen("d1:ali-5e2:xye1:bd1:ci1eee"));
+	assert(memcmp(buf, "d1:ali-5e2:xye1:bd1:ci1eee", len) == 0);
+
+	mbt_bew_init(&w, buf, sizeof(buf));
+	mbt_bew_dict(&w);
+	mbt_bew_key(&w, "b");
+	mbt_bew_int(&w, 1);
+	assert(mbt_bew_key(&w, "a") == -EILSEQ);
+	mbt_bew_end(&w);
+	assert(mbt_bew_finish(&w, &len) == -EILSEQ);
+
+	mbt_bew_init(&w, buf, 3);
+	mbt_bew_str(&w, "abcd", 4);
+	assert(w.err == -EMSGSIZE && mbt_bew_finish(&w, &len) == -EMSGSIZE);
+
+	mbt_bew_init(&w, buf, sizeof(buf));
+	mbt_bew_dict(&w);
+	assert(mbt_bew_int(&w, 1) == -EINVAL);
+
+	mbt_bew_init(&w, buf, sizeof(buf));
+	mbt_bew_dict(&w);
+	assert(mbt_bew_finish(&w, &len) == -EINVAL);
+
+	mbt_bew_init(&w, buf, sizeof(buf));
+	assert(mbt_bew_finish(&w, &len) == -EINVAL);
+
+	mbt_bew_init(&w, buf, sizeof(buf));
+	for (int i = 0; i < MBT_BEW_MAX_DEPTH; i++)
+		mbt_bew_list(&w);
+	assert(mbt_bew_list(&w) == -ERANGE);
+}
+
 static void
 test_big_string(void)
 {
@@ -367,6 +418,7 @@ main(void)
 {
 	test_truncated();
 	test_encode_child();
+	test_writer();
 	test_binary_keys();
 	test_big_string();
 	test_value_span();

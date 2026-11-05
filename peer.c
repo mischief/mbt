@@ -103,9 +103,12 @@ peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 {
 	uint8_t prefix[4];
 	struct mbt_packer pk;
+	size_t used;
 	mbt_pack_init(&pk, prefix, sizeof(prefix));
 	mbt_pack_u32(&pk, (uint32_t)len);
-	mbt_pack_end(&pk);
+	int prv = mbt_pack_end(&pk, &used);
+	if (prv < 0)
+		return prv;
 
 	struct iovec iov[2] = {
 		{ .iov_base = (void *)prefix,    .iov_len = sizeof(prefix) },
@@ -113,6 +116,18 @@ peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 	};
 	ssize_t rv = mbt_conn_writev(p->conn, iov, 2);
 	return rv < 0 ? rv : 0;
+}
+
+/* Send a packed message. A pack error returns here, in place of the write. */
+static int
+peer_write_packed(struct mbt_peer *p, struct mbt_packer *pk)
+{
+	size_t used;
+	int rv = mbt_pack_end(pk, &used);
+
+	if (rv < 0)
+		return rv;
+	return peer_write_msg(p, pk->start, used) < 0 ? -EIO : 0;
 }
 
 static void
@@ -157,7 +172,10 @@ peer_send_handshake(struct mbt_peer *p)
 	mbt_pack_mem(&pk, ext, 8);
 	mbt_pack_mem(&pk, p->ih->hash_sha1, 20);
 	mbt_pack_mem(&pk, p->our_id, 20);
-	size_t o = mbt_pack_end(&pk);
+	size_t o;
+	int prv = mbt_pack_end(&pk, &o);
+	if (prv < 0)
+		return prv;
 
 	if (peer_write(p, buf, o) < 0)
 		return -EIO;
@@ -196,7 +214,9 @@ peer_recv_handshake(struct mbt_peer *p)
 		return -ENOMSG;
 
 	mbt_unpack_mem(&pk, p->their_id, 20);
-	mbt_unpack_end(&pk);
+	size_t used;
+	if (mbt_unpack_end(&pk, &used) < 0)
+		return -ENOMSG;
 
 	/* We dialed ourselves (our own external address, through a NAT that
 	 * hairpins). The owner learns the address from this error. */
@@ -250,10 +270,9 @@ peer_send_extension_handshake(struct mbt_peer *p)
 	mbt_pack_u8(&pk, BT_EXTENSION);
 	mbt_pack_u8(&pk, 0);
 	mbt_pack_mem(&pk, encoded, sz);
-	size_t pklen = mbt_pack_end(&pk);
 	free(encoded);
 
-	int wr = peer_write_msg(p, packed, pklen);
+	int wr = peer_write_packed(p, &pk);
 	free(packed);
 	return wr;
 }
@@ -1174,14 +1193,18 @@ mbt_peer_send_interested(struct mbt_peer *p, int interested)
 {
 	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	uint8_t msg = interested ? 2 : 3;
+	int rv;
 	unsigned char buf[5];
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, buf, sizeof(buf));
 	mbt_pack_u32(&pk, 1);
 	mbt_pack_u8(&pk, msg);
-	mbt_pack_end(&pk);
+	size_t used;
+	rv = mbt_pack_end(&pk, &used);
+	if (rv < 0)
+		return rv;
 	p->am_interested = interested;
-	return peer_write(p, buf, 5) < 0 ? -EIO : 0;
+	return peer_write(p, buf, used) < 0 ? -EIO : 0;
 }
 
 int
@@ -1189,14 +1212,18 @@ mbt_peer_send_choke(struct mbt_peer *p, int choke)
 {
 	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
 	uint8_t msg = choke ? 0 : 1;
+	int rv;
 	unsigned char buf[5];
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, buf, sizeof(buf));
 	mbt_pack_u32(&pk, 1);
 	mbt_pack_u8(&pk, msg);
-	mbt_pack_end(&pk);
+	size_t used;
+	rv = mbt_pack_end(&pk, &used);
+	if (rv < 0)
+		return rv;
 	p->am_choking = choke;
-	return peer_write(p, buf, 5) < 0 ? -EIO : 0;
+	return peer_write(p, buf, used) < 0 ? -EIO : 0;
 }
 
 int
@@ -1210,7 +1237,7 @@ mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint3
 	mbt_pack_u32(&pk, piece);
 	mbt_pack_u32(&pk, offset);
 	mbt_pack_u32(&pk, length);
-	return peer_write_msg(p, buf, mbt_pack_end(&pk));
+	return peer_write_packed(p, &pk);
 }
 
 int
@@ -1224,7 +1251,7 @@ mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32
 	mbt_pack_u32(&pk, piece);
 	mbt_pack_u32(&pk, offset);
 	mbt_pack_u32(&pk, length);
-	return peer_write_msg(p, buf, mbt_pack_end(&pk));
+	return peer_write_packed(p, &pk);
 }
 
 int
@@ -1236,7 +1263,7 @@ mbt_peer_send_have(struct mbt_peer *p, uint32_t piece)
 	mbt_pack_init(&pk, buf, sizeof(buf));
 	mbt_pack_u8(&pk, BT_HAVE);
 	mbt_pack_u32(&pk, piece);
-	return peer_write_msg(p, buf, mbt_pack_end(&pk));
+	return peer_write_packed(p, &pk);
 }
 
 int
@@ -1284,10 +1311,13 @@ mbt_peer_send_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	mbt_pack_u8(&pk, BT_PIECE);
 	mbt_pack_u32(&pk, piece);
 	mbt_pack_u32(&pk, offset);
-	mbt_pack_end(&pk);
+	size_t used;
+	int prv = mbt_pack_end(&pk, &used);
+	if (prv < 0)
+		return prv;
 
 	struct iovec iov[2] = {
-		{ .iov_base = (void *)hdr,  .iov_len = sizeof(hdr) },
+		{ .iov_base = (void *)hdr,  .iov_len = used },
 		{ .iov_base = (void *)data, .iov_len = len },
 	};
 	ssize_t rv = mbt_conn_writev(p->conn, iov, 2);
@@ -1321,10 +1351,9 @@ mbt_peer_send_metadata_request(struct mbt_peer *p, int piece)
 	mbt_pack_u8(&pk, BT_EXTENSION);
 	mbt_pack_u8(&pk, (uint8_t)p->ut_metadata_id);
 	mbt_pack_mem(&pk, encoded, sz);
-	size_t pklen = mbt_pack_end(&pk);
 	free(encoded);
 
-	return peer_write_msg(p, packed, pklen);
+	return peer_write_packed(p, &pk);
 }
 
 int
