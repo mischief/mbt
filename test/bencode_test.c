@@ -2,6 +2,7 @@
 /* Bencode and metainfo parsing of truncated, large and hostile input. */
 #include <assert.h>
 #include <errno.h>
+#include <sys/types.h>
 #include <sha1.h>
 #include <stdio.h>
 #include <stdlib.h>

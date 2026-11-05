@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: ISC
 /* BEP 47: padding files transfer as zeros and never reach the disk. */
 #include <assert.h>
+#include <sys/types.h>
 #include <sha1.h>
 #include <stdio.h>
 #include <stdlib.h>

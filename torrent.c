@@ -2824,7 +2824,7 @@ mbt_torrent_read_piece(struct mbt_torrent *t, uint32_t piece, void *buf, size_t 
 	if (len < plen)
 		return -EMSGSIZE;
 	if (!mbt_torrent_has_piece(t, piece))
-		return -ENODATA;
+		return -ENOENT;
 	if (!t->storage_h || !t->storage->ops->read_piece)
 		return -ENOTSUP;
 	return t->storage->ops->read_piece(t->storage_h, piece, buf, plen);

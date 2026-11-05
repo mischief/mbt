@@ -2,6 +2,7 @@
 /* Storage failures stop the torrent and reach the caller. */
 #include <assert.h>
 #include <errno.h>
+#include <sys/types.h>
 #include <sha1.h>
 #include <stdio.h>
 #include <stdlib.h>
