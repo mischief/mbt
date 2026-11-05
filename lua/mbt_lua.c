@@ -24,6 +24,9 @@
 #include "mbt/metainfo.h"
 #include "mbt/picker.h"
 #include "mbt/session.h"
+#ifdef HAVE_CURL
+#include "mbt/http_curl.h"
+#endif
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
 
@@ -671,9 +674,27 @@ l_session(lua_State *L)
 		ls->dir = NULL;
 		return fail(L, -ENOMEM);
 	}
+#ifdef HAVE_CURL
+	if (opt_bool(L, 1, "http", true)) {
+		struct mbt_http_curl *http = NULL;
+
+		if ((rv = mbt_http_curl_new(&http, c->ev)) < 0) {
+			mbt_storage_unref(cfg.default_storage);
+			free(ls->dir);
+			ls->dir = NULL;
+			return fail(L, rv);
+		}
+		cfg.http = mbt_http_curl_fn;
+		cfg.http_arg = http;
+		cfg.http_free = mbt_http_curl_free;
+	}
+#endif
 	rv = mbt_session_new(&ls->s, &cfg);
 	mbt_storage_unref(cfg.default_storage);
 	if (rv < 0) {
+#ifdef HAVE_CURL
+		mbt_http_curl_free(cfg.http_arg);
+#endif
 		ls->s = NULL;
 		free(ls->dir);
 		ls->dir = NULL;

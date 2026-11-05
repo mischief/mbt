@@ -95,20 +95,25 @@ do
 	raises(function() closed:torrents() end, "closed")
 end
 
--- sleep order
+-- sleeping coroutines run side by side. Timers that expire in one loop
+-- iteration have no set order, so the test waits on state, not on delays.
 local order = {}
 mbt.run(function()
 	mbt.spawn(function()
-		mbt.sleep(40)
-		order[#order + 1] = "late"
+		while #order == 0 do
+			mbt.sleep(1)
+		end
+		order[#order + 1] = "second"
 	end)
 	mbt.spawn(function()
-		mbt.sleep(5)
-		order[#order + 1] = "early"
+		mbt.sleep(1)
+		order[#order + 1] = "first"
 	end)
-	mbt.sleep(80)
+	while #order < 2 do
+		mbt.sleep(1)
+	end
 end)
-assert(table.concat(order, " ") == "early late")
+assert(table.concat(order, " ") == "first second", table.concat(order, " "))
 
 -- handles
 do
@@ -258,6 +263,21 @@ do
 		assert(s:add_torrent_buf(other) == b)
 	end)
 	s:close()
+end
+
+-- a session closes with an HTTP announce pending
+do
+	local listener = assert(mbt.session{dir = tmp .. "/leech", utp = false})
+	local url = "http://127.0.0.1:" .. listener:listen_port() .. "/announce"
+	local data = assert(mbt.create(seed_path, {piece_length = 16384, trackers = {url}}))
+	local s = assert(mbt.session{dir = tmp .. "/seed", utp = false})
+	assert(s:add_torrent_buf(data))
+	mbt.run(function() mbt.sleep(20) end)
+	s:close()
+	local off = assert(mbt.session{dir = tmp .. "/seed", utp = false, http = false})
+	assert(off:add_torrent_buf(data))
+	off:close()
+	listener:close()
 end
 
 -- a failed storage stops the torrent and reaches on_error and t:wait

@@ -44,6 +44,8 @@ removed torrent.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
   - `max_peers`, `max_pieces_per_peer`, `min_peers_before_download`, `reqq`,
     `max_pipeline`, `utp_window_pkts`: see `struct mbt_session_config`.
+  - `http`: default true in builds with libcurl. false stops HTTP and HTTPS
+    trackers.
   - `timers`: a table with the fields of `struct mbt_timers`, in seconds.
   - `on_complete`: `function(torrent)`. It runs in its own coroutine.
   - `on_error`: `function(torrent, message, errno)`, for a storage or
@@ -120,8 +122,7 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 
 ## Limits
 
-- HTTP and HTTPS trackers do not work yet: the module has no HTTP client.
-  UDP trackers work.
+- HTTP and HTTPS trackers need a libmbt built with libcurl.
 - `t:wait()` has no timeout. Bound it with `mbt.spawn` and `mbt.sleep`.
 - Sessions do not save state across runs.
 - `mbt.run` blocks in the event loop, so Ctrl-C takes effect at the next Lua
