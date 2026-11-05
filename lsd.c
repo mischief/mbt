@@ -173,7 +173,10 @@ mbt_lsd_recv(struct mbt_lsd *lsd, struct mbt_lsd_frame **out)
 	frame->len = rv;
 	frame->frame[rv] = '\0';
 
-	strlcpy(frame->remote, "Unknown", sizeof(frame->remote));
+	if(strlcpy(frame->remote, "Unknown", sizeof(frame->remote)) >= sizeof(frame->remote)){
+		free(frame);
+		return -ENAMETOOLONG;
+	}
 
 	uint16_t _lsd_port;
 	mbt_sockaddr_split(&frame->sa, frame->remote, sizeof(frame->remote), &_lsd_port);
@@ -228,9 +231,14 @@ mbt_lsd_frame_parse(struct mbt_lsd_frame *frame, struct mbt_lsd_frame_info **out
 	p = ep+2;
 
 	info = calloc(1, sizeof(*info));
+	if(!info)
+		return -ENOMEM;
 
 	info->sa = frame->sa;
-	strlcpy(info->remote, frame->remote, sizeof(info->remote));
+	if(strlcpy(info->remote, frame->remote, sizeof(info->remote)) >= sizeof(info->remote)){
+		free(info);
+		return -ENAMETOOLONG;
+	}
 	info->port = port;
 
 	STAILQ_INIT(&info->infohashes);
