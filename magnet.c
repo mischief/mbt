@@ -8,6 +8,7 @@
 #include "mbt/magnet.h"
 #include "mbt/infohash.h"
 #include "parse.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 /* Percent-decode in-place. Returns decoded length. */
@@ -69,6 +70,8 @@ parse_peer(const char *s, struct mbt_magnet_peer *p)
 int
 mbt_magnet_parse(const char *uri, struct mbt_magnet *out)
 {
+	ASSERT_RETURN(uri, -EINVAL);
+	ASSERT_RETURN(out, -EINVAL);
 	const char *p, *end, *eq;
 	char *param;
 	size_t plen;

@@ -34,6 +34,7 @@
 #include "net.h"
 #include "udp_mux.h"
 #include "internal.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 struct mbt_ev_io;
@@ -1592,6 +1593,9 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 int
 mbt_dht_new(struct mbt_dht **out, const struct mbt_dht_config *cfg)
 {
+	ASSERT_RETURN(out, -EINVAL);
+	ASSERT_RETURN(cfg, -EINVAL);
+	ASSERT_RETURN(cfg->ev, -EINVAL);
 	/* Standalone: own a private mux on this port. */
 	struct mbt_udp_mux *mux;
 	int rv = mbt_udp_mux_new(&mux, cfg->ev, cfg->port);
@@ -1741,6 +1745,8 @@ dht_bootstrap_resolved(struct sockaddr_storage *addr, socklen_t len, int err, vo
 int
 mbt_dht_bootstrap(struct mbt_dht *d, const char *addr, uint16_t port)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(addr, -EINVAL);
 	struct sockaddr_storage sa = {0};
 	struct sockaddr_in *s4 = (struct sockaddr_in *)&sa;
 	struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&sa;
@@ -1772,6 +1778,8 @@ int
 mbt_dht_get_peers(struct mbt_dht *d, struct mbt_infohash *ih,
                   mbt_dht_peers_cb peers_cb, mbt_dht_done_cb done_cb, void *arg)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(ih, -EINVAL);
 	/* Find a free lookup slot */
 	struct dht_lookup *lk = NULL;
 	for (int i = 0; i < MAX_LOOKUPS; i++) {
@@ -1809,6 +1817,8 @@ mbt_dht_get_peers(struct mbt_dht *d, struct mbt_infohash *ih,
 int
 mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen_port)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(ih, -EINVAL);
 	/* Announce to all nodes that responded with a token in the last lookup */
 	struct dht_lookup *lk = lookup_find_for_target(d, ih->hash_sha1);
 	if (!lk) {
@@ -1864,6 +1874,9 @@ mbt_dht_node_id(struct mbt_dht *d)
 int
 mbt_dht_send_raw(struct mbt_dht *d, const char *addr, uint16_t port, const void *data, size_t len)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(addr, -EINVAL);
+	ASSERT_RETURN(data, -EINVAL);
 	struct sockaddr_storage sa;
 	int rv = parse_literal(addr, port, &sa);
 
@@ -1874,6 +1887,11 @@ int
 mbt_dht_query(struct mbt_dht *d, const char *addr, uint16_t port, const char *qname,
               struct mbt_be_value *args, mbt_dht_query_cb cb, void *arg)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(addr, -EINVAL);
+	ASSERT_RETURN(qname, -EINVAL);
+	ASSERT_RETURN(args, -EINVAL);
+	ASSERT_RETURN(cb, -EINVAL);
 	_cleanup_be_ struct mbt_be_value *msg = NULL;
 	unsigned char *enc;
 	size_t enc_len;
@@ -2027,6 +2045,9 @@ mbt_dht_mutable_target(const uint8_t k[MBT_DHT_PUBKEY_LEN], const char *salt, si
 int
 mbt_dht_get_item(struct mbt_dht *d, const uint8_t target[20], mbt_dht_item_cb cb, void *arg)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(target, -EINVAL);
+	ASSERT_RETURN(cb, -EINVAL);
 	struct dht_item *it = dht_item_find(d, target);
 
 	if (!it)
@@ -2039,6 +2060,8 @@ int
 mbt_dht_put_immutable(struct mbt_dht *d, const void *v, size_t vlen,
                       mbt_dht_done_cb done_cb, void *arg)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(v, -EINVAL);
 	if (vlen > MBT_DHT_MAX_VALUE) return -EINVAL;
 	uint8_t target[20];
 
@@ -2064,6 +2087,8 @@ int
 mbt_dht_get_immutable(struct mbt_dht *d, const uint8_t target[20],
                       mbt_dht_item_cb cb, void *arg)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(target, -EINVAL);
 	struct dht_item *it = dht_item_find(d, target);
 	if (it) {
 		if (cb) cb(it->v, it->vlen, -1, NULL, arg);
@@ -2081,6 +2106,10 @@ mbt_dht_put_mutable(struct mbt_dht *d,
                     const void *v, size_t vlen,
                     mbt_dht_done_cb done_cb, void *arg)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(k, -EINVAL);
+	ASSERT_RETURN(sig, -EINVAL);
+	ASSERT_RETURN(v, -EINVAL);
 	if (vlen > MBT_DHT_MAX_VALUE) return -EINVAL;
 	if (salt_len > 64) return -EMSGSIZE;
 
@@ -2141,6 +2170,8 @@ mbt_dht_get_mutable(struct mbt_dht *d,
                     const char *salt, size_t salt_len,
                     mbt_dht_item_cb cb, void *arg)
 {
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(k, -EINVAL);
 	uint8_t target[20];
 
 	mbt_dht_mutable_target(k, salt, salt_len, target);

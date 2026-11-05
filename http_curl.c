@@ -11,6 +11,7 @@
 #include "mbt/event.h"
 #include "mbt/http_curl.h"
 #include "mbt/log.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 #define HTTP_TIMEOUT_SEC 15L
@@ -186,6 +187,8 @@ socket_cb(CURL *easy, curl_socket_t fd, int what, void *arg, void *sockp)
 int
 mbt_http_curl_new(struct mbt_http_curl **out, struct mbt_ev *ev)
 {
+	ASSERT_RETURN(out, -EINVAL);
+	ASSERT_RETURN(ev, -EINVAL);
 	struct mbt_http_curl *c = calloc(1, sizeof(*c));
 
 	if (c == NULL)
@@ -231,6 +234,9 @@ int
 mbt_http_curl_fn(struct mbt_http_request *req, mbt_http_done_fn done, void *done_arg,
     void *arg)
 {
+	ASSERT_RETURN(req, -EINVAL);
+	ASSERT_RETURN(done, -EINVAL);
+	ASSERT_RETURN(arg, -EINVAL);
 	struct mbt_http_curl *c = arg;
 	struct xfer *x;
 

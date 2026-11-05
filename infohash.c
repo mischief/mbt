@@ -6,11 +6,14 @@
 
 #include "mbt/infohash.h"
 #include "mbt/hex.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 int
 mbt_infohash_new(struct mbt_infohash **ih, int type, const char *str)
 {
+	ASSERT_RETURN(ih, -EINVAL);
+	ASSERT_RETURN(str, -EINVAL);
 	int rv;
 	struct mbt_infohash *infohash;
 

@@ -221,3 +221,5 @@ storage_move_test = executable('storage_move_test', 'storage_move_test.c', link_
 test('storage_move', storage_move_test, timeout: 60)
 dht_txn_test = executable('dht_txn_test', 'dht_txn_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('dht_txn', dht_txn_test, timeout: 30)
+api_args_test = executable('api_args_test', 'api_args_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('api_args', api_args_test)

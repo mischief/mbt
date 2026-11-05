@@ -17,6 +17,7 @@
 #include "mbt/log.h"
 #include "mbt/infohash.h"
 #include "mbt/lsd.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 void
@@ -156,8 +157,7 @@ mbt_lsd_recv(struct mbt_lsd *lsd, struct mbt_lsd_frame **out)
 	socklen_t salen;
 	struct mbt_lsd_frame *frame;
 
-	assert(lsd);
-	assert(out);
+	ASSERT_RETURN(lsd && out, -EINVAL);
 
 	frame = calloc(1, sizeof(*frame));
 	if(!frame)
@@ -173,7 +173,7 @@ mbt_lsd_recv(struct mbt_lsd *lsd, struct mbt_lsd_frame **out)
 	frame->len = rv;
 	frame->frame[rv] = '\0';
 
-	assert(strlcpy(frame->remote, "Unknown", sizeof(frame->remote)) < sizeof(frame->remote));
+	strlcpy(frame->remote, "Unknown", sizeof(frame->remote));
 
 	uint16_t _lsd_port;
 	mbt_sockaddr_split(&frame->sa, frame->remote, sizeof(frame->remote), &_lsd_port);
@@ -230,7 +230,7 @@ mbt_lsd_frame_parse(struct mbt_lsd_frame *frame, struct mbt_lsd_frame_info **out
 	info = calloc(1, sizeof(*info));
 
 	info->sa = frame->sa;
-	assert(strlcpy(info->remote, frame->remote, sizeof(info->remote)) <= sizeof(info->remote));
+	strlcpy(info->remote, frame->remote, sizeof(info->remote));
 	info->port = port;
 
 	STAILQ_INIT(&info->infohashes);

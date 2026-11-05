@@ -20,6 +20,7 @@
 #include "mbt/be.h"
 #include "mbt/hex.h"
 #include "cleanup.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 #define MAX_TRACKERS 16
@@ -62,6 +63,7 @@ struct mbt_metainfo {
 int
 mbt_metainfo_new(struct mbt_metainfo **out)
 {
+	ASSERT_RETURN(out, -EINVAL);
 	struct mbt_metainfo *mi = calloc(1, sizeof(*mi));
 	if (!mi) return -ENOMEM;
 	mi->piece_length = DEFAULT_PIECE_LEN;
@@ -128,6 +130,8 @@ join_path(struct mbt_be_value *list)
 int
 mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 {
+	ASSERT_RETURN(out, -EINVAL);
+	ASSERT_RETURN(data, -EINVAL);
 	struct mbt_metainfo *mi;
 	int rv = mbt_metainfo_new(&mi);
 	if (rv < 0) return rv;

@@ -8,6 +8,7 @@
 #include <sys/types.h>
 
 #include "mbt/bitmap.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 /* Reverse bit order within a byte (MSB-first wire format → LSB-first ctz) */
@@ -197,9 +198,7 @@ mbt_bitmap_union(struct mbt_bitmap *a, struct mbt_bitmap *b, struct mbt_bitmap *
 	size_t i, len;
 	register uint8_t *outp, *ap, *bp;
 
-	assert(a);
-	assert(b);
-	assert(out);
+	ASSERT_RETURN(a && b && out, -EINVAL);
 
 	len = mbt_bitmap_bytes(a);
 
@@ -226,9 +225,7 @@ mbt_bitmap_intersection(struct mbt_bitmap *a, struct mbt_bitmap *b, struct mbt_b
 	size_t i, len;
 	register uint8_t *outp, *ap, *bp;
 
-	assert(a);
-	assert(b);
-	assert(out);
+	ASSERT_RETURN(a && b && out, -EINVAL);
 
 	len = mbt_bitmap_bytes(a);
 

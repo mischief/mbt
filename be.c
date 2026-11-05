@@ -11,6 +11,7 @@
 #include <sys/queue.h>
 
 #include "mbt/be.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 enum {
@@ -390,6 +391,8 @@ be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct mbt_
 int
 mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
+	ASSERT_RETURN(buf, -EINVAL);
+	ASSERT_RETURN(out, -EINVAL);
 	if(sz > INT_MAX)
 		return -EFBIG;
 	return be_value_parse_inner(0, buf, sz, out);
@@ -500,6 +503,9 @@ int
 mbt_be_dict_append_key(struct mbt_be_value *dict, const void *key, size_t key_len,
                        struct mbt_be_value *value)
 {
+	ASSERT_RETURN(dict, -EINVAL);
+	ASSERT_RETURN(key, -EINVAL);
+	ASSERT_RETURN(value, -EINVAL);
 	char *k;
 
 	k = malloc(key_len + 1);
@@ -687,6 +693,9 @@ encode_cb(struct mbt_be_value *v, void *arg)
 int
 mbt_be_value_encode(struct mbt_be_value *v, unsigned char **out, size_t *len)
 {
+	ASSERT_RETURN(v, -EINVAL);
+	ASSERT_RETURN(out, -EINVAL);
+	ASSERT_RETURN(len, -EINVAL);
 	struct encode_state e = {.root = v};
 	unsigned char *buf;
 

@@ -30,6 +30,7 @@
 #include "mbt/peer_source.h"
 #include "mbt/storage.h"
 #include "mbt/timers.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 struct mbt_bitmap;
@@ -2016,6 +2017,11 @@ torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp)
 int
 mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 {
+	ASSERT_RETURN(out, -EINVAL);
+	ASSERT_RETURN(cfg, -EINVAL);
+	ASSERT_RETURN(cfg->ev, -EINVAL);
+	ASSERT_RETURN(cfg->ih, -EINVAL);
+	ASSERT_RETURN(cfg->peer_id, -EINVAL);
 	struct mbt_torrent *t;
 
 	t = calloc(1, sizeof(*t));
@@ -2333,6 +2339,8 @@ metadata_parse(struct mbt_torrent *t, const void *info, size_t len)
 int
 mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 {
+	ASSERT_RETURN(t, -EINVAL);
+	ASSERT_RETURN(info, -EINVAL);
 	int rv;
 
 	/* Already have metadata parsed — skip */
@@ -2389,6 +2397,8 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 int
 mbt_torrent_set_storage(struct mbt_torrent *t, struct mbt_storage *st, const char *data_dir)
 {
+	ASSERT_RETURN(t, -EINVAL);
+	ASSERT_RETURN(st, -EINVAL);
 	struct torrent_peer *tp;
 	char *dir = NULL;
 	int rv;
@@ -2540,6 +2550,9 @@ int
 mbt_torrent_move_storage(struct mbt_torrent *t, struct mbt_storage *dst, const char *data_dir,
                          mbt_torrent_move_cb cb, void *arg)
 {
+	ASSERT_RETURN(t, -EINVAL);
+	ASSERT_RETURN(dst, -EINVAL);
+	ASSERT_RETURN(cb, -EINVAL);
 	const struct mbt_storage_ops *src_ops, *dst_ops;
 	struct torrent_move *m;
 	int rv;
@@ -2818,6 +2831,8 @@ mbt_torrent_piece_size(struct mbt_torrent *t, uint32_t piece)
 int
 mbt_torrent_read_piece(struct mbt_torrent *t, uint32_t piece, void *buf, size_t len)
 {
+	ASSERT_RETURN(t, -EINVAL);
+	ASSERT_RETURN(buf, -EINVAL);
 	size_t plen = mbt_torrent_piece_size(t, piece);
 
 	if (plen == 0)

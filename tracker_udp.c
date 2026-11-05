@@ -20,6 +20,7 @@
 #include "internal.h"
 #include "mbt/log.h"
 #include "parse.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 struct mbt_ev_io;
@@ -307,6 +308,7 @@ struct udp_announce_ctx {
 int
 mbt_tracker_group_new(struct mbt_tracker_group **out)
 {
+	ASSERT_RETURN(out, -EINVAL);
 	struct mbt_tracker_group *g = calloc(1, sizeof(*g));
 
 	if (!g)

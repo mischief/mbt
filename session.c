@@ -45,6 +45,7 @@ static int session_state_restore_cb(const struct mbt_state_entry *e, void *arg);
 /* --- Torrent list entry --- */
 
 #include "mbt/peerdb.h"
+#include "mbt/useful.h"
 #include "banned.h"
 
 struct mbt_ev_io;
@@ -830,6 +831,9 @@ session_listen(struct mbt_session *s)
 int
 mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 {
+	ASSERT_RETURN(out, -EINVAL);
+	ASSERT_RETURN(cfg, -EINVAL);
+	ASSERT_RETURN(cfg->ev, -EINVAL);
 	struct mbt_session *s;
 
 	s = calloc(1, sizeof(*s));
@@ -1012,6 +1016,8 @@ mbt_session_free(struct mbt_session *s)
 int
 mbt_session_default(struct mbt_session **out, const char *path)
 {
+	ASSERT_RETURN(out, -EINVAL);
+	ASSERT_RETURN(path, -EINVAL);
 	struct mbt_ev *ev;
 	int rv;
 
@@ -1447,6 +1453,8 @@ int
 mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
     struct mbt_add_torrent_cfg *acfg, struct mbt_torrent **out)
 {
+	ASSERT_RETURN(s, -EINVAL);
+	ASSERT_RETURN(ih, -EINVAL);
 	struct session_torrent *st = session_find(s, ih);
 
 	if (st) {
@@ -1513,6 +1521,8 @@ int
 mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
     struct mbt_add_torrent_cfg *cfg, struct mbt_torrent **out)
 {
+	ASSERT_RETURN(s, -EINVAL);
+	ASSERT_RETURN(data, -EINVAL);
 	int rv;
 	struct mbt_metainfo *mi = NULL;
 	struct mbt_infohash *ih;
@@ -1624,6 +1634,8 @@ int
 mbt_session_add_torrent_file(struct mbt_session *s, const char *path,
     struct mbt_add_torrent_cfg *cfg, struct mbt_torrent **out)
 {
+	ASSERT_RETURN(s, -EINVAL);
+	ASSERT_RETURN(path, -EINVAL);
 	autofree unsigned char *buf = NULL;
 	size_t len = 0;
 	int rv = read_torrent_file(path, &buf, &len);
@@ -1637,6 +1649,8 @@ int
 mbt_session_add_magnet(struct mbt_session *s, const char *uri,
     struct mbt_add_torrent_cfg *cfg, struct mbt_torrent **out)
 {
+	ASSERT_RETURN(s, -EINVAL);
+	ASSERT_RETURN(uri, -EINVAL);
 	struct mbt_magnet m;
 	struct mbt_infohash *ih = NULL;
 	struct mbt_torrent *t = NULL;
@@ -1712,6 +1726,8 @@ session_cancel_connects(struct mbt_session *s, struct mbt_torrent *t)
 int
 mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 {
+	ASSERT_RETURN(s, -EINVAL);
+	ASSERT_RETURN(ih, -EINVAL);
 	struct session_torrent *st = session_find(s, ih);
 	if (!st)
 		return -ENOENT;
@@ -1777,6 +1793,9 @@ static const char *mbt_fallback_trackers[] = {
 int
 mbt_session_add_tracker(struct mbt_session *s, struct mbt_torrent *t, const char *url)
 {
+	ASSERT_RETURN(s, -EINVAL);
+	ASSERT_RETURN(t, -EINVAL);
+	ASSERT_RETURN(url, -EINVAL);
 	struct session_torrent *st;
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		if (st->torrent != t) continue;
@@ -1975,6 +1994,9 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
                      const char *addr, uint16_t port, enum mbt_peer_source source,
                      uint8_t flags)
 {
+	ASSERT_RETURN(s, -EINVAL);
+	ASSERT_RETURN(ih, -EINVAL);
+	ASSERT_RETURN(addr, -EINVAL);
 	int rv, fd;
 	struct session_torrent *st;
 	struct pending_connect *pc;
