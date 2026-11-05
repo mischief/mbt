@@ -118,6 +118,22 @@ peer_write_msg(struct mbt_peer *p, const void *buf, size_t len)
 	return rv < 0 ? rv : 0;
 }
 
+/* Read up to three big-endian fields from a received header. */
+static int
+peer_unpack_u32s(const void *buf, size_t len, uint32_t *a, uint32_t *b, uint32_t *c)
+{
+	struct mbt_unpacker pk;
+	size_t used;
+
+	mbt_unpack_init(&pk, buf, len);
+	*a = mbt_unpack_u32(&pk);
+	if (b)
+		*b = mbt_unpack_u32(&pk);
+	if (c)
+		*c = mbt_unpack_u32(&pk);
+	return mbt_unpack_end(&pk, &used);
+}
+
 /* Send a packed message. A pack error returns here, in place of the write. */
 static int
 peer_write_packed(struct mbt_peer *p, struct mbt_packer *pk)
@@ -442,9 +458,8 @@ peer_rx_message(struct mbt_peer *p)
 		sz = mbt_conn_read(p->conn, lenbuf, 4);
 		if (sz != 4)
 			return -EIO;
-		struct mbt_unpacker pk;
-		mbt_unpack_init(&pk, lenbuf, 4);
-		length = mbt_unpack_u32(&pk);
+		if ((rv = peer_unpack_u32s(lenbuf, 4, &length, NULL, NULL)) < 0)
+			return rv;
 
 		if (length == 0)
 			return 0; /* keepalive */
@@ -505,7 +520,8 @@ peer_rx_message(struct mbt_peer *p)
 	case BT_HAVE:
 		if ((rv = peer_take(p, buf, 4)) < 0)
 			return rv;
-		{ struct mbt_unpacker pk; mbt_unpack_init(&pk, buf, 4); piece = mbt_unpack_u32(&pk); }
+		if ((rv = peer_unpack_u32s(buf, 4, &piece, NULL, NULL)) < 0)
+			return rv;
 		if (!p->bitfield && p->piece_count > 0)
 			mbt_bitmap_new_bits(&p->bitfield, p->piece_count);
 		if (p->bitfield)
@@ -531,7 +547,8 @@ peer_rx_message(struct mbt_peer *p)
 	case BT_REQUEST:
 		if ((rv = peer_take(p, buf, 12)) < 0)
 			return rv;
-		{ struct mbt_unpacker pk; mbt_unpack_init(&pk, buf, 12); piece = mbt_unpack_u32(&pk); offset = mbt_unpack_u32(&pk); req_len = mbt_unpack_u32(&pk); }
+		if ((rv = peer_unpack_u32s(buf, 12, &piece, &offset, &req_len)) < 0)
+			return rv;
 		if (p->cb.on_request)
 			p->cb.on_request(p, piece, offset, req_len, p->cb_arg);
 		break;
@@ -540,7 +557,8 @@ peer_rx_message(struct mbt_peer *p)
 		unsigned char hdr[8];
 		if ((rv = peer_take(p, hdr, 8)) < 0)
 			return rv;
-		{ struct mbt_unpacker pk; mbt_unpack_init(&pk, hdr, 8); piece = mbt_unpack_u32(&pk); offset = mbt_unpack_u32(&pk); }
+		if ((rv = peer_unpack_u32s(hdr, 8, &piece, &offset, NULL)) < 0)
+			return rv;
 		unsigned char *data;
 		size_t data_len;
 		if ((rv = peer_take_rest(p, &data, &data_len)) < 0)
@@ -698,7 +716,8 @@ peer_rx_message(struct mbt_peer *p)
 			if ((rv = peer_take(p, rj, 12)) < 0)
 				return rv;
 			uint32_t rpiece, roffset, rlen;
-			{ struct mbt_unpacker pk; mbt_unpack_init(&pk, rj, 12); rpiece = mbt_unpack_u32(&pk); roffset = mbt_unpack_u32(&pk); rlen = mbt_unpack_u32(&pk); }
+			if ((rv = peer_unpack_u32s(rj, 12, &rpiece, &roffset, &rlen)) < 0)
+				return rv;
 			if (p->cb.on_reject)
 				p->cb.on_reject(p, rpiece, roffset, rlen, p->cb_arg);
 			break;
@@ -774,7 +793,10 @@ peer_on_read(struct mbt_conn *c, void *v)
 			/* First pass: read length, set watermark for full message */
 			sz = mbt_conn_read(p->conn, lenbuf, 4);
 			if (sz != 4) { peer_error(p, -EIO); return; }
-			{ struct mbt_unpacker pk; mbt_unpack_init(&pk, lenbuf, 4); length = mbt_unpack_u32(&pk); }
+			if ((rv = peer_unpack_u32s(lenbuf, 4, &length, NULL, NULL)) < 0) {
+				peer_error(p, rv);
+				return;
+			}
 
 			if (length == 0) break; /* keepalive */
 

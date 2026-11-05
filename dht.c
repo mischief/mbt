@@ -152,6 +152,7 @@ struct dht_query {
 	void *arg;
 };
 
+#define DHT_MSG_MAX 2048    /* more than any KRPC message we send */
 #define DHT_DEFAULT_MAX_ITEMS 64
 #define DHT_ITEM_EXPIRE 7200
 #define DHT_DEFAULT_MAX_STORED 64
@@ -560,77 +561,117 @@ dht_send(struct mbt_dht *d, const struct sockaddr_storage *addr,
 	                          (const struct sockaddr *)addr, salen);
 }
 
+/* A KRPC query: id comes first in "a", then the caller adds sorted arguments. */
+static void
+query_begin(struct mbt_bew *w, void *buf, size_t size, struct mbt_dht *d)
+{
+	mbt_bew_init(w, buf, size);
+	mbt_bew_dict(w);
+	mbt_bew_key(w, "a");
+	mbt_bew_dict(w);
+	mbt_bew_key(w, "id");
+	mbt_bew_str(w, d->id, 20);
+}
+
+static int
+query_send(struct mbt_dht *d, struct mbt_bew *w, const struct sockaddr_storage *addr,
+           const char *q, const uint8_t txn[TXN_LEN])
+{
+	size_t len;
+	int rv;
+
+	mbt_bew_end(w);
+	mbt_bew_key(w, "q");
+	mbt_bew_str(w, q, strlen(q));
+	mbt_bew_key(w, "t");
+	mbt_bew_str(w, txn, TXN_LEN);
+	mbt_bew_key(w, "y");
+	mbt_bew_str(w, "q", 1);
+	mbt_bew_end(w);
+	rv = mbt_bew_finish(w, &len);
+	return rv < 0 ? rv : dht_send(d, addr, w->start, len);
+}
+
+/* A KRPC reply: id comes first in "r", then the caller adds sorted results. */
+static void
+reply_begin(struct mbt_bew *w, void *buf, size_t size, struct mbt_dht *d)
+{
+	mbt_bew_init(w, buf, size);
+	mbt_bew_dict(w);
+	mbt_bew_key(w, "r");
+	mbt_bew_dict(w);
+	mbt_bew_key(w, "id");
+	mbt_bew_str(w, d->id, 20);
+}
+
+static void
+reply_send(struct mbt_dht *d, struct mbt_bew *w, const struct sockaddr_storage *addr,
+           struct mbt_be_value *t)
+{
+	size_t len;
+
+	mbt_bew_end(w);
+	mbt_bew_key(w, "t");
+	mbt_bew_str(w, t->string.buf, t->string.len);
+	mbt_bew_key(w, "y");
+	mbt_bew_str(w, "r", 1);
+	mbt_bew_end(w);
+	if (mbt_bew_finish(w, &len) == 0)
+		dht_send(d, addr, w->start, len);
+}
+
 /* BEP 5 error reply. t is the transaction string of the query. */
 static void
 dht_send_error(struct mbt_dht *d, const struct sockaddr_storage *addr,
                struct mbt_be_value *t, int code, const char *text)
 {
-	_cleanup_be_ struct mbt_be_value *msg = NULL, *list = NULL, *c = NULL, *m = NULL;
-	unsigned char *enc;
-	size_t enc_len;
+	uint8_t buf[DHT_MSG_MAX];
+	struct mbt_bew w;
+	size_t len;
 
-	if (mbt_be_dict_new(&msg) < 0 ||
-	    mbt_be_dict_append_string(msg, "t", t->string.buf, t->string.len) < 0 ||
-	    mbt_be_dict_append_string(msg, "y", "e", 1) < 0 ||
-	    mbt_be_list_new(&list) < 0 ||
-	    mbt_be_integer_new(&c, code) < 0 ||
-	    mbt_be_string_new(&m, (const uint8_t *)text, strlen(text)) < 0)
-		return;
-	mbt_be_list_append(list, c);
-	mbt_be_list_append(list, m);
-	if (mbt_be_dict_append(msg, "e", list) < 0 ||
-	    mbt_be_value_encode(msg, &enc, &enc_len) < 0)
-		return;
-	dht_send(d, addr, enc, enc_len);
-	free(enc);
+	mbt_bew_init(&w, buf, sizeof(buf));
+	mbt_bew_dict(&w);
+	mbt_bew_key(&w, "e");
+	mbt_bew_list(&w);
+	mbt_bew_int(&w, code);
+	mbt_bew_str(&w, text, strlen(text));
+	mbt_bew_end(&w);
+	mbt_bew_key(&w, "t");
+	mbt_bew_str(&w, t->string.buf, t->string.len);
+	mbt_bew_key(&w, "y");
+	mbt_bew_str(&w, "e", 1);
+	mbt_bew_end(&w);
+	if (mbt_bew_finish(&w, &len) == 0)
+		dht_send(d, addr, buf, len);
 }
 
 static int
 dht_send_find_node(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *target)
 {
+	uint8_t buf[DHT_MSG_MAX], txn[TXN_LEN];
+	struct mbt_bew w;
+
 	if (!mbt_ratelimit_allow(d->send_limit, 1))
 		return 0;
-	_cleanup_be_ struct mbt_be_value *msg = NULL, *a = NULL;
-	uint8_t txn[TXN_LEN];
 	make_txn(d, txn);
-
-	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "q", "find_node", 9) < 0) return -ENOMEM;
-	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "target", target, 20) < 0) return -ENOMEM;
-	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
-
-	unsigned char *enc; size_t enc_len;
-	if (mbt_be_value_encode(msg, &enc, &enc_len) < 0) return -ENOMEM;
-	int rv = dht_send(d, addr, enc, enc_len);
-	free(enc);
-	return rv;
+	query_begin(&w, buf, sizeof(buf), d);
+	mbt_bew_key(&w, "target");
+	mbt_bew_str(&w, target, 20);
+	return query_send(d, &w, addr, "find_node", txn);
 }
 
 static int
 dht_send_get_peers(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *infohash,
                    uint8_t txn[TXN_LEN])
 {
-	_cleanup_be_ struct mbt_be_value *msg = NULL, *a = NULL;
+	uint8_t buf[DHT_MSG_MAX];
+	struct mbt_bew w;
+
 	make_txn(d, txn);
-
-	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "q", "get_peers", 9) < 0) return -ENOMEM;
-	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "info_hash", infohash, 20) < 0) return -ENOMEM;
-	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
-
-	unsigned char *enc; size_t enc_len;
-	if (mbt_be_value_encode(msg, &enc, &enc_len) < 0) return -ENOMEM;
-	int rv = dht_send(d, addr, enc, enc_len);
-	free(enc);
-	return rv;
+	query_begin(&w, buf, sizeof(buf), d);
+	mbt_bew_key(&w, "info_hash");
+	mbt_bew_str(&w, infohash, 20);
+	return query_send(d, &w, addr, "get_peers", txn);
 }
 
 static int
@@ -638,49 +679,31 @@ dht_send_announce(struct mbt_dht *d, const struct sockaddr_storage *addr,
                   const uint8_t *infohash, uint16_t port,
                   const uint8_t *token, int token_len)
 {
-	_cleanup_be_ struct mbt_be_value *msg = NULL, *a = NULL;
-	uint8_t txn[TXN_LEN];
+	uint8_t buf[DHT_MSG_MAX], txn[TXN_LEN];
+	struct mbt_bew w;
+
 	make_txn(d, txn);
-
-	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "q", "announce_peer", 13) < 0) return -ENOMEM;
-	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "info_hash", infohash, 20) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_number(a, "port", port) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "token", token, token_len) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_number(a, "implied_port", 0) < 0) return -ENOMEM;
-	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
-
-	unsigned char *enc; size_t enc_len;
-	if (mbt_be_value_encode(msg, &enc, &enc_len) < 0) return -ENOMEM;
-	int rv = dht_send(d, addr, enc, enc_len);
-	free(enc);
-	return rv;
+	query_begin(&w, buf, sizeof(buf), d);
+	mbt_bew_key(&w, "implied_port");
+	mbt_bew_int(&w, 0);
+	mbt_bew_key(&w, "info_hash");
+	mbt_bew_str(&w, infohash, 20);
+	mbt_bew_key(&w, "port");
+	mbt_bew_int(&w, port);
+	mbt_bew_key(&w, "token");
+	mbt_bew_str(&w, token, (size_t)token_len);
+	return query_send(d, &w, addr, "announce_peer", txn);
 }
 
 static int
 dht_send_ping(struct mbt_dht *d, const struct sockaddr_storage *addr)
 {
-	_cleanup_be_ struct mbt_be_value *msg = NULL, *a = NULL;
-	uint8_t txn[TXN_LEN];
+	uint8_t buf[DHT_MSG_MAX], txn[TXN_LEN];
+	struct mbt_bew w;
+
 	make_txn(d, txn);
-
-	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "t", txn, TXN_LEN) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "y", "q", 1) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(msg, "q", "ping", 4) < 0) return -ENOMEM;
-	if (mbt_be_dict_new(&a) < 0) return -ENOMEM;
-	if (mbt_be_dict_append_string(a, "id", d->id, 20) < 0) return -ENOMEM;
-	if (mbt_be_dict_append(msg, "a", a) < 0) return -ENOMEM;
-
-	unsigned char *enc; size_t enc_len;
-	if (mbt_be_value_encode(msg, &enc, &enc_len) < 0) return -ENOMEM;
-	int rv = dht_send(d, addr, enc, enc_len);
-	free(enc);
-	return rv;
+	query_begin(&w, buf, sizeof(buf), d);
+	return query_send(d, &w, addr, "ping", txn);
 }
 
 /* --- Lookup management --- */
@@ -968,6 +991,42 @@ query_reply(struct mbt_dht *d, struct mbt_be_value *msg, const struct sockaddr_s
 	}
 }
 
+/* Add "nodes", and "nodes6" if wanted: the K closest nodes that spoke to us. */
+static void
+reply_add_nodes(struct mbt_dht *d, struct mbt_bew *w, const uint8_t *target, int with_v6)
+{
+	struct dht_node closest[K];
+	uint8_t v4[K * NODE_COMPACT_LEN], v6[K * NODE6_COMPACT_LEN];
+	size_t len4 = 0, len6 = 0;
+	int n = routing_closest(d, target, closest, K, 1);
+
+	for (int i = 0; i < n; i++) {
+		if (closest[i].addr.ss_family == AF_INET6) {
+			struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&closest[i].addr;
+
+			memcpy(v6 + len6, closest[i].id, 20);
+			memcpy(v6 + len6 + 20, &s6->sin6_addr, 16);
+			memcpy(v6 + len6 + 36, &s6->sin6_port, 2);
+			len6 += NODE6_COMPACT_LEN;
+		} else {
+			struct sockaddr_in *s4 = (struct sockaddr_in *)&closest[i].addr;
+
+			memcpy(v4 + len4, closest[i].id, 20);
+			memcpy(v4 + len4 + 20, &s4->sin_addr, 4);
+			memcpy(v4 + len4 + 24, &s4->sin_port, 2);
+			len4 += NODE_COMPACT_LEN;
+		}
+	}
+	if (len4 > 0) {
+		mbt_bew_key(w, "nodes");
+		mbt_bew_str(w, v4, len4);
+	}
+	if (with_v6 && len6 > 0) {
+		mbt_bew_key(w, "nodes6");
+		mbt_bew_str(w, v6, len6);
+	}
+}
+
 /* Drop announces past their time, and infohashes left with no peers. */
 static void
 stored_expire(struct mbt_dht *d)
@@ -1189,22 +1248,12 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		if (routing_heard(d, qid->string.buf, &from))
 			goto out;
 
-		struct dht_node closest[K];
+		uint8_t rbuf[DHT_MSG_MAX];
+		struct mbt_bew w;
 
 		if (mbt_be_streq(q, "ping")) {
-			/* Respond to ping */
-			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
-			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
-			if (mbt_be_dict_new(&rb) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
-			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
-
-			unsigned char *enc; size_t enc_len;
-			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
-			dht_send(d, &from, enc, enc_len);
-			free(enc);
+			reply_begin(&w, rbuf, sizeof(rbuf), d);
+			reply_send(d, &w, &from, t);
 		} else if (mbt_be_streq(q, "find_node")) {
 			/* Respond with closest nodes */
 			struct mbt_be_value *target_v = mbt_be_find(a, "target");
@@ -1212,38 +1261,9 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
 			}
-			int nclose = routing_closest(d, target_v->string.buf, closest, K, 1);
-			uint8_t compact[K * NODE_COMPACT_LEN];
-			uint8_t compact6[K * NODE6_COMPACT_LEN];
-			int n4 = 0, n6 = 0;
-			for (int i = 0; i < nclose; i++) {
-				if (closest[i].addr.ss_family == AF_INET6) {
-					memcpy(compact6 + n6*38, closest[i].id, 20);
-					memcpy(compact6 + n6*38 + 20, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_addr, 16);
-					memcpy(compact6 + n6*38 + 36, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_port, 2);
-					n6++;
-				} else {
-					memcpy(compact + n4*26, closest[i].id, 20);
-					memcpy(compact + n4*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
-					memcpy(compact + n4*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
-					n4++;
-				}
-			}
-			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
-			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
-			if (mbt_be_dict_new(&rb) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
-			if (n4 > 0)
-				if (mbt_be_dict_append_string(rb, "nodes", compact, n4 * 26) < 0) goto out;
-			if (n6 > 0)
-				if (mbt_be_dict_append_string(rb, "nodes6", compact6, n6 * 38) < 0) goto out;
-			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
-			unsigned char *enc; size_t enc_len;
-			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
-			dht_send(d, &from, enc, enc_len);
-			free(enc);
+			reply_begin(&w, rbuf, sizeof(rbuf), d);
+			reply_add_nodes(d, &w, target_v->string.buf, 1);
+			reply_send(d, &w, &from, t);
 
 		} else if (mbt_be_streq(q, "get_peers")) {
 			/* Check if we have stored peers for this infohash */
@@ -1255,65 +1275,35 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			}
 			uint8_t token[TOKEN_LEN];
 			dht_make_token(d, &from, token);
-			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
-			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
-			if (mbt_be_dict_new(&rb) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "token", token, TOKEN_LEN) < 0) goto out;
-			/* Check stored peers */
-			int found_stored = 0;
+			reply_begin(&w, rbuf, sizeof(rbuf), d);
+
+			struct dht_stored *found = NULL;
+
 			for (int i = 0; i < d->stored_count; i++) {
 				if (memcmp(d->stored[i].infohash, ih_v->string.buf, 20) == 0) {
-					/* Return peers as "values" list */
-					_cleanup_be_ struct mbt_be_value *vals = NULL;
-					if (mbt_be_list_new(&vals) < 0) goto out;
-					for (int j = 0; j < d->stored[i].peer_count; j++) {
-						struct dht_peer *pa = &d->stored[i].peers[j];
-						uint8_t cp[18];
-						size_t alen = pa->family == AF_INET6 ? 16 : 4;
-						_cleanup_be_ struct mbt_be_value *pv = NULL;
-
-						memcpy(cp, pa->addr, alen);
-						memcpy(cp + alen, &pa->port, 2);
-						if (mbt_be_string_new(&pv, cp, alen + 2) < 0) goto out;
-						mbt_be_list_append(vals, pv);
-					}
-					if (mbt_be_dict_append(rb, "values", vals) < 0) goto out;
-					found_stored = 1;
+					found = &d->stored[i];
 					break;
 				}
 			}
-			if (!found_stored) {
-				/* Return closest nodes */
-				int nclose = routing_closest(d, ih_v->string.buf, closest, K, 1);
-				uint8_t compact_nodes[K * NODE_COMPACT_LEN];
-				uint8_t compact_nodes6[K * NODE6_COMPACT_LEN];
-				int cn4 = 0, cn6 = 0;
-				for (int i = 0; i < nclose; i++) {
-					if (closest[i].addr.ss_family == AF_INET6) {
-						memcpy(compact_nodes6 + cn6*38, closest[i].id, 20);
-						memcpy(compact_nodes6 + cn6*38 + 20, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_addr, 16);
-						memcpy(compact_nodes6 + cn6*38 + 36, &((struct sockaddr_in6 *)&closest[i].addr)->sin6_port, 2);
-						cn6++;
-					} else {
-						memcpy(compact_nodes + cn4*26, closest[i].id, 20);
-						memcpy(compact_nodes + cn4*26 + 20, &((struct sockaddr_in *)&closest[i].addr)->sin_addr, 4);
-						memcpy(compact_nodes + cn4*26 + 24, &((struct sockaddr_in *)&closest[i].addr)->sin_port, 2);
-						cn4++;
-					}
+			if (!found)
+				reply_add_nodes(d, &w, ih_v->string.buf, 1);
+			mbt_bew_key(&w, "token");
+			mbt_bew_str(&w, token, TOKEN_LEN);
+			if (found) {
+				mbt_bew_key(&w, "values");
+				mbt_bew_list(&w);
+				for (int j = 0; j < found->peer_count; j++) {
+					struct dht_peer *pa = &found->peers[j];
+					uint8_t cp[18];
+					size_t alen = pa->family == AF_INET6 ? 16 : 4;
+
+					memcpy(cp, pa->addr, alen);
+					memcpy(cp + alen, &pa->port, 2);
+					mbt_bew_str(&w, cp, alen + 2);
 				}
-				if (cn4 > 0)
-					if (mbt_be_dict_append_string(rb, "nodes", compact_nodes, cn4 * 26) < 0) goto out;
-				if (cn6 > 0)
-					if (mbt_be_dict_append_string(rb, "nodes6", compact_nodes6, cn6 * 38) < 0) goto out;
+				mbt_bew_end(&w);
 			}
-			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
-			unsigned char *enc; size_t enc_len;
-			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
-			dht_send(d, &from, enc, enc_len);
-			free(enc);
+			reply_send(d, &w, &from, t);
 
 		} else if (mbt_be_streq(q, "announce_peer")) {
 			/* Store the announcing peer */
@@ -1352,18 +1342,8 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			else
 				((struct sockaddr_in *)&pa)->sin_port = htons(aport);
 			stored_put(d, ih_v->string.buf, &pa);
-			/* Respond */
-			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
-			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
-			if (mbt_be_dict_new(&rb) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
-			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
-			unsigned char *enc; size_t enc_len;
-			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
-			dht_send(d, &from, enc, enc_len);
-			free(enc);
+			reply_begin(&w, rbuf, sizeof(rbuf), d);
+			reply_send(d, &w, &from, t);
 		} else if (mbt_be_streq(q, "sample_infohashes")) {
 			/* BEP 51: return sample of stored infohashes */
 			stored_expire(d);
@@ -1381,34 +1361,15 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				if (at < nsamp)
 					memcpy(samples + at * 20, d->stored[i].infohash, 20);
 			}
-			/* Closest nodes to target */
-			int nclosest = routing_closest(d, tgt->string.buf, closest, K, 1);
-			uint8_t compact[K * 26];
-			int clen = 0;
-			for (int i = 0; i < nclosest; i++) {
-				struct sockaddr_in *sin = (struct sockaddr_in *)&closest[i].addr;
-				if (sin->sin_family != AF_INET) continue;
-				memcpy(compact + clen, closest[i].id, 20);
-				memcpy(compact + clen + 20, &sin->sin_addr, 4);
-				memcpy(compact + clen + 24, &sin->sin_port, 2);
-				clen += 26;
-			}
-			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
-			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
-			if (mbt_be_dict_new(&rb) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
-			if (mbt_be_dict_append_number(rb, "interval", 3600) < 0) goto out;
-			if (clen > 0)
-				if (mbt_be_dict_append_string(rb, "nodes", compact, clen) < 0) goto out;
-			if (mbt_be_dict_append_number(rb, "num", d->stored_count) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "samples", samples, nsamp * 20) < 0) goto out;
-			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
-			unsigned char *enc; size_t enc_len;
-			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
-			dht_send(d, &from, enc, enc_len);
-			free(enc);
+			reply_begin(&w, rbuf, sizeof(rbuf), d);
+			mbt_bew_key(&w, "interval");
+			mbt_bew_int(&w, 3600);
+			reply_add_nodes(d, &w, tgt->string.buf, 0);
+			mbt_bew_key(&w, "num");
+			mbt_bew_int(&w, d->stored_count);
+			mbt_bew_key(&w, "samples");
+			mbt_bew_str(&w, samples, (size_t)nsamp * 20);
+			reply_send(d, &w, &from, t);
 		} else if (mbt_be_streq(q, "get")) {
 			/* BEP 44: get */
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
@@ -1417,43 +1378,29 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				goto out;
 			}
 			struct dht_item *it = dht_item_find(d, tgt->string.buf);
-			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
-			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
-			if (mbt_be_dict_new(&rb) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
 			uint8_t tok[TOKEN_LEN];
+
 			dht_make_token(d, &from, tok);
-			if (mbt_be_dict_append_string(rb, "token", tok, TOKEN_LEN) < 0) goto out;
-			int nc2 = routing_closest(d, tgt->string.buf, closest, K, 1);
-			uint8_t cn[K * NODE_COMPACT_LEN]; int cl = 0;
-			for (int j = 0; j < nc2; j++) {
-				if (closest[j].addr.ss_family != AF_INET) continue;
-				memcpy(cn + cl, closest[j].id, 20);
-				struct sockaddr_in *s4 = (struct sockaddr_in *)&closest[j].addr;
-				memcpy(cn + cl + 20, &s4->sin_addr, 4);
-				memcpy(cn + cl + 24, &s4->sin_port, 2);
-				cl += 26;
+			reply_begin(&w, rbuf, sizeof(rbuf), d);
+			if (it && it->mutable) {
+				mbt_bew_key(&w, "k");
+				mbt_bew_str(&w, it->k, MBT_DHT_PUBKEY_LEN);
 			}
-			if (cl > 0)
-				if (mbt_be_dict_append_string(rb, "nodes", cn, cl) < 0) goto out;
+			reply_add_nodes(d, &w, tgt->string.buf, 0);
+			if (it && it->mutable) {
+				mbt_bew_key(&w, "seq");
+				mbt_bew_int(&w, it->seq);
+				mbt_bew_key(&w, "sig");
+				mbt_bew_str(&w, it->sig, MBT_DHT_SIG_LEN);
+			}
+			mbt_bew_key(&w, "token");
+			mbt_bew_str(&w, tok, TOKEN_LEN);
 			if (it) {
 				/* it->v is bencoded, and goes on the wire as that value. */
-				_cleanup_be_ struct mbt_be_value *v_val = NULL;
-				if (mbt_be_value_parse(it->v, it->vlen, &v_val) <= 0) goto out;
-				if (mbt_be_dict_append(rb, "v", v_val) < 0) goto out;
-				if (it->mutable) {
-					if (mbt_be_dict_append_string(rb, "k", it->k, MBT_DHT_PUBKEY_LEN) < 0) goto out;
-					if (mbt_be_dict_append_string(rb, "sig", it->sig, MBT_DHT_SIG_LEN) < 0) goto out;
-					if (mbt_be_dict_append_number(rb, "seq", it->seq) < 0) goto out;
-				}
+				mbt_bew_key(&w, "v");
+				mbt_bew_raw(&w, it->v, it->vlen);
 			}
-			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
-			unsigned char *enc; size_t enc_len;
-			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
-			dht_send(d, &from, enc, enc_len);
-			free(enc);
+			reply_send(d, &w, &from, t);
 		} else if (mbt_be_streq(q, "put")) {
 			/* BEP 44: put */
 			struct mbt_be_value *v_val = mbt_be_find(a, "v");
@@ -1502,18 +1449,8 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				dht_send_put_error(d, &from, t, prv);
 				goto out;
 			}
-			/* Respond */
-			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
-			if (mbt_be_dict_new(&resp) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "t", t->string.buf, t->string.len) < 0) goto out;
-			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
-			if (mbt_be_dict_new(&rb) < 0) goto out;
-			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
-			if (mbt_be_dict_append(resp, "r", rb) < 0) goto out;
-			unsigned char *enc; size_t enc_len;
-			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
-			dht_send(d, &from, enc, enc_len);
-			free(enc);
+			reply_begin(&w, rbuf, sizeof(rbuf), d);
+			reply_send(d, &w, &from, t);
 		} else {
 			dht_send_error(d, &from, t, DHT_ERR_METHOD, "unknown method");
 		}

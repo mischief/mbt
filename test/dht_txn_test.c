@@ -22,7 +22,7 @@
 #define REAL_PORT 2222
 
 static struct mbt_ev *ev;
-static int peers, forged_peers, lookups_done;
+static int peers, forged_peers;
 
 static void
 on_peer(const char *addr, uint16_t port, void *arg)
@@ -36,7 +36,6 @@ static void
 on_done(void *arg)
 {
 	(void)arg;
-	lookups_done++;
 }
 
 /* Answer as a node: values holds one peer on port, and t is the id given. */

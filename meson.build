@@ -14,7 +14,6 @@ checkargs = '''
 -Wno-gnu-case-range
 -Wno-unused-parameter
 -Wno-unused-function
--Wno-unused-result
 -Wno-gnu-statement-expression-from-macro-expansion
 -Wno-gnu-include-next
 -Wnull-dereference
