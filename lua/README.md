@@ -61,6 +61,7 @@ removed torrent.
 - `mbt.spawn(fn, ...)` starts `fn` in its own coroutine. Its errors are
   printed.
 - `mbt.sleep(ms)` waits inside a coroutine.
+- `mbt.now_ms()` is a monotonic clock in milliseconds, for intervals.
 - `mbt.step([ms])` runs one loop iteration and waits at most `ms` (default
   0). Use it in place of `mbt.run` to drive the loop from your own loop.
 - `mbt.metainfo(data)` parses `.torrent` bytes into a table with `name`,
@@ -194,7 +195,8 @@ collect a token and `put` with it. These help:
 - `mbt.sha1(bytes)` returns hex. An immutable target is the sha1 of the
   bencoded value.
 
-`examples/mbt-dht.lua` is a small lookup tool.
+`examples/mbt-dht.lua` is a small lookup tool. `examples/dht-crawl.lua` walks
+the DHT at a set query rate and logs replies as TSV.
 
 ## Limits
 

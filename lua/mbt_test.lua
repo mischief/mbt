@@ -613,6 +613,33 @@ do
 	end)
 end
 
+-- the crawler walks local nodes and logs what it finds
+do
+	local dir = arg[0]:match("^(.*)/") or "."
+	local out = tmp .. "/crawl"
+	assert(os.execute("mkdir -p " .. out))
+	local a <close> = assert(mbt.dht())
+	local b <close> = assert(mbt.dht())
+	local status = out .. "/status"
+
+	mbt.run(function()
+		deadline(30000, "crawl")
+		assert(b:bootstrap("127.0.0.1", a:port()))
+		mbt.sleep(50)
+		assert(os.execute(string.format(
+		    "(%s %s/examples/dht-crawl.lua -s 127.0.0.1:%d -o %s -p 0 -q 200 -t 2 -P;" ..
+		    " echo $? > %s.tmp; mv %s.tmp %s) > %s/log 2>&1 &",
+		    arg[-1], dir, a:port(), out, status, status, status, out)))
+		while not io.open(status, "rb") do
+			mbt.sleep(20)
+		end
+	end)
+	assert(read_file(status) == "0\n", read_file(out .. "/log"))
+	local name = os.date("!crawl-%Y%m%d.tsv")
+	local lines = read_file(out .. "/" .. name)
+	assert(lines:find("\treply\t" .. a:id():lower(), 1, true), lines)
+end
+
 -- state close frees a timed wait still pending
 left_open = assert(mbt.session{utp = false})
 mbt.run(function()

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <lauxlib.h>
 #include <lua.h>
@@ -2106,6 +2107,17 @@ bencode_push(lua_State *L, int idx)
 	return 0;
 }
 
+/* mbt.now_ms(): a monotonic clock, for intervals. */
+static int
+l_now_ms(lua_State *L)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	lua_pushinteger(L, (lua_Integer)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+	return 1;
+}
+
 /* mbt.bencode(value): bencoded bytes. */
 static int
 l_bencode(lua_State *L)
@@ -2696,6 +2708,7 @@ static const luaL_Reg module_fns[] = {
     {"bencode", l_bencode},
     {"bdecode", l_bdecode},
     {"sha1", l_sha1},
+    {"now_ms", l_now_ms},
     {"run", l_run},
     {"spawn", l_spawn},
     {"sleep", l_sleep},
