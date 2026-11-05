@@ -1156,6 +1156,11 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				goto out;
 			}
 			uint16_t aport = use_source ? from_port : (uint16_t)port_v->integer;
+			char ih_hex[41];
+
+			mbt_hex_encode(ih_v->string.buf, 20, ih_hex, sizeof(ih_hex));
+			mbt_log_debug(MBT_LOG_DHT, "announce %s port %hu from %s", ih_hex, aport,
+			              sa_str(&from, _qaddr, sizeof(_qaddr)));
 			/* Find or create storage slot */
 			int slot = -1;
 			for (int i = 0; i < d->stored_count; i++) {
