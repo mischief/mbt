@@ -70,7 +70,6 @@ main(int argc, char *argv[])
 	if (rv < 0) errx(1, "dht: %s", strerror(-rv));
 
 	/* Bootstrap from well-known nodes */
-	mbt_dht_bootstrap(dht, "router.bittorrent.com", 6881);
 	mbt_dht_bootstrap(dht, "dht.transmissionbt.com", 6881);
 
 	/* Start lookup (bootstrap nodes are in routing table as seeds) */

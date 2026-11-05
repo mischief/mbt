@@ -230,7 +230,7 @@ struct mbt_session *s;
 mbt_session_default(&s, "/tmp/downloads");
 mbt_session_set_download_rate(s, 1024 * 1024); /* 1 MB/s */
 mbt_session_enable_dht(s);
-mbt_session_dht_bootstrap(s, "router.bittorrent.com", 6881);
+mbt_session_dht_bootstrap(s, "dht.transmissionbt.com", 6881);
 mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...", NULL, NULL);
 mbt_session_run(s);
 mbt_session_free(s);

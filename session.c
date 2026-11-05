@@ -1171,7 +1171,6 @@ mbt_session_enable_dht(struct mbt_session *s)
 		return rv;
 
 	/* Default bootstrap nodes */
-	mbt_session_dht_bootstrap(s, "router.bittorrent.com", 6881);
 	mbt_session_dht_bootstrap(s, "dht.transmissionbt.com", 6881);
 
 	/* Map UDP port if PCP is active */

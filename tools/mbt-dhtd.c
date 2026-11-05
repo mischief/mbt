@@ -15,7 +15,7 @@ static void usage(const char *prog)
 {
 	fprintf(stderr, "usage: %s [-p port] [-b host:port] [-d]\n", prog);
 	fprintf(stderr, "  -p port       DHT listen port (default: 6881)\n");
-	fprintf(stderr, "  -b host:port  bootstrap node (default: router.bittorrent.com:6881)\n");
+	fprintf(stderr, "  -b host:port  bootstrap node (default: dht.transmissionbt.com:6881)\n");
 	fprintf(stderr, "  -d            enable debug logging\n");
 	exit(1);
 }
@@ -23,7 +23,7 @@ static void usage(const char *prog)
 int main(int argc, char *argv[])
 {
 	int port = 6881, debug = 0, rv, ch;
-	const char *bootstrap = "router.bittorrent.com:6881";
+	const char *bootstrap = "dht.transmissionbt.com:6881";
 
 	while ((ch = getopt(argc, argv, "p:b:dh")) != -1) {
 		switch (ch) {
