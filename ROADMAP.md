@@ -133,6 +133,14 @@
 - [ ] Tracker store: expire stale peers (no re-announce within 2× interval)
 - [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
 
+### Storage compatibility
+- [ ] Clean unsafe metadata paths like other clients, not refuse the torrent
+- [ ] `path.utf-8` and `name.utf-8`: prefer them over `path` and `name`
+- [ ] Duplicate paths inside one torrent: rename or refuse
+- [ ] File names over 255 bytes: shorten and keep the extension
+- [ ] BEP 52 v2 and SHA-256 infohash
+- [ ] Move a torrent between storages
+
 ### Longer-term (enterprise/embedding)
 - [ ] Event + policy callback infrastructure on session/tracker configs
 - [ ] Tracker policy callbacks (accept/reject announce, infohash whitelist)
