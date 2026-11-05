@@ -1569,6 +1569,10 @@ mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 	STAILQ_REMOVE(&s->torrents, st, session_torrent, next);
 	mbt_torrent_free(st->torrent);
 	mbt_infohash_unref(st->ih);
+	if (st->reannounce_timer)
+		mbt_ev_timer_free(st->reannounce_timer);
+	for (int i = 0; i < st->tracker_count; i++)
+		free(st->trackers[i]);
 	free(st);
 	return 0;
 }
