@@ -173,6 +173,7 @@ struct mbt_torrent {
 	/* Endgame mode */
 	int endgame;
 	int verifying; /* 1 while initial SHA1 verify is running */
+	int error;     /* first fatal -errno; 0 = none */
 	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
 	int max_pieces_per_peer;
 
@@ -205,6 +206,18 @@ static void torrent_peer_writecb(struct mbt_conn *c, void *arg);
 static void torrent_drive_all_peers(struct mbt_torrent *t);
 static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
 static void torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp);
+
+/* Stop requesting data, and report the first fatal error once. */
+static void
+torrent_fail(struct mbt_torrent *t, int err)
+{
+	if (t->error)
+		return;
+	t->error = err;
+	mbt_log_warn(MBT_LOG_TORRENT, "torrent failed: %s", strerror(-err));
+	if (t->cb.on_error)
+		t->cb.on_error(t, err, t->cb_arg);
+}
 static void bucket_reinsert(struct mbt_torrent *t, uint32_t piece);
 
 static size_t
@@ -1172,14 +1185,21 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			}
 			return;
 		} else {
-			/* Verified — store */
+			/* Verified — store. A piece counts only once it is written. */
+			if (t->storage_h && t->storage->ops->write_piece) {
+				int wrv = t->storage->ops->write_piece(t->storage_h, piece,
+				                                       pi->data, plen);
+				if (wrv < 0) {
+					piece_info_free_one(t, pi);
+					torrent_fail(t, wrv);
+					return;
+				}
+			}
+
 			mbt_bitmap_set(t->have, piece);
 			t->have_count++;
 			if (tp && tp->failures > 0) tp->failures--;
 			tp->hash_failures = 0;
-
-			if (t->storage_h && t->storage->ops->write_piece)
-				t->storage->ops->write_piece(t->storage_h, piece, pi->data, plen);
 
 			piece_info_free_one(t, pi);
 			bucket_piece_complete(t, piece);
@@ -1313,7 +1333,12 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 		/* Parse and set metadata */
 		mbt_log_info(MBT_LOG_TORRENT, "metadata complete from %s:%hu (%zu bytes)",
 		             mbt_peer_addr(p), mbt_peer_conn_port(p), t->metadata_len);
-		mbt_torrent_set_metadata(t, t->metadata, t->metadata_len);
+		int mrv = mbt_torrent_set_metadata(t, t->metadata, t->metadata_len);
+		if (mrv < 0) {
+			t->error = 0; /* set_metadata reports by return only */
+			torrent_fail(t, mrv);
+			return;
+		}
 
 		if (t->piece_count > 0)
 			mbt_log_info(MBT_LOG_TORRENT, "name=\"%s\" pieces=%u piece_length=%u total=%llu",
@@ -1787,6 +1812,8 @@ torrent_drive_all_peers(struct mbt_torrent *t)
 static void
 torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
+	if (t->error)
+		return;
 	if (t->piece_count == 0 || mbt_peer_choked(tp->peer) || t->verifying) {
 		mbt_log_debug(MBT_LOG_TORRENT, "drive_peer: skip (no_metadata=%d choked=%d verifying=%d)",
 		              t->piece_count == 0, mbt_peer_choked(tp->peer), t->verifying);
@@ -1930,6 +1957,9 @@ torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg)
 static void
 torrent_request_metadata(struct mbt_torrent *t, struct torrent_peer *tp)
 {
+	if (t->error)
+		return;
+
 	/*
 	 * Request only the metadata pieces we don't yet have, capped to a small
 	 * in-flight window. Peers (e.g. transmission) limit outstanding
@@ -2257,6 +2287,7 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		int srv = t->storage->ops->open(t->storage->ctx, t, &t->storage_h);
 		if (srv < 0) {
 			mbt_log_warn(MBT_LOG_STORAGE, "storage open failed: %s", strerror(-srv));
+			t->error = srv;
 			return srv;
 		}
 	}
@@ -2390,6 +2421,8 @@ mbt_torrent_complete(struct mbt_torrent *t)
 enum mbt_torrent_state
 mbt_torrent_state(struct mbt_torrent *t)
 {
+	if (t->error)
+		return MBT_TORRENT_ERROR;
 	if (t->piece_count == 0)
 		return MBT_TORRENT_INIT;
 	if (t->verifying)
@@ -2459,6 +2492,12 @@ mbt_torrent_peer_at(struct mbt_torrent *t, int idx)
 	for (int i = 0; tp && i < idx; i++) tp = TAILQ_NEXT(tp, entry);
 	return tp ? tp->peer : NULL;
 }
+int
+mbt_torrent_error(struct mbt_torrent *t)
+{
+	return t->error;
+}
+
 int
 mbt_torrent_has_metadata(struct mbt_torrent *t)
 {

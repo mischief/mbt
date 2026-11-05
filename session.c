@@ -1467,13 +1467,21 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
 	ih = mbt_metainfo_infohash(mi);
 	if (!ih) { mbt_metainfo_free(mi); return -EINVAL; }
 
+	int existed = session_find(s, ih) != NULL;
+
 	rv = mbt_session_add_infohash(s, ih, cfg);
 	if (rv < 0) { mbt_metainfo_free(mi); return rv; }
 
 	t = mbt_session_find_torrent(s, ih);
 	if (t) {
 		const void *raw = mbt_metainfo_raw_info(mi, &raw_len);
-		mbt_torrent_set_metadata(t, raw, raw_len);
+		rv = mbt_torrent_set_metadata(t, raw, raw_len);
+		if (rv < 0) {
+			if (!existed)
+				mbt_session_remove_torrent(s, ih);
+			mbt_metainfo_free(mi);
+			return rv;
+		}
 		if (s->state_ops && s->state_ops->save)
 			s->state_ops->save(s->state_ctx, t);
 	}

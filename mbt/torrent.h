@@ -50,6 +50,7 @@ struct mbt_torrent_config {
 struct mbt_torrent_callbacks {
 	void (*on_complete)(struct mbt_torrent *t, void *arg);
 	void (*on_piece_complete)(struct mbt_torrent *t, uint32_t piece, void *arg);
+	/* Fatal storage or metadata error, once. Do not free t from this callback. */
 	void (*on_error)(struct mbt_torrent *t, int err, void *arg);
 	/* Called after each piece is verified during resume (have=1 if piece is good) */
 	void (*on_verify_progress)(struct mbt_torrent *t, uint32_t piece, int have, void *arg);
@@ -87,9 +88,13 @@ enum mbt_torrent_state {
 	MBT_TORRENT_DOWNLOADING, /* actively receiving pieces */
 	MBT_TORRENT_STALLED,     /* incomplete but no progress possible */
 	MBT_TORRENT_SEEDING,     /* complete, serving to others */
+	MBT_TORRENT_ERROR,       /* stopped; see mbt_torrent_error */
 };
 
 MBT_API enum mbt_torrent_state mbt_torrent_state(struct mbt_torrent *t);
+
+/* First fatal error as -errno, or 0. The torrent then requests no more data. */
+MBT_API int mbt_torrent_error(struct mbt_torrent *t);
 
 MBT_API uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);

@@ -17,6 +17,7 @@
 .Nm mbt_torrent_is_private ,
 .Nm mbt_torrent_has_metadata ,
 .Nm mbt_torrent_state ,
+.Nm mbt_torrent_error ,
 .Nm mbt_torrent_piece_count ,
 .Nm mbt_torrent_piece_length ,
 .Nm mbt_torrent_have_count ,
@@ -65,6 +66,8 @@
 .Fn mbt_torrent_has_metadata "struct mbt_torrent *t"
 .Ft "enum mbt_torrent_state"
 .Fn mbt_torrent_state "struct mbt_torrent *t"
+.Ft int
+.Fn mbt_torrent_error "struct mbt_torrent *t"
 .Ft uint32_t
 .Fn mbt_torrent_piece_count "struct mbt_torrent *t"
 .Ft uint32_t
@@ -133,6 +136,10 @@ No metadata.
 Actively receiving pieces.
 .It Va MBT_TORRENT_STALLED
 Incomplete, no progress possible.
+.It Va MBT_TORRENT_ERROR
+The torrent stopped after a storage or metadata error.
+.Fn mbt_torrent_error
+returns the first error as a negative errno, or 0.
 .It Va MBT_TORRENT_SEEDING
 All pieces present and verified.
 .El
