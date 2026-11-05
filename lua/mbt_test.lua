@@ -136,6 +136,27 @@ do
 	assert(s:add_torrent_buf("garbage") == nil)
 	assert(s:add_torrent_file(tmp .. "/none") == nil)
 	raises(function() t:wait() end, "inside mbt.run")
+	raises(function() t:wait(-1) end, "negative")
+	assert(t:piece_map() == "")
+	assert(t:read_piece(0) == nil)
+	raises(function() t:read_piece(-1) end, "out of range")
+
+	-- a wait times out and leaves the torrent, and two waits end alone
+	mbt.run(function()
+		local a, b
+		mbt.spawn(function() a = {t:wait(1000000)} end)
+		local ok, msg = t:wait(0)
+		assert(ok == nil and msg == "timeout")
+		ok, msg = t:wait(5)
+		assert(ok == nil and msg == "timeout")
+		assert(a == nil)
+		assert(s:find(hex) == t)
+		mbt.spawn(function() b = {t:wait(1000000)} end)
+		assert(t:remove())
+		mbt.sleep(10)
+		assert(a[2] == "torrent removed" and b[2] == "torrent removed")
+		t = assert(s:add_infohash(hex))
+	end)
 
 	-- a waiter ends when its torrent goes, and when its session closes
 	mbt.run(function()
@@ -228,6 +249,13 @@ mbt.run(function()
 	assert(t:progress() == 1)
 	assert(t:stats().bytes_downloaded >= #payload)
 	assert(read_file(tmp .. "/leech/data.bin") == payload)
+	assert(t:wait(1) == true)
+	assert(t:piece_map() == string.rep("1", mi.piece_count))
+	assert(t:read_piece(0) == payload:sub(1, mi.piece_length))
+	assert(t:read_piece(mi.piece_count - 1) ==
+	    payload:sub((mi.piece_count - 1) * mi.piece_length + 1))
+	local r, msg, errno = t:read_piece(mi.piece_count)
+	assert(r == nil and type(msg) == "string" and errno > 0)
 
 	local f = assert(fetch:add_magnet("magnet:?xt=urn:btih:" .. mi.infohash))
 	assert(f:add_peer("127.0.0.1", port))
@@ -355,3 +383,10 @@ seed:close()
 leech:close()
 fetch:close()
 cleanup()
+
+-- state close frees a timed wait still pending
+left_open = assert(mbt.session{utp = false})
+mbt.run(function()
+	local t = assert(left_open:add_infohash(hex))
+	mbt.spawn(function() t:wait(1000000) end)
+end)

@@ -121,15 +121,20 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   nothing for a private torrent.
 - `t:add_peer(addr, port[, utp])`.
 - `t:set_upload_rate(n)`, `t:set_download_rate(n)`.
-- `t:wait()` waits inside a coroutine until the torrent completes. It returns
-  true, or nil and a message when the torrent fails or the torrent or session
-  goes away.
+- `t:wait([timeout_ms])` waits inside a coroutine until the torrent completes.
+  It returns true, or nil and a message when the torrent fails or the torrent
+  or session goes away. After the timeout the message is `"timeout"`, and the
+  torrent keeps going.
+- `t:piece_map()` returns a string of `"0"` and `"1"`, one for each piece, or
+  an empty string before metadata arrives.
+- `t:read_piece(index)` returns the bytes of a verified piece, or nil and an
+  error. `index` starts at 0, as on the wire, so piece `i` is byte `i + 1` of
+  the map. It blocks the loop on disk.
 - `t:remove()` removes the torrent. Its data stays on disk.
 
 ## Limits
 
 - HTTP and HTTPS trackers need a libmbt built with libcurl.
-- `t:wait()` has no timeout. Bound it with `mbt.spawn` and `mbt.sleep`.
 - Sessions do not save state across runs.
 - Under the `lua` program, Ctrl-C raises `interrupted!` from `mbt.run`. Other
   hosts must handle SIGINT themselves.

@@ -13,8 +13,10 @@
 #include "mbt/session.h"
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
+#include "test_util.h"
 
 #define PIECE_LEN 16384
+#define FILE_LEN 100
 #define TRACKER "udp://127.0.0.1:1/announce"
 #define BIG_TAIL (5 * 1024 * 1024)
 #define OVER_LIMIT (65 * 1024 * 1024)
@@ -31,7 +33,7 @@ path_of(char *p, size_t n, const char *name)
 static void
 encode_priv(unsigned char **enc, size_t *enc_len, int priv)
 {
-	static const uint8_t data[100];
+	static const uint8_t data[FILE_LEN];
 	struct mbt_metainfo *mi;
 	char path[256];
 	FILE *fp;
@@ -120,6 +122,24 @@ test_magnet_then_metainfo(struct mbt_session *s, const unsigned char *enc, size_
 }
 
 static void
+test_read_piece(struct mbt_session *s, struct mbt_ev *ev, const unsigned char *enc, size_t enc_len)
+{
+	struct mbt_torrent *t = NULL;
+	uint8_t buf[FILE_LEN], zero[FILE_LEN] = {0};
+
+	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL, &t) == 0);
+	assert(mbt_torrent_piece_size(t, 0) == FILE_LEN);
+	assert(mbt_torrent_piece_size(t, 1) == 0);
+	test_wait_verified(ev, t);
+	memset(buf, 0xff, sizeof(buf));
+	assert(mbt_torrent_read_piece(t, 0, buf, sizeof(buf)) == 0);
+	assert(memcmp(buf, zero, FILE_LEN) == 0);
+	assert(mbt_torrent_read_piece(t, 1, buf, sizeof(buf)) == -ERANGE);
+	assert(mbt_torrent_read_piece(t, 0, buf, FILE_LEN - 1) == -EMSGSIZE);
+	assert(mbt_session_remove_torrent(s, mbt_torrent_infohash(t)) == 0);
+}
+
+static void
 test_file_limits(struct mbt_session *s)
 {
 	struct mbt_torrent *t = NULL;
@@ -179,6 +199,7 @@ main(void)
 	encode(&enc, &enc_len);
 	test_repeat(s, enc, enc_len);
 	test_magnet_then_metainfo(s, enc, enc_len);
+	test_read_piece(s, ev, enc, enc_len);
 	test_file_limits(s);
 	test_fallback_private(s);
 	free(enc);

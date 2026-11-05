@@ -35,6 +35,7 @@
 #define RUN_STEP_MS 100
 
 #define TORRENT_FAILED "torrent failed"
+#define WAIT_TIMEOUT "timeout"
 
 /* User values of a session. */
 #define UV_ON_COMPLETE 1
@@ -250,6 +251,8 @@ struct lwaiter {
 	TAILQ_ENTRY(lwaiter) entries;
 	struct wait w;
 	struct mbt_infohash *ih;
+	struct lsession *ls;
+	struct mbt_ev_timer *timer;  /* t:wait(timeout_ms), or NULL */
 	const char *err;
 };
 
@@ -368,6 +371,15 @@ wake(struct cctx *c)
 		c->wake_armed = true;
 }
 
+static void
+waiter_stop_timer(struct lwaiter *w)
+{
+	if (w->timer != NULL) {
+		mbt_ev_timer_free(w->timer);
+		w->timer = NULL;
+	}
+}
+
 /* Move the waiters on ih (all of them for ih NULL) to the ready list. */
 static void
 waiters_ready(struct lsession *ls, struct mbt_infohash *ih, const char *err)
@@ -380,6 +392,7 @@ waiters_ready(struct lsession *ls, struct mbt_infohash *ih, const char *err)
 		if (ih != NULL && mbt_infohash_cmp(w->ih, ih) != 0)
 			continue;
 		TAILQ_REMOVE(&ls->waiters, w, entries);
+		waiter_stop_timer(w);
 		w->err = err;
 		TAILQ_INSERT_TAIL(&c->ready, w, entries);
 		wake(c);
@@ -524,6 +537,7 @@ session_close(struct lsession *ls, bool resume)
 	} else {
 		while ((w = TAILQ_FIRST(&ls->waiters)) != NULL) {
 			TAILQ_REMOVE(&ls->waiters, w, entries);
+			waiter_stop_timer(w);
 			mbt_infohash_unref(w->ih);
 			free(w);
 		}
@@ -1122,6 +1136,46 @@ l_stats(lua_State *L)
 	return 1;
 }
 
+/* t:piece_map(): one "0" or "1" per piece, "" before metadata. */
+static int
+l_piece_map(lua_State *L)
+{
+	struct mbt_torrent *t = check_torrent(L, 1, NULL);
+	uint32_t n = mbt_torrent_has_metadata(t) ? mbt_torrent_piece_count(t) : 0;
+	luaL_Buffer b;
+	char *p = luaL_buffinitsize(L, &b, n);
+
+	for (uint32_t i = 0; i < n; i++)
+		p[i] = mbt_torrent_has_piece(t, i) ? '1' : '0';
+	luaL_pushresultsize(&b, n);
+	return 1;
+}
+
+/* t:read_piece(index): the bytes of a verified piece. index starts at 0. */
+static int
+l_read_piece(lua_State *L)
+{
+	struct mbt_torrent *t = check_torrent(L, 1, NULL);
+	lua_Integer i = luaL_checkinteger(L, 2);
+	luaL_Buffer b;
+	size_t len;
+	char *p;
+	int rv;
+
+	luaL_argcheck(L, i >= 0 && i <= UINT32_MAX, 2, "out of range");
+	len = mbt_torrent_piece_size(t, (uint32_t)i);
+	if (len == 0)
+		return fail(L, -ERANGE);
+	p = luaL_buffinitsize(L, &b, len);
+	rv = mbt_torrent_read_piece(t, (uint32_t)i, p, len);
+	luaL_pushresultsize(&b, rv < 0 ? 0 : len);
+	if (rv < 0) {
+		lua_pop(L, 1);
+		return fail(L, rv);
+	}
+	return 1;
+}
+
 /* t:error(): nil, or the message and errno that stopped the torrent. */
 static int
 l_error(lua_State *L)
@@ -1290,15 +1344,31 @@ l_set_download_rate(lua_State *L)
 	return 0;
 }
 
-/* t:wait(): park the coroutine until the torrent completes. */
+static void
+wait_timeout_cb(struct mbt_ev_timer *timer, void *arg)
+{
+	struct lwaiter *w = arg;
+	struct lsession *ls = w->ls;
+
+	(void)timer;
+	TAILQ_REMOVE(&ls->waiters, w, entries);
+	waiter_stop_timer(w);
+	w->err = WAIT_TIMEOUT;
+	TAILQ_INSERT_TAIL(&ls->c->ready, w, entries);
+	wake(ls->c);
+}
+
+/* t:wait([timeout_ms]): park the coroutine until the torrent completes. */
 static int
 l_wait(lua_State *L)
 {
 	struct lsession *ls;
 	struct mbt_torrent *t = check_torrent(L, 1, &ls);
 	struct ltorrent *lt = lua_touserdata(L, 1);
+	lua_Integer ms = luaL_optinteger(L, 2, -1);
 	struct lwaiter *w;
 
+	luaL_argcheck(L, lua_isnoneornil(L, 2) || ms >= 0, 2, "must not be negative");
 	if (mbt_torrent_complete(t)) {
 		lua_pushboolean(L, 1);
 		return 1;
@@ -1314,6 +1384,13 @@ l_wait(lua_State *L)
 		free(w);
 		return luaL_error(L, "mbt: call wait inside mbt.run");
 	}
+	if (ms >= 0 && mbt_ev_timer_new(ls->c->ev, &w->timer, (uint64_t)ms * 1000,
+	    wait_timeout_cb, w) < 0) {
+		luaL_unref(ls->c->L, LUA_REGISTRYINDEX, w->w.ref);
+		free(w);
+		return luaL_error(L, "mbt: cannot make a timer");
+	}
+	w->ls = ls;
 	w->ih = mbt_infohash_ref(lt->ih);
 	TAILQ_INSERT_TAIL(&ls->waiters, w, entries);
 	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
@@ -1699,6 +1776,8 @@ static const luaL_Reg torrent_methods[] = {
     {"complete", l_complete},
     {"has_metadata", l_has_metadata},
     {"error", l_error},
+    {"piece_map", l_piece_map},
+    {"read_piece", l_read_piece},
     {"stats", l_stats},
     {"peers", l_peers},
     {"files", l_files},

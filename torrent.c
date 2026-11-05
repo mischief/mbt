@@ -2553,6 +2553,30 @@ mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece)
 	return mbt_bitmap_isset(t->have, piece) > 0;
 }
 
+size_t
+mbt_torrent_piece_size(struct mbt_torrent *t, uint32_t piece)
+{
+	if (piece >= t->piece_count)
+		return 0;
+	return piece_length_for(t, piece);
+}
+
+int
+mbt_torrent_read_piece(struct mbt_torrent *t, uint32_t piece, void *buf, size_t len)
+{
+	size_t plen = mbt_torrent_piece_size(t, piece);
+
+	if (plen == 0)
+		return -ERANGE;
+	if (len < plen)
+		return -EMSGSIZE;
+	if (!mbt_torrent_has_piece(t, piece))
+		return -ENODATA;
+	if (!t->storage_h || !t->storage->ops->read_piece)
+		return -ENOTSUP;
+	return t->storage->ops->read_piece(t->storage_h, piece, buf, plen);
+}
+
 struct mbt_bitmap *
 mbt_torrent_have_bitmap(struct mbt_torrent *t)
 {

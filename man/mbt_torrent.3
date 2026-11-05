@@ -25,6 +25,8 @@
 .Nm mbt_torrent_peer_count ,
 .Nm mbt_torrent_peer_at ,
 .Nm mbt_torrent_has_piece ,
+.Nm mbt_torrent_piece_size ,
+.Nm mbt_torrent_read_piece ,
 .Nm mbt_torrent_piece_active ,
 .Nm mbt_torrent_piece_fully_requested ,
 .Nm mbt_torrent_piece_map ,
@@ -82,6 +84,10 @@
 .Fn mbt_torrent_peer_at "struct mbt_torrent *t" "int idx"
 .Ft int
 .Fn mbt_torrent_has_piece "struct mbt_torrent *t" "uint32_t piece"
+.Ft size_t
+.Fn mbt_torrent_piece_size "struct mbt_torrent *t" "uint32_t piece"
+.Ft int
+.Fn mbt_torrent_read_piece "struct mbt_torrent *t" "uint32_t piece" "void *buf" "size_t len"
 .Ft int
 .Fn mbt_torrent_piece_active "struct mbt_torrent *t" "uint32_t piece"
 .Ft int
@@ -173,6 +179,28 @@ and
 cap per-torrent bandwidth; 0 means unlimited.
 These override the session-level limits set via
 .Xr mbt_session 3 .
+.Ss Reading pieces
+.Fn mbt_torrent_piece_size
+returns the bytes in a piece, or 0 for an index out of range.
+The last piece can be short.
+.Pp
+.Fn mbt_torrent_read_piece
+copies a verified piece from storage to
+.Fa buf .
+It blocks on the storage.
+It returns 0 on success.
+It returns
+.Er ERANGE
+for an index out of range,
+.Er EMSGSIZE
+if
+.Fa len
+is too small,
+.Er ENODATA
+if the torrent does not have the piece, and
+.Er ENOTSUP
+if the storage cannot read.
+Errors are negative.
 .Sh RETURN VALUES
 Functions returning
 .Ft int

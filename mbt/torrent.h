@@ -103,6 +103,10 @@ MBT_API uint64_t mbt_torrent_bytes_downloaded(struct mbt_torrent *t);
 MBT_API int mbt_torrent_peer_count(struct mbt_torrent *t);
 MBT_API struct mbt_peer *mbt_torrent_peer_at(struct mbt_torrent *t, int idx);
 MBT_API int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);
+/* Bytes in a piece, or 0 for a piece out of range. */
+MBT_API size_t mbt_torrent_piece_size(struct mbt_torrent *t, uint32_t piece);
+/* Read a verified piece from storage. Blocks on the storage. */
+MBT_API int mbt_torrent_read_piece(struct mbt_torrent *t, uint32_t piece, void *buf, size_t len);
 MBT_API struct mbt_bitmap *mbt_torrent_have_bitmap(struct mbt_torrent *t);
 MBT_API int mbt_torrent_piece_active(struct mbt_torrent *t, uint32_t piece);
 MBT_API int mbt_torrent_piece_fully_requested(struct mbt_torrent *t, uint32_t piece);
