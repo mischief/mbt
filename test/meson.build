@@ -65,6 +65,9 @@ test('storage_shared', storage_shared_test, timeout: 60)
 torrent_path_test = executable('torrent_path_test', 'torrent_path_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('torrent_path', torrent_path_test)
 
+storage_pad_test = executable('storage_pad_test', 'storage_pad_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('storage_pad', storage_pad_test, timeout: 60)
+
 peerdb_test = executable('peerdb_test', 'peerdb_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('peerdb', peerdb_test)
 

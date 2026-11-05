@@ -2200,6 +2200,11 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 				t->files[idx].path = strdup(pathbuf);
 			}
 
+			struct mbt_be_value *attr = mbt_be_find(f, "attr");
+			if (attr && attr->type == BE_STRING &&
+			    memchr(attr->string.buf, 'p', attr->string.len))
+				t->files[idx].pad = 1;
+
 			t->files[idx].offset = offset;
 			t->files[idx].length = (uint64_t)flen->integer;
 			offset += t->files[idx].length;

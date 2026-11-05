@@ -31,6 +31,7 @@ struct mbt_file {
 	char *path;            /* relative path (single component or multi-component joined with /) */
 	uint64_t offset;       /* byte offset within the torrent data */
 	uint64_t length;
+	int pad;               /* BEP 47 padding: reads as zeros, has no disk file */
 };
 
 /* Torrent configuration */

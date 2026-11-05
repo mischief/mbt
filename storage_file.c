@@ -23,7 +23,7 @@ struct mbt_torrent;
  */
 
 struct file_entry {
-	int fd;
+	int fd;                /* -1 for padding: reads as zeros, writes are dropped */
 	char *path;
 	uint64_t offset;
 	uint64_t length;
@@ -115,7 +115,7 @@ path_in_use(struct file_storage *fs, const char *path)
 
 	SLIST_FOREACH(h, &fs->handles, next)
 		for (int i = 0; i < h->count; i++)
-			if (strcmp(h->entries[i].path, path) == 0)
+			if (h->entries[i].path && strcmp(h->entries[i].path, path) == 0)
 				return 1;
 	return 0;
 }
@@ -164,7 +164,11 @@ file_open(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out)
 		struct file_entry *e = &h->entries[i];
 
 		e->fd = -1;
+		e->offset = f->offset;
+		e->length = f->length;
 		h->count = i + 1;
+		if (f->pad)
+			continue;
 		if (!f->path) {
 			rv = -EINVAL;
 			goto fail;
@@ -192,9 +196,6 @@ file_open(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out)
 			mbt_log_warn(MBT_LOG_STORAGE, "open %s: %s", e->path, strerror(-rv));
 			goto fail;
 		}
-
-		e->offset = f->offset;
-		e->length = f->length;
 	}
 
 	SLIST_INSERT_HEAD(&fs->handles, h, next);
@@ -228,8 +229,10 @@ file_write_piece(struct mbt_storage_handle *handle, uint32_t index,
 		uint64_t can_write   = e->length - write_start;
 		size_t to_write = remaining < can_write ? remaining : (size_t)can_write;
 
-		ssize_t rv = pwrite(e->fd, p + data_start, to_write, write_start);
-		if (rv < 0) return -errno;
+		if (e->fd >= 0) {
+			ssize_t rv = pwrite(e->fd, p + data_start, to_write, write_start);
+			if (rv < 0) return -errno;
+		}
 
 		remaining     -= to_write;
 		piece_offset  += to_write;
@@ -258,9 +261,13 @@ file_read_piece(struct mbt_storage_handle *handle, uint32_t index, void *buf, si
 		uint64_t can_read   = e->length - read_start;
 		size_t to_read = remaining < can_read ? remaining : (size_t)can_read;
 
-		ssize_t rv = pread(e->fd, p + data_start, to_read, read_start);
-		if (rv < 0) return -errno;
-		if ((size_t)rv < to_read) return -EIO;
+		if (e->fd >= 0) {
+			ssize_t rv = pread(e->fd, p + data_start, to_read, read_start);
+			if (rv < 0) return -errno;
+			if ((size_t)rv < to_read) return -EIO;
+		} else {
+			memset(p + data_start, 0, to_read);
+		}
 
 		remaining    -= to_read;
 		piece_offset += to_read;
