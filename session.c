@@ -1414,11 +1414,15 @@ session_on_metadata(struct mbt_torrent *t, void *arg)
 		s->cb.on_torrent_metadata(s, t, s->cb.arg);
 }
 
-void
+/* A durable save, for a step that a crash must not undo. */
+int
 mbt_session_save_torrent(struct mbt_session *s, struct mbt_torrent *t)
 {
-	if (s->state_ops && s->state_ops->save)
-		s->state_ops->save(s->state_ctx, t);
+	if (!s->state_ops)
+		return 0;
+	if (s->state_ops->save_sync)
+		return s->state_ops->save_sync(s->state_ctx, t);
+	return s->state_ops->save ? s->state_ops->save(s->state_ctx, t) : 0;
 }
 
 static void

@@ -35,6 +35,8 @@ struct mbt_state_ops {
 	int  (*remove)(void *ctx, struct mbt_torrent *t);
 	/* Clean up ctx. */
 	void (*close)(void *ctx);
+	/* As save, and durable when it returns. Optional. */
+	int  (*save_sync)(void *ctx, struct mbt_torrent *t);
 };
 
 /* --- File-based implementation --- */

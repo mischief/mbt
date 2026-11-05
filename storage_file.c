@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "mbt/infohash.h"
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
 #include "mbt/log.h"
@@ -135,12 +136,58 @@ entry_path(const char *dir, const char *name, const char *file, int multi)
 	return path;
 }
 
+/* Path of the file that says a move into this directory has not finished. */
+static char *
+marker_path(struct file_storage *fs, struct mbt_torrent *t)
+{
+	char hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
+	size_t n;
+	char *path;
+
+	mbt_infohash_string(mbt_torrent_infohash(t), hex, sizeof(hex));
+	n = strlen(fs->data_dir) + sizeof("/.mbt-move-") + sizeof(hex);
+	if ((path = malloc(n)) != NULL)
+		snprintf(path, n, "%s/.mbt-move-%s", fs->data_dir, hex);
+	return path;
+}
+
+static int
+file_mark(void *ctx, struct mbt_torrent *t, int on)
+{
+	char *path = marker_path(ctx, t);
+	int fd, rv = 0;
+
+	if (!path)
+		return -ENOMEM;
+	if (!on) {
+		if (unlink(path) < 0 && errno != ENOENT)
+			rv = -errno;
+	} else if ((rv = mkdirs(path)) == 0) {
+		if ((fd = open(path, O_WRONLY | O_CREAT, 0644)) < 0)
+			rv = -errno;
+		else
+			close(fd);
+	}
+	free(path);
+	return rv;
+}
+
+/* Files beside a marker are what a crashed move left, so a new move may reuse them. */
 static int
 file_exists(void *ctx, struct mbt_torrent *t)
 {
 	struct file_storage *fs = ctx;
 	int fc = mbt_torrent_file_count(t);
 	const char *name = mbt_torrent_name(t);
+	char *marker = marker_path(fs, t);
+	int crashed;
+
+	if (!marker)
+		return -ENOMEM;
+	crashed = access(marker, F_OK) == 0;
+	free(marker);
+	if (crashed)
+		return 0;
 
 	for (int i = 0; i < fc; i++) {
 		const struct mbt_file *f = mbt_torrent_file(t, i);
@@ -172,6 +219,60 @@ rmdirs(const char *data_dir, char *path)
 		if (rmdir(path) < 0)
 			return;
 	}
+}
+
+static int
+sync_dir(const char *path)
+{
+	int fd = open(path, O_RDONLY | O_DIRECTORY);
+	int rv = 0;
+
+	if (fd < 0)
+		return -errno;
+	if (fsync(fd) < 0)
+		rv = -errno;
+	close(fd);
+	return rv;
+}
+
+/* New directory entries need an fsync of each directory above them. */
+static int
+sync_parents(const char *data_dir, char *path)
+{
+	size_t root = strlen(data_dir);
+	char *slash;
+	int rv;
+
+	while ((slash = strrchr(path, '/')) != NULL && (size_t)(slash - path) >= root) {
+		*slash = '\0';
+		if ((rv = sync_dir(path)) < 0)
+			return rv;
+	}
+	return 0;
+}
+
+static int
+file_sync(struct mbt_storage_handle *handle)
+{
+	struct file_torrent *h = (struct file_torrent *)handle;
+
+	for (int i = 0; i < h->count; i++) {
+		struct file_entry *e = &h->entries[i];
+		char *path;
+		int rv;
+
+		if (e->fd < 0)
+			continue;
+		if (fsync(e->fd) < 0)
+			return -errno;
+		if ((path = strdup(e->path)) == NULL)
+			return -ENOMEM;
+		rv = sync_parents(h->fs->data_dir, path);
+		free(path);
+		if (rv < 0)
+			return rv;
+	}
+	return 0;
 }
 
 static int
@@ -361,4 +462,6 @@ static const struct mbt_storage_ops file_ops = {
 	.destroy     = file_destroy,
 	.remove      = file_remove,
 	.exists      = file_exists,
+	.sync        = file_sync,
+	.mark        = file_mark,
 };

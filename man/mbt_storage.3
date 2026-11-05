@@ -78,22 +78,37 @@ before it drops its reference to the storage.
 .Fa destroy
 is optional.
 .Pp
-.Fa remove
+.Fa remove ,
+.Fa exists ,
+.Fa sync
 and
-.Fa exists
+.Fa mark
 are optional.
+.Xr mbt_torrent_move_storage 3
+needs
+.Fa remove
+on both storages, and uses the others on the target.
+.Pp
 .Fa remove
 deletes the data of an open torrent.
 The handle stays valid for
 .Fa close .
+.Pp
 .Fa exists
-returns 1 if data for the torrent is already present, and 0 if not.
-.Xr mbt_torrent_move_storage 3
-needs
-.Fa remove
-on both storages, and uses
+returns 1 if data for the torrent blocks a move, and 0 if not.
+.Pp
+.Fa sync
+returns after all writes are durable.
+.Pp
+.Fa mark
+records that a move into the storage has started, or clears that record when
+.Fa on
+is 0.
 .Fa exists
-on the target.
+ignores data that a mark covers, so a move can retry after a crash.
+File storage uses a file named
+.Pa .mbt-move-<infohash>
+in the data directory.
 .Sh FILE STORAGE
 .Fn mbt_storage_file_new
 makes a storage for files under

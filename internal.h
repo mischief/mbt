@@ -82,7 +82,7 @@ struct mbt_peer;
 struct mbt_ratelimit *mbt_session_get_upload_limit(struct mbt_session *s);
 struct mbt_ratelimit *mbt_session_get_download_limit(struct mbt_session *s);
 void mbt_torrent_set_session(struct mbt_torrent *t, struct mbt_session *s);
-void mbt_session_save_torrent(struct mbt_session *s, struct mbt_torrent *t);
+int mbt_session_save_torrent(struct mbt_session *s, struct mbt_torrent *t);
 int mbt_session_max_pieces_per_peer(struct mbt_session *s);
 int mbt_session_min_peers_before_download(struct mbt_session *s);
 int mbt_session_reqq(struct mbt_session *s);

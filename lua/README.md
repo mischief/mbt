@@ -132,8 +132,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 - `t:move(st)` moves the torrent to `st` as it runs, and returns when done.
   Each piece is verified on `st`, then the old data is deleted. On failure it
   returns nil, a message and an errno, the old data stays in use, and data on
-  `st` is deleted. It fails if `st` already has these files. Call it inside a
-  coroutine.
+  `st` is deleted. It fails if `st` already has these files, unless a crashed
+  move left them. Call it inside a coroutine.
 - `t:piece_map()` returns a string of `"0"` and `"1"`, one for each piece, or
   an empty string before metadata arrives.
 - `t:read_piece(index)` returns the bytes of a verified piece, or nil and an

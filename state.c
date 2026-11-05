@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: ISC
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,8 +49,42 @@ mbt_state_close(struct mbt_state *st)
 	free(st);
 }
 
+/* Replace dst with data through tmp, durably when sync is set. */
 static int
-state_save_impl(void *ctx, struct mbt_torrent *t)
+write_file(const char *dir, const char *tmp, const char *dst, const void *data, size_t len,
+    int sync)
+{
+	FILE *fp = fopen(tmp, "wb");
+	int rv = 0;
+
+	if (!fp)
+		return -errno;
+	if (fwrite(data, 1, len, fp) != len || fflush(fp) != 0)
+		rv = -EIO;
+	if (rv == 0 && sync && fsync(fileno(fp)) < 0)
+		rv = -errno;
+	if (fclose(fp) != 0 && rv == 0)
+		rv = -EIO;
+	if (rv < 0) {
+		unlink(tmp);
+		return rv;
+	}
+	if (rename(tmp, dst) < 0)
+		return -errno;
+	if (sync) {
+		int fd = open(dir, O_RDONLY | O_DIRECTORY);
+
+		if (fd < 0)
+			return -errno;
+		if (fsync(fd) < 0)
+			rv = -errno;
+		close(fd);
+	}
+	return rv;
+}
+
+static int
+state_save(void *ctx, struct mbt_torrent *t, int sync)
 {
 	struct mbt_state *st = ctx;
 
@@ -65,11 +101,8 @@ state_save_impl(void *ctx, struct mbt_torrent *t)
 		char tmp[512], dst[512];
 		snprintf(tmp, sizeof(tmp), "%s/%s.torrent.tmp", st->dir, hex);
 		snprintf(dst, sizeof(dst), "%s/%s.torrent", st->dir, hex);
-		FILE *fp = fopen(tmp, "wb");
-		if (!fp) return -errno;
-		fwrite(meta, 1, meta_len, fp);
-		fclose(fp);
-		if (rename(tmp, dst) < 0) return -errno;
+		int rv = write_file(st->dir, tmp, dst, meta, meta_len, sync);
+		if (rv < 0) return rv;
 	}
 
 	/* Write <hex>.resume (bencode dict: data_dir, added) */
@@ -88,14 +121,21 @@ state_save_impl(void *ctx, struct mbt_torrent *t)
 	char tmp[512], dst[512];
 	snprintf(tmp, sizeof(tmp), "%s/%s.resume.tmp", st->dir, hex);
 	snprintf(dst, sizeof(dst), "%s/%s.resume", st->dir, hex);
-	FILE *fp = fopen(tmp, "wb");
-	if (!fp) { free(enc); return -errno; }
-	fwrite(enc, 1, enc_len, fp);
-	fclose(fp);
+	int rv = write_file(st->dir, tmp, dst, enc, enc_len, sync);
 	free(enc);
+	return rv;
+}
 
-	if (rename(tmp, dst) < 0) return -errno;
-	return 0;
+static int
+state_save_impl(void *ctx, struct mbt_torrent *t)
+{
+	return state_save(ctx, t, 0);
+}
+
+static int
+state_save_sync_impl(void *ctx, struct mbt_torrent *t)
+{
+	return state_save(ctx, t, 1);
 }
 
 static int
@@ -204,6 +244,7 @@ state_close_impl(void *ctx)
 static const struct mbt_state_ops file_state_ops = {
 	.enumerate = state_enumerate_impl,
 	.save      = state_save_impl,
+	.save_sync = state_save_sync_impl,
 	.remove    = state_remove_impl,
 	.close     = state_close_impl,
 };

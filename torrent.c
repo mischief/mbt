@@ -2416,28 +2416,47 @@ mbt_torrent_set_storage(struct mbt_torrent *t, struct mbt_storage *st, const cha
 
 /* --- Moving to another storage --- */
 
-static void
-move_switch(struct mbt_torrent *t, struct torrent_move *m)
+/*
+ * Order matters for a crash: the new data is durable, then saved state points
+ * to it, then the old data goes. At each step one whole copy can be found.
+ */
+static int
+move_commit(struct mbt_torrent *t, struct torrent_move *m)
 {
-	struct mbt_storage *old = t->storage;
+	struct mbt_storage *old = t->storage, *dst = m->dst;
 	struct mbt_storage_handle *old_h = t->storage_h;
-	int rv;
+	char *old_dir = t->data_dir;
+	int rv = 0;
 
-	t->storage = m->dst;
-	t->storage_h = m->h;
-	m->dst = NULL;
-	if (m->data_dir) {
-		free(t->data_dir);
+	if (dst->ops->sync)
+		rv = dst->ops->sync(m->h);
+	else
+		mbt_log_warn(MBT_LOG_STORAGE, "move: target storage cannot sync");
+	if (rv < 0)
+		return rv;
+
+	if (m->data_dir)
 		t->data_dir = m->data_dir;
+	if (t->session && (rv = mbt_session_save_torrent(t->session, t)) < 0) {
+		t->data_dir = old_dir;
+		return rv;
+	}
+	if (m->data_dir) {
+		free(old_dir);
 		m->data_dir = NULL;
 	}
+
+	t->storage = dst;
+	t->storage_h = m->h;
+	m->dst = NULL;
+	if (dst->ops->mark)
+		dst->ops->mark(dst->ctx, t, 0);
 	rv = old->ops->remove(old_h);
 	if (rv < 0)
 		mbt_log_warn(MBT_LOG_STORAGE, "move: cannot delete old data: %s", strerror(-rv));
 	old->ops->close(old_h);
 	mbt_storage_unref(old);
-	if (t->session)
-		mbt_session_save_torrent(t->session, t);
+	return 0;
 }
 
 static void
@@ -2448,12 +2467,14 @@ move_finish(struct mbt_torrent *t, int err)
 	t->move = NULL;
 	if (m->timer)
 		mbt_ev_timer_free(m->timer);
-	if (err == 0) {
-		move_switch(t, m);
-	} else {
+	if (err == 0)
+		err = move_commit(t, m);
+	if (err < 0) {
 		mbt_log_warn(MBT_LOG_STORAGE, "move failed: %s", strerror(-err));
 		m->dst->ops->remove(m->h);
 		m->dst->ops->close(m->h);
+		if (m->dst->ops->mark)
+			m->dst->ops->mark(m->dst->ctx, t, 0);
 	}
 	mbt_storage_unref(m->dst);
 	free(m->buf);
@@ -2538,8 +2559,13 @@ mbt_torrent_move_storage(struct mbt_torrent *t, struct mbt_storage *dst, const c
 		if (rv != 0)
 			return rv < 0 ? rv : -EEXIST;
 	}
-	if ((m = calloc(1, sizeof(*m))) == NULL)
+	if (dst_ops->mark && (rv = dst_ops->mark(dst->ctx, t, 1)) < 0)
+		return rv;
+	if ((m = calloc(1, sizeof(*m))) == NULL) {
+		if (dst_ops->mark)
+			dst_ops->mark(dst->ctx, t, 0);
 		return -ENOMEM;
+	}
 	m->cb = cb;
 	m->arg = arg;
 	m->buf = malloc(t->piece_length);
@@ -2562,6 +2588,8 @@ mbt_torrent_move_storage(struct mbt_torrent *t, struct mbt_storage *dst, const c
 	return 0;
 
 fail:
+	if (dst_ops->mark)
+		dst_ops->mark(dst->ctx, t, 0);
 	free(m->buf);
 	free(m->data_dir);
 	free(m);

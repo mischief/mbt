@@ -207,9 +207,11 @@ It reads each piece back from
 .Fa dst
 and checks its hash.
 Pieces that arrive during the move go to both storages.
-At the end the torrent uses
-.Fa dst ,
-and the data on the old storage is deleted.
+At the end the new data is made durable, then saved state points to it, and
+only then is the data on the old storage deleted.
+Pass the new
+.Fa data_dir
+if the session saves state.
 .Fn cb
 then runs with 0.
 .Pp

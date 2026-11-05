@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -13,6 +14,7 @@
 #include "mbt/infohash.h"
 #include "mbt/metainfo.h"
 #include "mbt/session.h"
+#include "mbt/state.h"
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
 #include "test_util.h"
@@ -211,6 +213,11 @@ test_refused(void)
 static int writes_left;
 static int corrupt;
 static int removed;
+static int sync_fail;
+static int synced;
+static int saves;
+static int save_fail;
+static char *src_probe;
 
 static int
 bad_open(void *ctx, struct mbt_torrent *t, struct mbt_storage_handle **out)
@@ -236,6 +243,51 @@ bad_read(struct mbt_storage_handle *h, uint32_t p, void *buf, size_t len)
 }
 
 static int
+good_read(struct mbt_storage_handle *h, uint32_t p, void *buf, size_t len)
+{
+	(void)h;
+	memcpy(buf, data + (size_t)p * PIECE_LEN, len);
+	return 0;
+}
+
+static int
+good_write(struct mbt_storage_handle *h, uint32_t p, const void *d, size_t l)
+{
+	(void)h; (void)p; (void)d; (void)l;
+	return 0;
+}
+
+static int
+do_sync(struct mbt_storage_handle *h)
+{
+	(void)h;
+	synced++;
+	return sync_fail;
+}
+
+/* A durable save must come after sync and before the old data goes. */
+static int
+state_save_sync(void *ctx, struct mbt_torrent *t)
+{
+	(void)ctx; (void)t;
+	assert(synced == 1);
+	assert(access(src_probe, F_OK) == 0);
+	saves++;
+	return save_fail;
+}
+
+static int
+state_save_plain(void *ctx, struct mbt_torrent *t)
+{
+	(void)ctx; (void)t;
+	return 0;
+}
+
+static const struct mbt_state_ops order_state = {
+	.save = state_save_plain, .save_sync = state_save_sync,
+};
+
+static int
 bad_remove(struct mbt_storage_handle *h)
 {
 	(void)h;
@@ -252,6 +304,11 @@ bad_close(struct mbt_storage_handle *h)
 static const struct mbt_storage_ops bad_ops = {
 	.open = bad_open, .write_piece = bad_write, .read_piece = bad_read,
 	.remove = bad_remove, .close = bad_close,
+};
+
+static const struct mbt_storage_ops sync_ops = {
+	.open = bad_open, .write_piece = good_write, .read_piece = good_read,
+	.remove = bad_remove, .close = bad_close, .sync = do_sync,
 };
 
 static const struct mbt_storage_ops no_remove_ops = {
@@ -273,6 +330,7 @@ test_failures(void)
 	t = add_on(s, "d");
 
 	assert(mbt_torrent_move_storage(t, lacking, NULL, move_cb, NULL) == -ENOTSUP);
+	removed = 0;
 
 	writes_left = 0;
 	assert(mbt_torrent_move_storage(t, bad, NULL, move_cb, NULL) == 0);
@@ -302,6 +360,112 @@ test_failures(void)
 
 	mbt_storage_unref(bad);
 	mbt_storage_unref(lacking);
+	mbt_session_free(s);
+}
+
+/* The commit order, and a failed sync or save at each step. */
+static void
+test_commit_order(void)
+{
+	static char handle;
+	struct mbt_session_config cfg = {
+		.ev = ev, .disable_utp = 1, .state_ops = &order_state,
+	};
+	struct mbt_session *s;
+	struct mbt_torrent *t;
+	struct mbt_storage *dst = mbt_storage_new(&sync_ops, &handle);
+	char probe[256];
+
+	assert(mbt_session_new(&s, &cfg) == 0);
+	mkdir_in_tmp("order");
+	write_data("order");
+	path_of(probe, sizeof(probe), "order", "m.bin");
+	src_probe = probe;
+	t = add_on(s, "order");
+	removed = 0;
+
+	sync_fail = -EIO;
+	assert(mbt_torrent_move_storage(t, dst, NULL, move_cb, NULL) == 0);
+	wait_move();
+	assert(last_err == -EIO && saves == 0 && removed == 1);
+	check_data("order");
+
+	sync_fail = 0;
+	synced = 0;
+	save_fail = -ENOSPC;
+	assert(mbt_torrent_move_storage(t, dst, "kept", move_cb, NULL) == 0);
+	wait_move();
+	assert(last_err == -ENOSPC && saves == 1 && removed == 2);
+	assert(mbt_torrent_data_dir(t) == NULL ||
+	    strcmp(mbt_torrent_data_dir(t), "kept") != 0);
+	check_data("order");
+
+	save_fail = 0;
+	synced = 0;
+	saves = 0;
+	assert(mbt_torrent_move_storage(t, dst, NULL, move_cb, NULL) == 0);
+	wait_move();
+	assert(last_err == 0 && saves == 1);
+	assert(!file_there("order", "m.bin"));
+	mbt_storage_unref(dst);
+	mbt_session_free(s);
+}
+
+/* A process that dies in a move leaves the source whole, and a retry works. */
+static void
+crash_child(void)
+{
+	struct mbt_session *s;
+	struct mbt_torrent *t;
+	struct mbt_storage *dst;
+
+	assert(mbt_ev_new_default(&ev) == 0);
+	s = session_new();
+	t = add_on(s, "crash_a");
+	dst = storage_in("crash_b");
+	assert(mbt_torrent_move_storage(t, dst, NULL, move_cb, NULL) == 0);
+	_exit(0);
+}
+
+static void
+crash_in_move(void)
+{
+	pid_t pid;
+	int status;
+
+	mkdir_in_tmp("crash_a");
+	mkdir_in_tmp("crash_b");
+	write_data("crash_a");
+	assert((pid = fork()) >= 0);
+	if (pid == 0)
+		crash_child();
+	assert(waitpid(pid, &status, 0) == pid);
+	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+static void
+test_retry_after_crash(void)
+{
+	struct mbt_session *s = session_new();
+	struct mbt_torrent *t;
+	struct mbt_storage *dst;
+
+	assert(file_there("crash_b", "m.bin"));
+	check_data("crash_a");
+	t = add_on(s, "crash_a");
+	dst = storage_in("crash_b");
+	assert(mbt_torrent_move_storage(t, dst, NULL, move_cb, NULL) == 0);
+	mbt_storage_unref(dst);
+	wait_move();
+	assert(last_err == 0);
+	check_data("crash_b");
+	assert(!file_there("crash_a", "m.bin"));
+
+	char hex[41], name[64];
+
+	mbt_infohash_string(mbt_torrent_infohash(t), hex, sizeof(hex));
+	snprintf(name, sizeof(name), ".mbt-move-%s", hex);
+	assert(!file_there("crash_b", name));
 	mbt_session_free(s);
 }
 
@@ -400,9 +564,12 @@ main(void)
 	for (int i = 0; i < FILE_LEN; i++)
 		data[i] = (uint8_t)(i * 17 + (i >> 8));
 	assert(mkdtemp(tmpdir));
-	assert(mbt_ev_new_default(&ev) == 0);
 	make_torrent();
+	crash_in_move();
+	assert(mbt_ev_new_default(&ev) == 0);
 	test_move_complete();
+	test_commit_order();
+	test_retry_after_crash();
 	test_refused();
 	test_failures();
 	test_move_while_downloading();
