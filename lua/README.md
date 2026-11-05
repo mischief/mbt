@@ -84,7 +84,9 @@ reference. A session that the collector frees stops its transfers.
 - `s:add_torrent_file(path[, opts])`, `s:add_torrent_buf(data[, opts])`,
   `s:add_magnet(uri[, opts])` and `s:add_infohash(hex[, opts])` return a
   torrent. `opts.storage` selects a storage. `opts.dir` makes a separate
-  file storage for this torrent. Adding a torrent the session has returns the
+  file storage for this torrent. `opts.storage = false` adds it with no
+  storage: it fetches metadata, then holds in state `no_storage` until
+  `t:set_storage(st)`. Adding a torrent the session has returns the
   same torrent and ignores `opts`; a `.torrent` for a magnet with no metadata
   yet supplies its metadata. `.torrent` files are limited to 64 MiB.
 - `s:find(hex)` returns a torrent or nil. `s:torrents()` returns a list.
@@ -101,8 +103,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 
 - `t:infohash()` is uppercase hex, and works after the torrent is gone.
 - `t:name()`, nil before metadata arrives.
-- `t:state()`: `init`, `verifying`, `downloading`, `stalled`, `seeding` or
-  `error`.
+- `t:state()`: `init`, `verifying`, `downloading`, `stalled`, `seeding`,
+  `error` or `no_storage`.
 - `t:progress()`, `t:complete()`, `t:has_metadata()`.
 - `t:error()` returns nil, or the message and errno that stopped the torrent.
 - `t:stats()` returns a table with `name`, `state`, `progress`, `complete`,
@@ -125,6 +127,13 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   It returns true, or nil and a message when the torrent fails or the torrent
   or session goes away. After the timeout the message is `"timeout"`, and the
   torrent keeps going.
+- `t:wait_metadata([timeout_ms])` works the same, until metadata arrives.
+- `t:set_storage(st)` attaches storage to a torrent with none.
+- `t:move(st)` moves the torrent to `st` as it runs, and returns when done.
+  Each piece is verified on `st`, then the old data is deleted. On failure it
+  returns nil, a message and an errno, the old data stays in use, and data on
+  `st` is deleted. It fails if `st` already has these files. Call it inside a
+  coroutine.
 - `t:piece_map()` returns a string of `"0"` and `"1"`, one for each piece, or
   an empty string before metadata arrives.
 - `t:read_piece(index)` returns the bytes of a verified piece, or nil and an

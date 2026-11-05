@@ -333,6 +333,62 @@ do
 	s:close()
 end
 
+-- a torrent moves between storages, and a magnet holds until it gets storage
+do
+	assert(os.execute("mkdir -p " .. tmp .. "/move_a " .. tmp .. "/move_b " ..
+	    tmp .. "/move_c " .. tmp .. "/hold"))
+	write_file(tmp .. "/move_a/data.bin", payload)
+	local a = assert(mbt.storage.file(tmp .. "/move_a"))
+	local b = assert(mbt.storage.file(tmp .. "/move_b"))
+	local c = assert(mbt.storage.file(tmp .. "/move_c"))
+	local s = assert(mbt.session{storage = a, utp = false})
+	local t = assert(s:add_torrent_buf(torrent))
+
+	raises(function() t:move(b) end, "inside mbt.run")
+	mbt.run(function()
+		assert(t:wait())
+		assert(t:move(b))
+		assert(read_file(tmp .. "/move_b/data.bin") == payload)
+		assert(io.open(tmp .. "/move_a/data.bin", "rb") == nil)
+		assert(t:stats().dir == b:dir())
+		assert(t:state() == "seeding")
+
+		local r, msg, errno = t:move(b)
+		assert(r == nil and type(msg) == "string" and errno > 0)
+
+		-- a complete torrent still reads
+		assert(t:read_piece(0) == payload:sub(1, mi.piece_length))
+
+		-- removal ends a move, and the data stays where it was
+		local got
+		mbt.spawn(function() got = {t:move(c)} end)
+		assert(t:remove())
+		mbt.sleep(10)
+		assert(got[1] == nil and got[2] == "torrent removed")
+		assert(read_file(tmp .. "/move_b/data.bin") == payload)
+		assert(io.open(tmp .. "/move_c/data.bin", "rb") == nil)
+	end)
+	s:close()
+
+	local late = assert(mbt.storage.file(tmp .. "/hold"))
+	local h = assert(mbt.session{dir = tmp .. "/leech", utp = false})
+	raises(function() h:add_infohash(hex, {storage = false, dir = "x"}) end, "not both")
+	local x = assert(h:add_magnet("magnet:?xt=urn:btih:" .. mi.infohash, {storage = false}))
+	mbt.run(function()
+		assert(({x:wait_metadata(1)})[2] == "timeout")
+		assert(x:add_peer("127.0.0.1", port))
+		assert(x:wait_metadata())
+		assert(x:wait_metadata())
+		assert(x:state() == "no_storage")
+		assert(x:name() == "data.bin")
+		assert(x:set_storage(late))
+		assert(x:set_storage(late) == nil)
+		assert(x:wait())
+		assert(read_file(tmp .. "/hold/data.bin") == payload)
+	end)
+	h:close()
+end
+
 -- the example client downloads from the seed, and stops on SIGINT
 do
 	local dir = arg[0]:match("^(.*)/") or "."

@@ -246,13 +246,23 @@ wait_k(lua_State *L, int status, lua_KContext ctx)
 
 struct lsession;
 
-/* A t:wait call. On c->ready, err says how it ended; NULL means complete. */
+enum wait_kind {
+	WAIT_COMPLETE = 1 << 0,
+	WAIT_METADATA = 1 << 1,
+	WAIT_MOVE = 1 << 2,
+	WAIT_ALL = WAIT_COMPLETE | WAIT_METADATA | WAIT_MOVE,
+};
+
+/* A parked call. On c->ready, err or errnum say how it ended; else it worked. */
 struct lwaiter {
 	TAILQ_ENTRY(lwaiter) entries;
 	struct wait w;
 	struct mbt_infohash *ih;
 	struct lsession *ls;
-	struct mbt_ev_timer *timer;  /* t:wait(timeout_ms), or NULL */
+	struct mbt_ev_timer *timer;  /* a timeout, or NULL */
+	enum wait_kind kind;
+	bool queued;                 /* on c->ready */
+	int errnum;
 	const char *err;
 };
 
@@ -295,7 +305,12 @@ deliver_waiter(struct cctx *c, struct lwaiter *w)
 	int n = 1;
 
 	TAILQ_REMOVE(&c->ready, w, entries);
-	if (w->err == NULL) {
+	if (w->errnum != 0) {
+		lua_pushnil(co);
+		lua_pushstring(co, strerror(w->errnum));
+		lua_pushinteger(co, w->errnum);
+		n = 3;
+	} else if (w->err == NULL) {
 		lua_pushboolean(co, 1);
 	} else {
 		lua_pushnil(co);
@@ -380,22 +395,30 @@ waiter_stop_timer(struct lwaiter *w)
 	}
 }
 
-/* Move the waiters on ih (all of them for ih NULL) to the ready list. */
 static void
-waiters_ready(struct lsession *ls, struct mbt_infohash *ih, const char *err)
+waiter_queue(struct lsession *ls, struct lwaiter *w)
 {
-	struct cctx *c = ls->c;
+	TAILQ_REMOVE(&ls->waiters, w, entries);
+	waiter_stop_timer(w);
+	w->queued = true;
+	TAILQ_INSERT_TAIL(&ls->c->ready, w, entries);
+	wake(ls->c);
+}
+
+/* Queue the waiters of these kinds on ih (on every torrent for ih NULL). */
+static void
+waiters_ready(struct lsession *ls, struct mbt_infohash *ih, const char *err, int kinds)
+{
 	struct lwaiter *w, *next;
 
 	for (w = TAILQ_FIRST(&ls->waiters); w != NULL; w = next) {
 		next = TAILQ_NEXT(w, entries);
+		if ((w->kind & kinds) == 0)
+			continue;
 		if (ih != NULL && mbt_infohash_cmp(w->ih, ih) != 0)
 			continue;
-		TAILQ_REMOVE(&ls->waiters, w, entries);
-		waiter_stop_timer(w);
 		w->err = err;
-		TAILQ_INSERT_TAIL(&c->ready, w, entries);
-		wake(c);
+		waiter_queue(ls, w);
 	}
 }
 
@@ -421,7 +444,7 @@ session_complete_cb(struct mbt_session *s, struct mbt_torrent *t, void *arg)
 	struct mbt_infohash *ih = mbt_torrent_infohash(t);
 
 	(void)s;
-	waiters_ready(ls, ih, NULL);
+	waiters_ready(ls, ih, NULL, WAIT_COMPLETE);
 	done_queue(ls, ih, 0);
 }
 
@@ -433,8 +456,16 @@ session_error_cb(struct mbt_session *s, struct mbt_torrent *t, int err, void *ar
 	struct mbt_infohash *ih = mbt_torrent_infohash(t);
 
 	(void)s;
-	waiters_ready(ls, ih, TORRENT_FAILED);
+	waiters_ready(ls, ih, TORRENT_FAILED, WAIT_ALL);
 	done_queue(ls, ih, err);
+}
+
+/* Runs inside libmbt: queue only. */
+static void
+session_metadata_cb(struct mbt_session *s, struct mbt_torrent *t, void *arg)
+{
+	(void)s;
+	waiters_ready(arg, mbt_torrent_infohash(t), NULL, WAIT_METADATA);
 }
 
 /* Drop queued completions for ls, on ih only if ih is not NULL. */
@@ -533,7 +564,7 @@ session_close(struct lsession *ls, bool resume)
 	ls->s = NULL;
 	done_forget(ls, NULL);
 	if (resume) {
-		waiters_ready(ls, NULL, "session closed");
+		waiters_ready(ls, NULL, "session closed", WAIT_ALL);
 	} else {
 		while ((w = TAILQ_FIRST(&ls->waiters)) != NULL) {
 			TAILQ_REMOVE(&ls->waiters, w, entries);
@@ -631,6 +662,7 @@ l_session(lua_State *L)
 	struct mbt_session_callbacks cb = {
 		.on_torrent_complete = session_complete_cb,
 		.on_torrent_error = session_error_cb,
+		.on_torrent_metadata = session_metadata_cb,
 	};
 	struct lstorage *lst = NULL;
 	struct lsession *ls;
@@ -748,11 +780,12 @@ add_opts(lua_State *L, int idx, struct mbt_add_torrent_cfg *cfg,
 		return 0;
 	luaL_checktype(L, idx, LUA_TTABLE);
 	lua_getfield(L, idx, "storage");
-	if (!lua_isnil(L, -1))
+	cfg->no_storage = lua_isboolean(L, -1) && !lua_toboolean(L, -1);
+	if (!lua_isnil(L, -1) && !cfg->no_storage)
 		lst = check_storage(L, -1);
 	lua_getfield(L, idx, "dir");
 	dir = luaL_optstring(L, -1, NULL);
-	if (lst != NULL && dir != NULL)
+	if ((lst != NULL || cfg->no_storage) && dir != NULL)
 		return luaL_error(L, "mbt: use dir or storage, not both");
 	if (lst != NULL) {
 		cfg->storage = lst->st;
@@ -1071,6 +1104,7 @@ state_name(enum mbt_torrent_state s)
 	case MBT_TORRENT_STALLED:	return "stalled";
 	case MBT_TORRENT_SEEDING:	return "seeding";
 	case MBT_TORRENT_ERROR:		return "error";
+	case MBT_TORRENT_NO_STORAGE:	return "no_storage";
 	}
 	return "unknown";
 }
@@ -1348,36 +1382,19 @@ static void
 wait_timeout_cb(struct mbt_ev_timer *timer, void *arg)
 {
 	struct lwaiter *w = arg;
-	struct lsession *ls = w->ls;
 
 	(void)timer;
-	TAILQ_REMOVE(&ls->waiters, w, entries);
-	waiter_stop_timer(w);
 	w->err = WAIT_TIMEOUT;
-	TAILQ_INSERT_TAIL(&ls->c->ready, w, entries);
-	wake(ls->c);
+	waiter_queue(w->ls, w);
 }
 
-/* t:wait([timeout_ms]): park the coroutine until the torrent completes. */
+/* Park the coroutine until the kind of event happens. It holds a torrent at 1. */
 static int
-l_wait(lua_State *L)
+wait_park(lua_State *L, struct lsession *ls, lua_Integer ms, enum wait_kind kind)
 {
-	struct lsession *ls;
-	struct mbt_torrent *t = check_torrent(L, 1, &ls);
 	struct ltorrent *lt = lua_touserdata(L, 1);
-	lua_Integer ms = luaL_optinteger(L, 2, -1);
 	struct lwaiter *w;
 
-	luaL_argcheck(L, lua_isnoneornil(L, 2) || ms >= 0, 2, "must not be negative");
-	if (mbt_torrent_complete(t)) {
-		lua_pushboolean(L, 1);
-		return 1;
-	}
-	if (mbt_torrent_error(t) != 0) {
-		lua_pushnil(L);
-		lua_pushstring(L, TORRENT_FAILED);
-		return 2;
-	}
 	if ((w = calloc(1, sizeof(*w))) == NULL)
 		return luaL_error(L, "mbt: out of memory");
 	if (wait_begin(ls->c, L, &w->w) < 0) {
@@ -1391,6 +1408,106 @@ l_wait(lua_State *L)
 		return luaL_error(L, "mbt: cannot make a timer");
 	}
 	w->ls = ls;
+	w->kind = kind;
+	w->ih = mbt_infohash_ref(lt->ih);
+	TAILQ_INSERT_TAIL(&ls->waiters, w, entries);
+	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
+}
+
+/* t:wait([timeout_ms]): park the coroutine until the torrent completes. */
+static int
+l_wait(lua_State *L)
+{
+	struct lsession *ls;
+	struct mbt_torrent *t = check_torrent(L, 1, &ls);
+	lua_Integer ms = luaL_optinteger(L, 2, -1);
+
+	luaL_argcheck(L, lua_isnoneornil(L, 2) || ms >= 0, 2, "must not be negative");
+	if (mbt_torrent_complete(t)) {
+		lua_pushboolean(L, 1);
+		return 1;
+	}
+	if (mbt_torrent_error(t) != 0) {
+		lua_pushnil(L);
+		lua_pushstring(L, TORRENT_FAILED);
+		return 2;
+	}
+	return wait_park(L, ls, ms, WAIT_COMPLETE);
+}
+
+/* t:wait_metadata([timeout_ms]): park until the torrent has its metadata. */
+static int
+l_wait_metadata(lua_State *L)
+{
+	struct lsession *ls;
+	struct mbt_torrent *t = check_torrent(L, 1, &ls);
+	lua_Integer ms = luaL_optinteger(L, 2, -1);
+
+	luaL_argcheck(L, lua_isnoneornil(L, 2) || ms >= 0, 2, "must not be negative");
+	if (mbt_torrent_has_metadata(t)) {
+		lua_pushboolean(L, 1);
+		return 1;
+	}
+	if (mbt_torrent_error(t) != 0) {
+		lua_pushnil(L);
+		lua_pushstring(L, TORRENT_FAILED);
+		return 2;
+	}
+	return wait_park(L, ls, ms, WAIT_METADATA);
+}
+
+/* t:set_storage(st): give storage to a torrent added with storage = false. */
+static int
+l_set_storage(lua_State *L)
+{
+	struct mbt_torrent *t = check_torrent(L, 1, NULL);
+	struct lstorage *lst = check_storage(L, 2);
+	int rv = mbt_torrent_set_storage(t, lst->st, lst->dir);
+
+	if (rv < 0)
+		return fail(L, rv);
+	lua_pushboolean(L, 1);
+	return 1;
+}
+
+/* Runs inside libmbt, or under a close or remove that queued w: queue only. */
+static void
+move_done_cb(struct mbt_torrent *t, int err, void *arg)
+{
+	struct lwaiter *w = arg;
+
+	(void)t;
+	if (w->queued)
+		return;
+	w->errnum = -err;
+	waiter_queue(w->ls, w);
+}
+
+/* t:move(st): park until the torrent is on st and gone from its old storage. */
+static int
+l_move(lua_State *L)
+{
+	struct lsession *ls;
+	struct mbt_torrent *t = check_torrent(L, 1, &ls);
+	struct ltorrent *lt = lua_touserdata(L, 1);
+	struct lstorage *lst = check_storage(L, 2);
+	struct lwaiter *w;
+	int rv;
+
+	if ((w = calloc(1, sizeof(*w))) == NULL)
+		return luaL_error(L, "mbt: out of memory");
+	if (wait_begin(ls->c, L, &w->w) < 0) {
+		free(w);
+		return luaL_error(L, "mbt: call move inside mbt.run");
+	}
+	w->ls = ls;
+	w->kind = WAIT_MOVE;
+	rv = mbt_torrent_move_storage(t, lst->st, lst->dir, move_done_cb, w);
+	if (rv < 0) {
+		luaL_unref(ls->c->L, LUA_REGISTRYINDEX, w->w.ref);
+		free(w);
+		return fail(L, rv);
+	}
 	w->ih = mbt_infohash_ref(lt->ih);
 	TAILQ_INSERT_TAIL(&ls->waiters, w, entries);
 	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
@@ -1404,7 +1521,7 @@ l_remove(lua_State *L)
 	struct mbt_infohash *ih = mbt_infohash_ref(mbt_torrent_infohash(t));
 	int rv;
 
-	waiters_ready(ls, ih, "torrent removed");
+	waiters_ready(ls, ih, "torrent removed", WAIT_ALL);
 	done_forget(ls, ih);
 	rv = mbt_session_remove_torrent(ls->s, ih);
 	mbt_infohash_unref(ih);
@@ -1789,6 +1906,9 @@ static const luaL_Reg torrent_methods[] = {
     {"set_upload_rate", l_set_upload_rate},
     {"set_download_rate", l_set_download_rate},
     {"wait", l_wait},
+    {"wait_metadata", l_wait_metadata},
+    {"set_storage", l_set_storage},
+    {"move", l_move},
     {"remove", l_remove},
     {NULL, NULL},
 };
