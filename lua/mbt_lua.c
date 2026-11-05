@@ -5,6 +5,8 @@
  * mbt.run drives it. See lua/README.md.
  */
 #include <sys/queue.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -17,7 +19,9 @@
 #include <lauxlib.h>
 #include <lua.h>
 
+#include "mbt/dht.h"
 #include "mbt/event.h"
+#include "mbt/hex.h"
 #include "mbt/infohash.h"
 #include "mbt/log.h"
 #include "mbt/magnet.h"
@@ -32,6 +36,8 @@
 
 #define SESSION_META "mbt.session"
 #define STORAGE_META "mbt.storage"
+#define DHT_META "mbt.dht"
+#define NODE_ID_LEN 20
 #define RUN_STEP_MS 100
 
 #define TORRENT_FAILED "torrent failed"
@@ -49,6 +55,7 @@
 
 struct task;
 struct lwaiter;
+struct llookup;
 struct ldone;
 struct lsleep;
 
@@ -66,6 +73,7 @@ struct cctx {
 	bool wake_armed;
 	TAILQ_HEAD(, task) tasks; /* tasks still running */
 	TAILQ_HEAD(, lwaiter) ready;
+	TAILQ_HEAD(, llookup) lookups;  /* finished DHT lookups */
 	TAILQ_HEAD(, ldone) done;
 	TAILQ_HEAD(, lsleep) sleeps;
 };
@@ -350,11 +358,60 @@ deliver_done(struct cctx *c, struct ldone *d)
 	free(d);
 }
 
+/* A d:get_peers call. It stays on ld->pending until the lookup ends. */
+struct lpeer {
+	char addr[INET6_ADDRSTRLEN];
+	uint16_t port;
+};
+
+struct llookup {
+	TAILQ_ENTRY(llookup) entries;
+	struct wait w;
+	struct ldht *ld;
+	struct lpeer *peers;
+	size_t count, cap;
+	const char *err;
+};
+
+struct ldht {
+	struct cctx *c;
+	struct mbt_dht *d;
+	TAILQ_HEAD(, llookup) pending;
+};
+
+static void
+deliver_lookup(struct cctx *c, struct llookup *l)
+{
+	lua_State *co = l->w.co;
+	int n = 1;
+
+	TAILQ_REMOVE(&c->lookups, l, entries);
+	if (l->err != NULL) {
+		lua_pushnil(co);
+		lua_pushstring(co, l->err);
+		n = 2;
+	} else {
+		lua_createtable(co, (int)l->count, 0);
+		for (size_t i = 0; i < l->count; i++) {
+			lua_createtable(co, 0, 2);
+			lua_pushstring(co, l->peers[i].addr);
+			lua_setfield(co, -2, "addr");
+			lua_pushinteger(co, l->peers[i].port);
+			lua_setfield(co, -2, "port");
+			lua_rawseti(co, -2, (lua_Integer)i + 1);
+		}
+	}
+	free(l->peers);
+	wait_end(&l->w, n);
+	free(l);
+}
+
 static void
 wake_cb(struct mbt_ev_timer *timer, void *arg)
 {
 	struct cctx *c = arg;
 	struct lwaiter *w;
+	struct llookup *l;
 	struct ldone *d;
 
 	(void)timer;
@@ -362,6 +419,8 @@ wake_cb(struct mbt_ev_timer *timer, void *arg)
 	for (;;) {
 		if ((w = TAILQ_FIRST(&c->ready)) != NULL)
 			deliver_waiter(c, w);
+		else if ((l = TAILQ_FIRST(&c->lookups)) != NULL)
+			deliver_lookup(c, l);
 		else if ((d = TAILQ_FIRST(&c->done)) != NULL)
 			deliver_done(c, d);
 		else
@@ -1532,6 +1591,260 @@ l_remove(lua_State *L)
 }
 
 /* ------------------------------------------------------------------ */
+/* DHT                                                                 */
+/* ------------------------------------------------------------------ */
+
+static struct ldht *
+check_dht(lua_State *L, int idx)
+{
+	struct ldht *ld = luaL_checkudata(L, idx, DHT_META);
+
+	if (ld->d == NULL)
+		luaL_error(L, "mbt: dht is closed");
+	return ld;
+}
+
+static void
+lookup_queue(struct llookup *l)
+{
+	struct ldht *ld = l->ld;
+
+	TAILQ_REMOVE(&ld->pending, l, entries);
+	TAILQ_INSERT_TAIL(&ld->c->lookups, l, entries);
+	wake(ld->c);
+}
+
+/* With resume set, pending lookups get an error, as in session_close. */
+static void
+dht_close(struct ldht *ld, bool resume)
+{
+	struct llookup *l;
+
+	if (ld->d == NULL)
+		return;
+	mbt_dht_free(ld->d);
+	ld->d = NULL;
+	while ((l = TAILQ_FIRST(&ld->pending)) != NULL) {
+		if (resume) {
+			l->err = "dht closed";
+			lookup_queue(l);
+		} else {
+			TAILQ_REMOVE(&ld->pending, l, entries);
+			free(l->peers);
+			free(l);
+		}
+	}
+}
+
+static int
+l_dht_gc(lua_State *L)
+{
+	dht_close(luaL_checkudata(L, 1, DHT_META), false);
+	return 0;
+}
+
+static int
+l_dht_close(lua_State *L)
+{
+	dht_close(luaL_checkudata(L, 1, DHT_META), true);
+	return 0;
+}
+
+static void
+parse_node_id(lua_State *L, int idx, uint8_t id[NODE_ID_LEN])
+{
+	size_t len;
+	const char *hex = luaL_checklstring(L, idx, &len);
+
+	luaL_argcheck(L, len == NODE_ID_LEN * 2 &&
+	    mbt_hex_decode(id, NODE_ID_LEN, hex) >= 0, idx, "want 40 hex digits");
+}
+
+/* mbt.dht{port = 0, id = hex}: a DHT node of its own, with no session. */
+static int
+l_dht(lua_State *L)
+{
+	struct cctx *c = ctx_of(L);
+	uint8_t id[NODE_ID_LEN];
+	bool has_id = false;
+	struct ldht *ld;
+	uint16_t port = 0;
+	int rv;
+
+	if (!lua_isnoneornil(L, 1)) {
+		luaL_checktype(L, 1, LUA_TTABLE);
+		port = (uint16_t)opt_int(L, 1, "port", 0);
+		lua_getfield(L, 1, "id");
+		if (!lua_isnil(L, -1)) {
+			parse_node_id(L, -1, id);
+			has_id = true;
+		}
+		lua_pop(L, 1);
+	}
+	ld = lua_newuserdatauv(L, sizeof(*ld), 0);
+	memset(ld, 0, sizeof(*ld));
+	ld->c = c;
+	TAILQ_INIT(&ld->pending);
+	luaL_setmetatable(L, DHT_META);
+	rv = mbt_dht_new(&ld->d, c->ev, port);
+	if (rv < 0) {
+		ld->d = NULL;
+		return fail(L, rv);
+	}
+	if (has_id)
+		mbt_dht_set_node_id(ld->d, id);
+	return 1;
+}
+
+static int
+l_dht_port(lua_State *L)
+{
+	lua_pushinteger(L, mbt_dht_port(check_dht(L, 1)->d));
+	return 1;
+}
+
+static int
+l_dht_node_count(lua_State *L)
+{
+	lua_pushinteger(L, mbt_dht_node_count(check_dht(L, 1)->d));
+	return 1;
+}
+
+static int
+l_dht_bootstrap(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	const char *addr = luaL_checkstring(L, 2);
+	lua_Integer port = luaL_checkinteger(L, 3);
+	int rv;
+
+	luaL_argcheck(L, port > 0 && port <= UINT16_MAX, 3, "bad port");
+	rv = mbt_dht_bootstrap(ld->d, addr, (uint16_t)port);
+	if (rv < 0)
+		return fail(L, rv);
+	lua_pushboolean(L, 1);
+	return 1;
+}
+
+struct node_iter {
+	lua_State *L;
+	lua_Integer n;
+};
+
+static void
+node_push(const uint8_t id[20], const char *addr, uint16_t port, void *arg)
+{
+	struct node_iter *it = arg;
+	lua_State *L = it->L;
+	char hex[NODE_ID_LEN * 2 + 1];
+
+	mbt_hex_encode((unsigned char *)id, NODE_ID_LEN, hex, sizeof(hex));
+	lua_createtable(L, 0, 3);
+	lua_pushstring(L, hex);
+	lua_setfield(L, -2, "id");
+	lua_pushstring(L, addr);
+	lua_setfield(L, -2, "addr");
+	lua_pushinteger(L, port);
+	lua_setfield(L, -2, "port");
+	lua_rawseti(L, -2, ++it->n);
+}
+
+/* d:nodes(): the routing table. */
+static int
+l_dht_nodes(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	struct node_iter it = {.L = L};
+
+	lua_newtable(L);
+	mbt_dht_foreach_node(ld->d, node_push, &it);
+	return 1;
+}
+
+/* Runs inside libmbt: copy only. A peer can appear in several replies. */
+static void
+lookup_peer_cb(const char *addr, uint16_t port, void *arg)
+{
+	struct llookup *l = arg;
+
+	for (size_t i = 0; i < l->count; i++)
+		if (l->peers[i].port == port && strcmp(l->peers[i].addr, addr) == 0)
+			return;
+	if (l->count == l->cap) {
+		size_t cap = l->cap == 0 ? 16 : l->cap * 2;
+		struct lpeer *p = realloc(l->peers, cap * sizeof(*p));
+
+		if (p == NULL)
+			return;
+		l->peers = p;
+		l->cap = cap;
+	}
+	snprintf(l->peers[l->count].addr, sizeof(l->peers[0].addr), "%s", addr);
+	l->peers[l->count++].port = port;
+}
+
+static void
+lookup_done_cb(void *arg)
+{
+	lookup_queue(arg);
+}
+
+/* d:get_peers(infohash): park until the lookup ends, return a list of peers. */
+static int
+l_dht_get_peers(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	const char *hex = luaL_checkstring(L, 2);
+	struct mbt_infohash *ih = NULL;
+	struct llookup *l;
+	int rv;
+
+	if ((rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hex)) < 0)
+		return fail(L, rv);
+	if ((l = calloc(1, sizeof(*l))) == NULL) {
+		mbt_infohash_unref(ih);
+		return luaL_error(L, "mbt: out of memory");
+	}
+	if (wait_begin(ld->c, L, &l->w) < 0) {
+		mbt_infohash_unref(ih);
+		free(l);
+		return luaL_error(L, "mbt: call get_peers inside mbt.run");
+	}
+	l->ld = ld;
+	TAILQ_INSERT_TAIL(&ld->pending, l, entries);
+	rv = mbt_dht_get_peers(ld->d, ih, lookup_peer_cb, lookup_done_cb, l);
+	mbt_infohash_unref(ih);
+	if (rv < 0) {
+		TAILQ_REMOVE(&ld->pending, l, entries);
+		luaL_unref(ld->c->L, LUA_REGISTRYINDEX, l->w.ref);
+		free(l);
+		return fail(L, rv);
+	}
+	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
+}
+
+/* d:announce(infohash, port): uses the tokens of the last get_peers. */
+static int
+l_dht_announce(lua_State *L)
+{
+	struct ldht *ld = check_dht(L, 1);
+	const char *hex = luaL_checkstring(L, 2);
+	lua_Integer port = luaL_checkinteger(L, 3);
+	struct mbt_infohash *ih = NULL;
+	int rv;
+
+	luaL_argcheck(L, port > 0 && port <= UINT16_MAX, 3, "bad port");
+	if ((rv = mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, hex)) < 0)
+		return fail(L, rv);
+	rv = mbt_dht_announce(ld->d, ih, (uint16_t)port);
+	mbt_infohash_unref(ih);
+	if (rv < 0)
+		return fail(L, rv);
+	lua_pushboolean(L, 1);
+	return 1;
+}
+
+/* ------------------------------------------------------------------ */
 /* Metainfo and magnet                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -1913,6 +2226,17 @@ static const luaL_Reg torrent_methods[] = {
     {NULL, NULL},
 };
 
+static const luaL_Reg dht_methods[] = {
+    {"port", l_dht_port},
+    {"node_count", l_dht_node_count},
+    {"nodes", l_dht_nodes},
+    {"bootstrap", l_dht_bootstrap},
+    {"get_peers", l_dht_get_peers},
+    {"announce", l_dht_announce},
+    {"close", l_dht_close},
+    {NULL, NULL},
+};
+
 static const luaL_Reg storage_methods[] = {
     {"dir", l_storage_dir},
     {NULL, NULL},
@@ -1925,6 +2249,7 @@ static const luaL_Reg storage_fns[] = {
 
 static const luaL_Reg module_fns[] = {
     {"session", l_session},
+    {"dht", l_dht},
     {"run", l_run},
     {"spawn", l_spawn},
     {"sleep", l_sleep},
@@ -1942,6 +2267,7 @@ ctx_gc(lua_State *L)
 {
 	struct cctx *c = luaL_checkudata(L, 1, CTX_META);
 	struct lwaiter *w;
+	struct llookup *l;
 	struct lsleep *s;
 	struct task *t;
 
@@ -1960,6 +2286,11 @@ ctx_gc(lua_State *L)
 		TAILQ_REMOVE(&c->ready, w, entries);
 		mbt_infohash_unref(w->ih);
 		free(w);
+	}
+	while ((l = TAILQ_FIRST(&c->lookups)) != NULL) {
+		TAILQ_REMOVE(&c->lookups, l, entries);
+		free(l->peers);
+		free(l);
 	}
 	if (c->wake != NULL)
 		mbt_ev_timer_free(c->wake);
@@ -1981,6 +2312,7 @@ luaopen_mbt(lua_State *L)
 		memset(c, 0, sizeof(*c));
 		TAILQ_INIT(&c->tasks);
 		TAILQ_INIT(&c->ready);
+		TAILQ_INIT(&c->lookups);
 		TAILQ_INIT(&c->done);
 		TAILQ_INIT(&c->sleeps);
 		if ((rv = mbt_ev_new_default(&c->ev)) < 0)
@@ -2033,6 +2365,16 @@ luaopen_mbt(lua_State *L)
 		lua_setfield(L, -2, "__index");
 		lua_pushcfunction(L, l_storage_gc);
 		lua_setfield(L, -2, "__gc");
+	}
+	lua_pop(L, 1);
+	if (luaL_newmetatable(L, DHT_META)) {
+		lua_newtable(L);
+		luaL_setfuncs(L, dht_methods, 0);
+		lua_setfield(L, -2, "__index");
+		lua_pushcfunction(L, l_dht_gc);
+		lua_setfield(L, -2, "__gc");
+		lua_pushcfunction(L, l_dht_close);
+		lua_setfield(L, -2, "__close");
 	}
 	lua_pop(L, 1);
 	luaL_newlib(L, module_fns);

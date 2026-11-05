@@ -141,6 +141,30 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   the map. It blocks the loop on disk.
 - `t:remove()` removes the torrent. Its data stays on disk.
 
+## DHT
+
+`mbt.dht{port = 0, id = hex}` makes a DHT node on its own, with no session.
+`port` 0 binds a free port. `id` is 40 hex digits, and the default is random.
+It stays alive while Lua can reach it. Its lookups need `mbt.run` or
+`mbt.step`.
+
+- `d:port()`, `d:node_count()`.
+- `d:bootstrap(addr, port)` sends find_node to a node.
+- `d:nodes()` returns the routing table: a list of tables with `id`, `addr`
+  and `port`.
+- `d:get_peers(infohash)` waits inside a coroutine until the lookup ends, and
+  returns a list of tables with `addr` and `port`. Up to 8 lookups run at one
+  time.
+- `d:announce(infohash, port)` announces to the nodes that the last get_peers
+  for this infohash reached.
+- `d:close()` frees the node. A pending `d:get_peers` returns
+  `nil, "dht closed"`. The `<close>` attribute also closes it.
+
+BEP 44 items are not bound: libmbt stores and serves them, but has no client
+for the network side.
+
+`examples/mbt-dht.lua` is a small lookup tool.
+
 ## Limits
 
 - HTTP and HTTPS trackers need a libmbt built with libcurl.

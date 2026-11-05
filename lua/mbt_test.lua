@@ -440,6 +440,47 @@ leech:close()
 fetch:close()
 cleanup()
 
+-- DHT nodes find each other, and a peer announced on one is found from another
+do
+	local ih = string.rep("EF", 20)
+	local a <close> = assert(mbt.dht{id = string.rep("A0", 20)})
+	local b <close> = assert(mbt.dht())
+	local c <close> = assert(mbt.dht())
+	raises(function() mbt.dht{id = "zz"} end, "40 hex")
+	raises(function() a:get_peers(ih) end, "inside mbt.run")
+	assert(a:get_peers("zz") == nil)
+	assert(a:announce(ih, 6881) == nil)
+	assert(a:port() > 0)
+	assert(#a:nodes() == 0)
+
+	mbt.run(function()
+		deadline(30000, "dht")
+		assert(b:bootstrap("127.0.0.1", a:port()))
+		assert(c:bootstrap("127.0.0.1", a:port()))
+		local function learned(node)
+			local nodes = node:nodes()
+
+			return nodes[1] ~= nil and nodes[1].id == string.rep("A0", 20)
+		end
+		while not learned(b) or not learned(c) do
+			mbt.sleep(10)
+		end
+		local nodes = c:nodes()
+		assert(nodes[1].addr == "127.0.0.1" and nodes[1].port == a:port())
+
+		assert(#assert(b:get_peers(ih)) == 0)
+		assert(b:announce(ih, 7001))
+		mbt.sleep(50)
+		local peers = assert(c:get_peers(ih))
+		assert(#peers == 1 and peers[1].addr == "127.0.0.1" and peers[1].port == 7001)
+
+		local lone = assert(mbt.dht())
+		assert(#assert(lone:get_peers(ih)) == 0)
+		lone:close()
+		raises(function() lone:port() end, "closed")
+	end)
+end
+
 -- state close frees a timed wait still pending
 left_open = assert(mbt.session{utp = false})
 mbt.run(function()
