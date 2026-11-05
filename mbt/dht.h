@@ -83,6 +83,17 @@ typedef void (*mbt_dht_item_cb)(const uint8_t *value, size_t vlen,
                                 const uint8_t *k, /* NULL for immutable */
                                 void *arg);
 
+/* Item storage keys. An immutable value is its bencoded form. */
+MBT_API void mbt_dht_immutable_target(const void *v, size_t vlen, uint8_t target[20]);
+MBT_API void mbt_dht_mutable_target(const uint8_t k[MBT_DHT_PUBKEY_LEN], const char *salt,
+                                    size_t salt_len, uint8_t target[20]);
+
+/* Read any stored item. cb runs before this returns. -ENOENT if absent. */
+MBT_API int mbt_dht_get_item(struct mbt_dht *d, const uint8_t target[20],
+                             mbt_dht_item_cb cb, void *arg);
+
+/* The get and put below act on the local store only, which serves other nodes. */
+
 /* Get an immutable item by its SHA-1 hash */
 MBT_API int mbt_dht_get_immutable(struct mbt_dht *d, const uint8_t target[20],
                                   mbt_dht_item_cb cb, void *arg);

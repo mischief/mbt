@@ -52,6 +52,10 @@ struct mbt_ev_timer;
 #define LOOKUP_TICK_US (500 * 1000ULL)
 #define DHT_ERR_PROTOCOL 203
 #define DHT_ERR_METHOD 204
+#define DHT_ERR_TOO_BIG 205
+#define DHT_ERR_SIGNATURE 206
+#define DHT_ERR_SALT 207
+#define DHT_ERR_SEQ 302
 #define LOOKUP_NODE_TIMEOUT_SEC 2           /* then a node counts as silent */
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
@@ -106,6 +110,7 @@ struct lookup_node {
 	int queried;
 	int responded;     /* also set for a node that stayed silent */
 	time_t sent;
+	uint8_t txn[TXN_LEN];
 };
 
 struct dht_lookup {
@@ -158,7 +163,6 @@ struct mbt_dht {
 	struct dht_lookup lookups[MAX_LOOKUPS];
 
 	/* Transaction counter */
-	uint32_t txn_counter;
 
 	/* Refresh timer */
 	struct mbt_ev_timer *refresh_timer;
@@ -260,7 +264,10 @@ closer_to(const uint8_t *target, const uint8_t *a, const uint8_t *b)
 static void
 make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 {
-	uint32_t t = ++d->txn_counter;
+	/* Random: a sender that cannot see the query cannot guess the reply. */
+	uint32_t t = mbt_random32();
+
+	(void)d;
 	memcpy(txn, &t, TXN_LEN);
 }
 
@@ -570,10 +577,10 @@ dht_send_find_node(struct mbt_dht *d, const struct sockaddr_storage *addr, const
 }
 
 static int
-dht_send_get_peers(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *infohash)
+dht_send_get_peers(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *infohash,
+                   uint8_t txn[TXN_LEN])
 {
 	_cleanup_be_ struct mbt_be_value *msg = NULL, *a = NULL;
-	uint8_t txn[TXN_LEN];
 	make_txn(d, txn);
 
 	if (mbt_be_dict_new(&msg) < 0) return -ENOMEM;
@@ -709,7 +716,7 @@ lookup_advance(struct mbt_dht *d, struct dht_lookup *lk)
 		lk->nodes[best].queried = 1;
 		lk->pending++;
 		lk->nodes[best].sent = time(NULL);
-		dht_send_get_peers(d, &lk->nodes[best].addr, lk->target);
+		dht_send_get_peers(d, &lk->nodes[best].addr, lk->target, lk->nodes[best].txn);
 		{ char _b[64]; mbt_log_debug(MBT_LOG_DHT, "get_peers sent to %s",
 		              sa_str(&lk->nodes[best].addr, _b, sizeof(_b))); }
 		sent++;
@@ -828,6 +835,27 @@ parse_compact_peers(const uint8_t *data, size_t len,
 }
 
 static void
+dht_send_put_error(struct mbt_dht *d, const struct sockaddr_storage *addr,
+                   struct mbt_be_value *t, int err)
+{
+	switch (err) {
+	case -EEXIST:
+		dht_send_error(d, addr, t, DHT_ERR_SEQ, "sequence number too old");
+		break;
+	case -EACCES:
+	case -ENOSYS:
+		dht_send_error(d, addr, t, DHT_ERR_SIGNATURE, "invalid signature");
+		break;
+	case -EMSGSIZE:
+		dht_send_error(d, addr, t, DHT_ERR_SALT, "salt too big");
+		break;
+	default:
+		dht_send_error(d, addr, t, DHT_ERR_PROTOCOL, "cannot store");
+		break;
+	}
+}
+
+static void
 query_finish(struct dht_query *q, struct mbt_be_value *reply, int err)
 {
 	SLIST_REMOVE(&q->d->queries, q, dht_query, entry);
@@ -895,13 +923,16 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		struct mbt_be_value *values = mbt_be_find(r, "values");
 		struct mbt_be_value *token = mbt_be_find(r, "token");
 
-		/* Try to match to a lookup by source address */
+		/* A reply belongs to a lookup by its transaction id and source. */
+		struct mbt_be_value *rt = mbt_be_find(msg, "t");
 		struct dht_lookup *lk = NULL;
 		for (int i = 0; i < MAX_LOOKUPS; i++) {
 			if (!d->lookups[i].active) continue;
+			if (!rt || rt->type != BE_STRING || rt->string.len != TXN_LEN) break;
 			for (int j = 0; j < d->lookups[i].node_count; j++) {
 				if (d->lookups[i].nodes[j].queried && !d->lookups[i].nodes[j].responded &&
-				    sa_equal(&d->lookups[i].nodes[j].addr, &from)) {
+				    sa_equal(&d->lookups[i].nodes[j].addr, &from) &&
+				    memcmp(d->lookups[i].nodes[j].txn, rt->string.buf, TXN_LEN) == 0) {
 					d->lookups[i].nodes[j].responded = 1;
 					d->lookups[i].pending--;
 					/* Update node ID from response */
@@ -1222,8 +1253,9 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			if (mbt_be_dict_append_string(resp, "y", "r", 1) < 0) goto out;
 			if (mbt_be_dict_new(&rb) < 0) goto out;
 			if (mbt_be_dict_append_string(rb, "id", d->id, 20) < 0) goto out;
-			uint8_t tok[4]; make_txn(d, tok);
-			if (mbt_be_dict_append_string(rb, "token", tok, 4) < 0) goto out;
+			uint8_t tok[TOKEN_LEN];
+			dht_make_token(d, &from, tok);
+			if (mbt_be_dict_append_string(rb, "token", tok, TOKEN_LEN) < 0) goto out;
 			struct dht_node closest[K];
 			int nc2 = routing_closest(d, tgt->string.buf, closest, K, 1);
 			uint8_t cn[K * NODE_COMPACT_LEN]; int cl = 0;
@@ -1238,7 +1270,10 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			if (cl > 0)
 				if (mbt_be_dict_append_string(rb, "nodes", cn, cl) < 0) goto out;
 			if (it) {
-				if (mbt_be_dict_append_string(rb, "v", it->v, it->vlen) < 0) goto out;
+				/* it->v is bencoded, and goes on the wire as that value. */
+				_cleanup_be_ struct mbt_be_value *v_val = NULL;
+				if (mbt_be_value_parse(it->v, it->vlen, &v_val) <= 0) goto out;
+				if (mbt_be_dict_append(rb, "v", v_val) < 0) goto out;
 				if (it->mutable) {
 					if (mbt_be_dict_append_string(rb, "k", it->k, MBT_DHT_PUBKEY_LEN) < 0) goto out;
 					if (mbt_be_dict_append_string(rb, "sig", it->sig, MBT_DHT_SIG_LEN) < 0) goto out;
@@ -1253,34 +1288,51 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		} else if (mbt_be_streq(q, "put")) {
 			/* BEP 44: put */
 			struct mbt_be_value *v_val = mbt_be_find(a, "v");
-			if (!v_val) {
+			struct mbt_be_value *tok_v = mbt_be_find(a, "token");
+			if (!v_val || !tok_v || tok_v->type != BE_STRING) {
 				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
 			}
-			unsigned char *v_enc = NULL; size_t v_enc_len = 0;
-			if (mbt_be_value_encode(v_val, &v_enc, &v_enc_len) < 0) goto out;
-			if (v_enc_len > MBT_DHT_MAX_VALUE) { free(v_enc); goto out; }
+			if (!dht_verify_token(d, &from, tok_v->string.buf, tok_v->string.len)) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad token");
+				goto out;
+			}
+			/* The target covers the value as sent, so keep those bytes. */
+			const uint8_t *v_enc = buf + a->src_off + v_val->src_off;
+			size_t v_enc_len = v_val->src_len;
+			if (v_enc_len > MBT_DHT_MAX_VALUE) {
+				dht_send_error(d, &from, t, DHT_ERR_TOO_BIG, "value too big");
+				goto out;
+			}
 			struct mbt_be_value *k_val = mbt_be_find(a, "k");
-			if (k_val && k_val->type == BE_STRING &&
-			    k_val->string.len == MBT_DHT_PUBKEY_LEN) {
+			int prv;
+			if (k_val) {
 				struct mbt_be_value *sig_val = mbt_be_find(a, "sig");
 				struct mbt_be_value *seq_val = mbt_be_find(a, "seq");
 				struct mbt_be_value *salt_val = mbt_be_find(a, "salt");
-				if (!sig_val || sig_val->string.len != MBT_DHT_SIG_LEN ||
-				    !seq_val || seq_val->type != BE_INTEGER) {
-					free(v_enc); goto out;
+				if (k_val->type != BE_STRING || k_val->string.len != MBT_DHT_PUBKEY_LEN ||
+				    !sig_val || sig_val->type != BE_STRING ||
+				    sig_val->string.len != MBT_DHT_SIG_LEN ||
+				    !seq_val || seq_val->type != BE_INTEGER ||
+				    (salt_val && salt_val->type != BE_STRING)) {
+					dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
+					goto out;
 				}
 				const char *salt = NULL; size_t slen = 0;
-				if (salt_val && salt_val->type == BE_STRING) {
-					salt = (const char *)salt_val->string.buf; slen = salt_val->string.len;
+				if (salt_val) {
+					salt = (const char *)salt_val->string.buf;
+					slen = salt_val->string.len;
 				}
-				mbt_dht_put_mutable(d, k_val->string.buf,
+				prv = mbt_dht_put_mutable(d, k_val->string.buf,
 				    sig_val->string.buf, seq_val->integer,
 				    salt, slen, v_enc, v_enc_len, NULL, NULL);
 			} else {
-				mbt_dht_put_immutable(d, v_enc, v_enc_len, NULL, NULL);
+				prv = mbt_dht_put_immutable(d, v_enc, v_enc_len, NULL, NULL);
 			}
-			free(v_enc);
+			if (prv < 0) {
+				dht_send_put_error(d, &from, t, prv);
+				goto out;
+			}
 			/* Respond */
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
@@ -1748,16 +1800,48 @@ mbt_dht_set_verify(struct mbt_dht *d, mbt_dht_verify_cb cb, void *arg)
 	d->verify_arg = arg;
 }
 
+void
+mbt_dht_immutable_target(const void *v, size_t vlen, uint8_t target[20])
+{
+	SHA1_CTX ctx;
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, v, vlen);
+	SHA1Final(target, &ctx);
+}
+
+void
+mbt_dht_mutable_target(const uint8_t k[MBT_DHT_PUBKEY_LEN], const char *salt, size_t salt_len,
+                       uint8_t target[20])
+{
+	SHA1_CTX ctx;
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, k, MBT_DHT_PUBKEY_LEN);
+	if (salt && salt_len > 0)
+		SHA1Update(&ctx, (const uint8_t *)salt, salt_len);
+	SHA1Final(target, &ctx);
+}
+
+int
+mbt_dht_get_item(struct mbt_dht *d, const uint8_t target[20], mbt_dht_item_cb cb, void *arg)
+{
+	struct dht_item *it = dht_item_find(d, target);
+
+	if (!it)
+		return -ENOENT;
+	cb(it->v, it->vlen, it->mutable ? it->seq : -1, it->mutable ? it->k : NULL, arg);
+	return 0;
+}
+
 int
 mbt_dht_put_immutable(struct mbt_dht *d, const void *v, size_t vlen,
                       mbt_dht_done_cb done_cb, void *arg)
 {
 	if (vlen > MBT_DHT_MAX_VALUE) return -EINVAL;
 	uint8_t target[20];
-	SHA1_CTX ctx;
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, v, vlen);
-	SHA1Final(target, &ctx);
+
+	mbt_dht_immutable_target(v, vlen, target);
 
 	struct dht_item *it = dht_item_find(d, target);
 	if (!it) {
@@ -1796,24 +1880,23 @@ mbt_dht_put_mutable(struct mbt_dht *d,
                     mbt_dht_done_cb done_cb, void *arg)
 {
 	if (vlen > MBT_DHT_MAX_VALUE) return -EINVAL;
-	if (salt_len > 64) return -EINVAL;
+	if (salt_len > 64) return -EMSGSIZE;
 
 	uint8_t target[20];
-	SHA1_CTX ctx;
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, k, MBT_DHT_PUBKEY_LEN);
-	if (salt && salt_len > 0)
-		SHA1Update(&ctx, (const uint8_t *)salt, salt_len);
-	SHA1Final(target, &ctx);
+
+	mbt_dht_mutable_target(k, salt, salt_len, target);
 
 	if (d->verify_cb) {
 		uint8_t buf[1200];
 		int off = 0;
-		if (salt && salt_len > 0)
+		if (salt && salt_len > 0) {
 			off += snprintf((char *)buf + off, sizeof(buf) - off,
-			                "4:salt%zu:%.*s", salt_len, (int)salt_len, salt);
-		off += snprintf((char *)buf + off, sizeof(buf) - off, "3:seqi%lde1:v",
-		                (long)seq);
+			                "4:salt%zu:", salt_len);
+			memcpy(buf + off, salt, salt_len);
+			off += salt_len;
+		}
+		off += snprintf((char *)buf + off, sizeof(buf) - off, "3:seqi%llde1:v",
+		                (long long)seq);
 		if ((size_t)off + vlen > sizeof(buf)) return -EINVAL;
 		memcpy(buf + off, v, vlen);
 		off += vlen;
@@ -1825,8 +1908,9 @@ mbt_dht_put_mutable(struct mbt_dht *d,
 
 	struct dht_item *it = dht_item_find(d, target);
 	if (it) {
-		if (seq <= it->seq) return -EEXIST;
+		if (seq < it->seq) return -EEXIST;
 		free(it->v);
+		it->v = NULL;
 	} else {
 		it = dht_item_alloc(d, target);
 		if (!it) return -ENOMEM;
@@ -1840,7 +1924,9 @@ mbt_dht_put_mutable(struct mbt_dht *d,
 	it->seq = seq;
 	it->mutable = 1;
 	free(it->salt);
-	it->salt = (salt && salt_len > 0) ? strndup(salt, salt_len) : NULL;
+	it->salt = NULL;
+	if (salt && salt_len > 0 && (it->salt = malloc(salt_len)) != NULL)
+		memcpy(it->salt, salt, salt_len);
 	it->salt_len = salt_len;
 	it->stored_at = time(NULL);
 	(void)done_cb; (void)arg;
@@ -1854,12 +1940,8 @@ mbt_dht_get_mutable(struct mbt_dht *d,
                     mbt_dht_item_cb cb, void *arg)
 {
 	uint8_t target[20];
-	SHA1_CTX ctx;
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, k, MBT_DHT_PUBKEY_LEN);
-	if (salt && salt_len > 0)
-		SHA1Update(&ctx, (const uint8_t *)salt, salt_len);
-	SHA1Final(target, &ctx);
+
+	mbt_dht_mutable_target(k, salt, salt_len, target);
 
 	struct dht_item *it = dht_item_find(d, target);
 	if (it) {

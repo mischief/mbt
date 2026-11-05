@@ -243,6 +243,13 @@
 - [ ] Error codes: NoSuchPeer, NotConnected, NoSupport, NoSelf
 - [ ] Depends on uTP being implemented first
 
+### DHT items (BEP 44)
+- [x] Store items, serve get and put with tokens, signature check through a hook
+- [x] Lua: local store, raw queries, bencode and sha1 helpers
+- [ ] Network client: get and put through a lookup
+- [ ] ed25519 sign and verify
+- [ ] Republish stored items
+
 ### HTTP seeding (BEP 19)
 - [ ] HTTP seeding (BEP 19)
 

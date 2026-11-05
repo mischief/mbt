@@ -12,6 +12,9 @@
 .Nm mbt_dht_node_id ,
 .Nm mbt_dht_query ,
 .Nm mbt_dht_send_raw ,
+.Nm mbt_dht_get_item ,
+.Nm mbt_dht_immutable_target ,
+.Nm mbt_dht_mutable_target ,
 .Nm mbt_dht_port ,
 .Nm mbt_dht_set_node_id ,
 .Nm mbt_dht_set_verify ,
@@ -80,7 +83,10 @@ must not call into the DHT.
 .Pp
 The
 .Nm mbt_dht
-module provides a BitTorrent DHT implementation, supporting both standard node operations and BEP 44 (Arbitrary data storage) capabilities.
+module provides a BitTorrent DHT implementation, supporting standard node operations and the server side of BEP 44
+(arbitrary data storage).
+The node stores items and answers get and put from other nodes.
+It has no client that sends get or put over the network.
 .Sh PEER DISCOVERY AND ANNOUNCEMENT
 .Bl -tag -width 12
 .It Fn mbt_dht_bootstrap
@@ -92,7 +98,14 @@ Announces the caller's presence as a peer for the specified infohash.
 Returns the number of nodes told, or -EINVAL with no prior get_peers.
 .El
 .Sh DATA STORAGE (BEP 44)
+These calls use the local store, which serves other nodes.
 .Bl -tag -width 12
+.It Fn mbt_dht_get_item
+Reads a stored item of either kind.
+.It Fn mbt_dht_immutable_target
+Computes the key of an immutable item from its bencoded value.
+.It Fn mbt_dht_mutable_target
+Computes the key of a mutable item from its public key and salt.
 .It Fn mbt_dht_get_immutable
 Retrieves an immutable item from the DHT using its SHA-1 hash.
 .It Fn mbt_dht_put_immutable
