@@ -215,3 +215,5 @@ if libcurl_dep.found()
   http_curl_test = executable('http_curl_test', 'http_curl_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
   test('http_curl', http_curl_test, timeout: 60)
 endif
+tracker_cancel_test = executable('tracker_cancel_test', 'tracker_cancel_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tracker_cancel', tracker_cancel_test, timeout: 60)

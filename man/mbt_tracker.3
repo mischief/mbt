@@ -4,7 +4,9 @@
 .Sh NAME
 .Nm mbt_tracker_udp_announce ,
 .Nm mbt_tracker_http_announce ,
-.Nm mbt_tracker_announce
+.Nm mbt_tracker_announce ,
+.Nm mbt_tracker_group_new ,
+.Nm mbt_tracker_group_free
 .Nd Tracker announcement client functions for BitTorrent.
 .Sh SYNOPSIS
 .In mbt/tracker.h
@@ -14,6 +16,10 @@
 .Fn mbt_tracker_http_announce "const char *url" "struct mbt_tracker_request *req" "mbt_http_fn http" "void *http_arg"
 .Ft int
 .Fn mbt_tracker_announce "const char *url" "struct mbt_tracker_request *req" "mbt_http_fn http" "void *http_arg"
+.Ft int
+.Fn mbt_tracker_group_new "struct mbt_tracker_group **out"
+.Ft void
+.Fn mbt_tracker_group_free "struct mbt_tracker_group *g"
 .Sh DESCRIPTION
 The
 .Nm mbt_tracker
@@ -51,6 +57,13 @@ A callback invoked when the announcement completes or fails.
 .Sh FUNCTIONS
 The following functions perform the announcements:
 .Bl -tag -width 12
+.It .Fn mbt_tracker_group_new
+Makes a group. Set
+.Fa group
+in a request to add its UDP announce to the group.
+.It .Fn mbt_tracker_group_free
+Drops pending UDP announces of the group, with no callback.
+Free the group before the state that the callbacks use.
 .It .Fn mbt_tracker_udp_announce
 Performs an asynchronous UDP tracker announcement (BEP 15). The function returns 0 if the request was successfully initiated, or a negative error code on failure.
 .El

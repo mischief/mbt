@@ -123,6 +123,7 @@ struct mbt_session {
 	mbt_http_fn http;
 	void *http_arg;
 	void (*http_free)(void *arg);
+	struct mbt_tracker_group *tracker_group;
 	uint8_t peer_id[20];
 
 	struct mbt_session_callbacks cb;
@@ -294,6 +295,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 			st->completed_announced = 1;
 			struct mbt_tracker_request treq = {
 				.ev = s->ev, .ih = st->ih, .peer_id = s->peer_id,
+				.group = s->tracker_group,
 				.listen_port = s->listen_port, .left = 0,
 				.event = MBT_TRACKER_EVENT_COMPLETED,
 			};
@@ -913,6 +915,11 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 		session_pcp_start(s);
 	}
 
+	if (mbt_tracker_group_new(&s->tracker_group) < 0) {
+		mbt_session_free(s);
+		return -ENOMEM;
+	}
+
 	/* Restore persisted torrents */
 	if (s->state_ops && s->state_ops->enumerate) {
 		s->state_ops->enumerate(s->state_ctx,
@@ -932,6 +939,7 @@ mbt_session_free(struct mbt_session *s)
 	/* Pending announces report to s. */
 	if (s->http_free)
 		s->http_free(s->http_arg);
+	mbt_tracker_group_free(s->tracker_group);
 
 	mbt_listener_close(&s->listener);
 	if (s->lsd_announce_timer)
@@ -1339,6 +1347,7 @@ session_do_announce(struct mbt_session *s, struct session_torrent *st)
 		.peer_cb = session_tracker_peer_cb,
 		.done_cb = session_tracker_done_cb,
 		.arg = s,
+		.group = s->tracker_group,
 	};
 
 	for (int i = 0; i < st->tracker_count; i++) {

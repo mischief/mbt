@@ -30,7 +30,16 @@ struct mbt_tracker_request {
 	mbt_tracker_peer_cb peer_cb;
 	mbt_tracker_done_cb done_cb;
 	void *arg;
+	struct mbt_tracker_group *group; /* may be NULL; see mbt_tracker_group_new */
 };
+
+/*
+ * Set of pending UDP announces. mbt_tracker_group_free drops them with no
+ * callback, so free the group before the state that the callbacks use.
+ */
+struct mbt_tracker_group;
+MBT_API int mbt_tracker_group_new(struct mbt_tracker_group **out);
+MBT_API void mbt_tracker_group_free(struct mbt_tracker_group *g);
 
 #define MBT_TRACKER_EVENT_NONE      0
 #define MBT_TRACKER_EVENT_COMPLETED 1

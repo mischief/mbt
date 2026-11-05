@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: ISC
+#include <sys/queue.h>
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -8,6 +9,7 @@
 #include <string.h>
 #include <errno.h>
 #include "mbt/endian.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -36,6 +38,9 @@ enum udp_state {
 };
 
 struct udp_tracker {
+	TAILQ_ENTRY(udp_tracker) entries;
+	struct mbt_tracker_group *group;
+	uint8_t peer_id[20];
 	struct mbt_ev *ev;
 	struct mbt_ev_io *io;
 	struct mbt_ev_timer *timer;
@@ -50,12 +55,23 @@ struct udp_tracker {
 	socklen_t addrlen;
 };
 
+struct udp_announce_ctx;
+
+/* Pending announces of one owner. */
+struct mbt_tracker_group {
+	TAILQ_HEAD(, udp_tracker) trackers;
+	TAILQ_HEAD(, udp_announce_ctx) lookups;
+};
+
 static void udp_on_read(struct mbt_ev_io *io, int fd, uint32_t events, void *v);
 static void udp_on_timeout(struct mbt_ev_timer *timer, void *v);
 
 static void
 udp_cleanup(struct udp_tracker *ut)
 {
+	if (ut->group)
+		TAILQ_REMOVE(&ut->group->trackers, ut, entries);
+	mbt_infohash_unref(ut->req.ih);
 	if (ut->io) mbt_ev_io_free(ut->io);
 	if (ut->timer) mbt_ev_timer_free(ut->timer);
 	if (ut->fd >= 0) close(ut->fd);
@@ -273,37 +289,72 @@ parse_udp_url(const char *url, char *host, size_t hostlen, uint16_t *port)
 	return 0;
 }
 
-/* Context for async DNS → UDP announce */
+/* Context for async DNS -> UDP announce */
 struct udp_announce_ctx {
+	TAILQ_ENTRY(udp_announce_ctx) entries;
+	struct mbt_tracker_group *group;
+	bool canceled;
 	char host[256];
 	uint16_t port;
+	uint8_t peer_id[20];
 	struct mbt_tracker_request req;
 };
 
-static void
-udp_announce_resolved(struct sockaddr_storage *addr, socklen_t len, int err, void *arg)
+int
+mbt_tracker_group_new(struct mbt_tracker_group **out)
 {
-	struct udp_announce_ctx *ctx = arg;
+	struct mbt_tracker_group *g = calloc(1, sizeof(*g));
+
+	if (!g)
+		return -ENOMEM;
+	TAILQ_INIT(&g->trackers);
+	TAILQ_INIT(&g->lookups);
+	*out = g;
+	return 0;
+}
+
+/* A DNS lookup cannot stop: it ends in udp_announce_resolved. */
+void
+mbt_tracker_group_free(struct mbt_tracker_group *g)
+{
 	struct udp_tracker *ut;
+	struct udp_announce_ctx *ctx;
+
+	if (!g)
+		return;
+	while ((ut = TAILQ_FIRST(&g->trackers)) != NULL)
+		udp_cleanup(ut);
+	while ((ctx = TAILQ_FIRST(&g->lookups)) != NULL) {
+		TAILQ_REMOVE(&g->lookups, ctx, entries);
+		ctx->group = NULL;
+		ctx->canceled = true;
+	}
+	free(g);
+}
+
+static void
+ctx_free(struct udp_announce_ctx *ctx)
+{
+	if (ctx->group)
+		TAILQ_REMOVE(&ctx->group->lookups, ctx, entries);
+	mbt_infohash_unref(ctx->req.ih);
+	free(ctx);
+}
+
+static int
+udp_start(struct udp_announce_ctx *ctx, struct sockaddr_storage *addr, socklen_t len)
+{
+	struct udp_tracker *ut = calloc(1, sizeof(*ut));
 	int rv;
 
-	if (err < 0) {
-		if (ctx->req.done_cb)
-			ctx->req.done_cb(ctx->req.ih, err, 0, ctx->req.arg);
-		free(ctx);
-		return;
-	}
-
-	ut = calloc(1, sizeof(*ut));
-	if (!ut) {
-		if (ctx->req.done_cb)
-			ctx->req.done_cb(ctx->req.ih, -ENOMEM, 0, ctx->req.arg);
-		free(ctx);
-		return;
-	}
+	if (!ut)
+		return -ENOMEM;
 
 	ut->ev = ctx->req.ev;
 	ut->req = ctx->req;
+	memcpy(ut->peer_id, ctx->peer_id, sizeof(ut->peer_id));
+	ut->req.peer_id = ut->peer_id;
+	ut->req.ih = mbt_infohash_ref(ctx->req.ih);
 	ut->fd = -1;
 
 	/* Set up destination address */
@@ -316,36 +367,56 @@ udp_announce_resolved(struct sockaddr_storage *addr, socklen_t len, int err, voi
 
 	/* Create UDP socket matching resolved address family */
 	ut->fd = socket(ut->addr.ss_family, SOCK_DGRAM, 0);
-	if (ut->fd >= 0)
-		fcntl(ut->fd, F_SETFL, fcntl(ut->fd, F_GETFL) | O_NONBLOCK);
 	if (ut->fd < 0) {
-		free(ut); free(ctx);
-		return;
+		rv = -errno;
+		udp_cleanup(ut);
+		return rv;
 	}
+	fcntl(ut->fd, F_SETFL, fcntl(ut->fd, F_GETFL) | O_NONBLOCK);
 
 	/* Watch for responses */
 	rv = mbt_ev_io_new(ut->ev, &ut->io, ut->fd, MBT_EV_READ, udp_on_read, ut);
 	if (rv < 0) {
-		close(ut->fd); free(ut); free(ctx);
-		return;
+		udp_cleanup(ut);
+		return rv;
 	}
 
 	/* Timeout */
 	rv = mbt_ev_timer_new(ut->ev, &ut->timer, 15 * 1000000ULL, udp_on_timeout, ut);
 	if (rv < 0) {
-		mbt_ev_io_free(ut->io); close(ut->fd); free(ut); free(ctx);
-		return;
+		udp_cleanup(ut);
+		return rv;
 	}
 
 	/* Send connect */
 	rv = udp_send_connect(ut);
 	if (rv < 0) {
-		udp_cleanup(ut); free(ctx);
-		return;
+		udp_cleanup(ut);
+		return rv;
 	}
 
+	if (ctx->group) {
+		ut->group = ctx->group;
+		TAILQ_INSERT_TAIL(&ut->group->trackers, ut, entries);
+	}
 	mbt_log_debug(MBT_LOG_SESSION, "tracker: UDP connect sent to %s:%hu", ctx->host, ctx->port);
-	free(ctx);
+	return 0;
+}
+
+static void
+udp_announce_resolved(struct sockaddr_storage *addr, socklen_t len, int err, void *arg)
+{
+	struct udp_announce_ctx *ctx = arg;
+
+	if (ctx->canceled) {
+		ctx_free(ctx);
+		return;
+	}
+	if (err == 0)
+		err = udp_start(ctx, addr, len);
+	if (err < 0 && ctx->req.done_cb)
+		ctx->req.done_cb(ctx->req.ih, err, 0, ctx->req.arg);
+	ctx_free(ctx);
 }
 
 int
@@ -364,8 +435,18 @@ mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req)
 	memcpy(ctx->host, host, sizeof(ctx->host));
 	ctx->port = port;
 	ctx->req = *req;
+	memcpy(ctx->peer_id, req->peer_id, sizeof(ctx->peer_id));
+	ctx->req.peer_id = ctx->peer_id;
+	ctx->req.ih = mbt_infohash_ref(req->ih);
+	if (req->group) {
+		ctx->group = req->group;
+		TAILQ_INSERT_TAIL(&req->group->lookups, ctx, entries);
+	}
 
 	rv = mbt_resolve(req->ev, host, port, udp_announce_resolved, ctx, NULL);
-	if (rv < 0) { free(ctx); return rv; }
+	if (rv < 0) {
+		ctx_free(ctx);
+		return rv;
+	}
 	return 0;
 }
