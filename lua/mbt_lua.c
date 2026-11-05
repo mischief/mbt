@@ -32,6 +32,7 @@
 
 #define SESSION_META "mbt.session"
 #define STORAGE_META "mbt.storage"
+#define RUN_STEP_MS 100
 
 #define TORRENT_FAILED "torrent failed"
 
@@ -1233,6 +1234,17 @@ l_add_tracker(lua_State *L)
 }
 
 /* t:add_peer(addr, port[, utp]) */
+/* t:add_fallback_trackers(): public trackers, announced now. */
+static int
+l_add_fallback_trackers(lua_State *L)
+{
+	struct lsession *ls;
+	struct mbt_torrent *t = check_torrent(L, 1, &ls);
+
+	mbt_session_add_tracker_fallbacks(ls->s, t);
+	return 0;
+}
+
 static int
 l_add_peer(lua_State *L)
 {
@@ -1588,6 +1600,17 @@ check_loop_caller(lua_State *L, const char *what)
  * mbt.run(fn, ...): run fn in a coroutine, driving the loop until it
  * returns. Raises fn's error.
  */
+/*
+ * The lua program answers SIGINT with a count hook on the main thread. That
+ * thread sits in the loop here and runs no Lua code, so run the hook from C.
+ */
+static bool
+interrupted(lua_State *L)
+{
+	return lua_gethook(L) != NULL && (lua_gethookmask(L) & LUA_MASKCOUNT) != 0 &&
+	    lua_gethookcount(L) == 1;
+}
+
 static int
 l_run(lua_State *L)
 {
@@ -1605,8 +1628,20 @@ l_run(lua_State *L)
 		c->in_loop--;
 		return luaL_error(L, "mbt.run: out of memory");
 	}
-	while (!t->done)
-		mbt_ev_step(c->ev, -1);
+	while (!t->done) {
+		mbt_ev_step(c->ev, RUN_STEP_MS);
+		if (interrupted(L)) {
+			lua_Hook hook = lua_gethook(L);
+			lua_Debug ar = {.event = LUA_HOOKCOUNT};
+
+			/* The hook raises. fn stays parked and no longer reports here. */
+			c->in_loop--;
+			t->keep = false;
+			hook(L, &ar);
+			c->in_loop++;
+			t->keep = true;
+		}
+	}
 	c->in_loop--;
 	ok = t->ok;
 	err = t->err;
@@ -1669,6 +1704,7 @@ static const luaL_Reg torrent_methods[] = {
     {"files", l_files},
     {"trackers", l_trackers},
     {"add_tracker", l_add_tracker},
+    {"add_fallback_trackers", l_add_fallback_trackers},
     {"add_peer", l_add_peer},
     {"reannounce", l_reannounce},
     {"set_upload_rate", l_set_upload_rate},

@@ -25,6 +25,8 @@ end)
 s:close()
 ```
 
+`examples/mbt-get.lua` is a full download client.
+
 ## Errors
 
 Calls that can fail at run time return `nil, message, errno`. Wrong use
@@ -112,7 +114,11 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   `done_pct`, `hash_failures`, `score`, `source`, `downloaded` and
   `uploaded`.
 - `t:files()` returns a list of tables with `path`, `offset` and `length`.
-- `t:trackers()`, `t:add_tracker(url)`, `t:reannounce()`.
+- `t:trackers()`, `t:add_tracker(url)`, `t:reannounce()`. A tracker from
+  `t:add_tracker` gets its first announce from `t:reannounce()` or the next
+  periodic announce.
+- `t:add_fallback_trackers()` adds public trackers and announces. It does
+  nothing for a private torrent.
 - `t:add_peer(addr, port[, utp])`.
 - `t:set_upload_rate(n)`, `t:set_download_rate(n)`.
 - `t:wait()` waits inside a coroutine until the torrent completes. It returns
@@ -125,8 +131,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 - HTTP and HTTPS trackers need a libmbt built with libcurl.
 - `t:wait()` has no timeout. Bound it with `mbt.spawn` and `mbt.sleep`.
 - Sessions do not save state across runs.
-- `mbt.run` blocks in the event loop, so Ctrl-C takes effect at the next Lua
-  code that runs.
+- Under the `lua` program, Ctrl-C raises `interrupted!` from `mbt.run`. Other
+  hosts must handle SIGINT themselves.
 
 ## Process-wide effects
 

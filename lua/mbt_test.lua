@@ -305,6 +305,52 @@ do
 	s:close()
 end
 
+-- the example client downloads from the seed, and stops on SIGINT
+do
+	local dir = arg[0]:match("^(.*)/") or "."
+	local script = dir .. "/examples/mbt-get.lua"
+	local function start(sub, flags, target)
+		local out = tmp .. "/" .. sub
+		local status = out .. "/status"
+
+		assert(os.execute("mkdir -p " .. out))
+		assert(os.execute(string.format(
+		    "(sh -c 'echo $$ > %s/pid; exec %s %s -q -F -L -U %s -o %s -A 127.0.0.1:%d %s';" ..
+		    " echo $? > %s.tmp; mv %s.tmp %s) > %s/log 2>&1 &",
+		    out, arg[-1], script, flags, out, port, target, status, status, status, out)))
+		return out, status
+	end
+	local function wait_file(path)
+		mbt.run(function()
+			while not io.open(path, "rb") do
+				mbt.sleep(20)
+			end
+		end)
+	end
+	local function fetch_with(sub, target)
+		local out, status = start(sub, "", target)
+
+		wait_file(status)
+		assert(read_file(status) == "0\n", read_file(out .. "/log"))
+		assert(read_file(out .. "/data.bin") == payload)
+	end
+
+	mbt.run(function() deadline(30000, "mbt-get.lua") end)
+	fetch_with("get_file", torrent_path)
+	fetch_with("get_hash", mi.infohash)
+
+	local out, status = start("get_seed", "-S", torrent_path)
+	mbt.run(function()
+		while not io.open(out .. "/data.bin", "rb") do
+			mbt.sleep(20)
+		end
+		mbt.sleep(200)
+	end)
+	assert(os.execute("kill -INT $(cat " .. out .. "/pid)"))
+	wait_file(status)
+	assert(read_file(status) == "130\n", read_file(status) .. read_file(out .. "/log"))
+end
+
 seed:close()
 leech:close()
 fetch:close()
