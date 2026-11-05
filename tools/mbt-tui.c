@@ -371,14 +371,14 @@ handle_command(void)
 		mbt_ev_stop(ev);
 	} else {
 		/* Try as .torrent file, magnet, or infohash */
-		int rv = mbt_session_add_torrent_file(session, cmdbuf, NULL);
+		int rv = mbt_session_add_torrent_file(session, cmdbuf, NULL, NULL);
 		if (rv < 0)
-			rv = mbt_session_add_magnet(session, cmdbuf, NULL);
+			rv = mbt_session_add_magnet(session, cmdbuf, NULL, NULL);
 		if (rv < 0 && cmdlen == 40) {
 			/* Try as raw SHA1 infohash hex */
 			char mag[256];
 			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", cmdbuf);
-			mbt_session_add_magnet(session, mag, NULL);
+			mbt_session_add_magnet(session, mag, NULL, NULL);
 		}
 	}
 	cmdbuf[0] = 0;
@@ -560,13 +560,13 @@ main(int argc, char *argv[])
 
 	/* Add any args as torrents (.torrent, magnet, or raw infohash) */
 	for (int i = 0; i < argc; i++) {
-		int rv = mbt_session_add_torrent_file(session, argv[i], NULL);
+		int rv = mbt_session_add_torrent_file(session, argv[i], NULL, NULL);
 		if (rv < 0)
-			rv = mbt_session_add_magnet(session, argv[i], NULL);
+			rv = mbt_session_add_magnet(session, argv[i], NULL, NULL);
 		if (rv < 0 && strlen(argv[i]) == 40) {
 			char mag[256];
 			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", argv[i]);
-			mbt_session_add_magnet(session, mag, NULL);
+			mbt_session_add_magnet(session, mag, NULL, NULL);
 		}
 		struct mbt_torrent *ft = mbt_session_torrent_first(session);
 		if (ft)

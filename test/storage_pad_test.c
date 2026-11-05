@@ -154,7 +154,7 @@ main(void)
 	write_seed("a.bin", stream, A_LEN);
 	write_seed("b.bin", stream + A_LEN + PAD_LEN, B_LEN);
 
-	assert(mbt_session_add_torrent_buf(seed, enc, enc_len, NULL) == 0);
+	assert(mbt_session_add_torrent_buf(seed, enc, enc_len, NULL, NULL) == 0);
 	struct mbt_torrent *st = mbt_session_torrent_first(seed);
 	assert(st);
 	test_wait_verified(ev, st);
@@ -162,7 +162,7 @@ main(void)
 	assert(mbt_torrent_file_count(st) == 3);
 	assert(mbt_torrent_file(st, 1)->pad);
 
-	assert(mbt_session_add_torrent_buf(leech, enc, enc_len, NULL) == 0);
+	assert(mbt_session_add_torrent_buf(leech, enc, enc_len, NULL, NULL) == 0);
 	struct mbt_torrent *lt = mbt_session_torrent_first(leech);
 	assert(lt);
 	test_wait_verified(ev, lt);

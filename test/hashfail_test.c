@@ -99,7 +99,7 @@ int main(void)
 	};
 	struct mbt_session *sA;
 	mbt_session_new(&sA, &cfgA);
-	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL, NULL);
 
 	/* Seeder B: corrupt data */
 	static char corrupt_handle;
@@ -109,7 +109,7 @@ int main(void)
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
-	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL, NULL);
 	struct mbt_torrent *tB = mbt_session_torrent_first(sB);
 	test_wait_verified(ev, tB);
 	assert(mbt_torrent_complete(tB));
@@ -138,7 +138,7 @@ int main(void)
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu",
 	         hex, mbt_session_listen_port(sB));
-	mbt_session_add_magnet(sL, magnet, NULL);
+	mbt_session_add_magnet(sL, magnet, NULL, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

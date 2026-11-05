@@ -148,7 +148,7 @@ test_add_open_fails(struct mbt_ev *ev, const unsigned char *enc, size_t enc_len)
 	struct mbt_storage *st = mbt_storage_new(&noopen_ops, &handle);
 	struct mbt_session *s = session_on(ev, st);
 
-	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL) == -EACCES);
+	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL, NULL) == -EACCES);
 	assert(mbt_session_torrent_count(s) == 0);
 	mbt_session_free(s);
 	mbt_storage_unref(st);
@@ -165,7 +165,7 @@ test_magnet_open_fails(struct mbt_ev *ev, struct mbt_session *seed, struct mbt_t
 	mbt_infohash_string(mbt_torrent_infohash(st), hex, sizeof(hex));
 	snprintf(uri, sizeof(uri), "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex,
 	    mbt_session_listen_port(seed));
-	assert(mbt_session_add_magnet(s, uri, NULL) == 0);
+	assert(mbt_session_add_magnet(s, uri, NULL, NULL) == 0);
 	wait_error(ev);
 	assert(last_error == -EACCES);
 	assert(mbt_torrent_state(mbt_session_torrent_first(s)) == MBT_TORRENT_ERROR);
@@ -181,7 +181,7 @@ test_write_fails(struct mbt_ev *ev, struct mbt_session *seed,
 	struct mbt_storage *full = mbt_storage_new(&full_ops, &handle);
 	struct mbt_session *s = session_on(ev, full);
 
-	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL) == 0);
+	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL, NULL) == 0);
 	struct mbt_torrent *t = mbt_session_torrent_first(s);
 	test_wait_verified(ev, t);
 	assert(mbt_session_add_peer(s, mbt_torrent_infohash(t), "127.0.0.1",
@@ -211,7 +211,7 @@ main(void)
 	struct mbt_storage_memory *mem = mbt_storage_memory_new();
 	mbt_storage_memory_put_file(mem, 0, data, TOTAL_LEN);
 	struct mbt_session *seed = session_on(ev, mbt_storage_memory_storage(mem));
-	assert(mbt_session_add_torrent_buf(seed, enc, enc_len, NULL) == 0);
+	assert(mbt_session_add_torrent_buf(seed, enc, enc_len, NULL, NULL) == 0);
 	struct mbt_torrent *st = mbt_session_torrent_first(seed);
 	test_wait_verified(ev, st);
 	assert(mbt_torrent_complete(st));

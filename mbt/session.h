@@ -79,15 +79,23 @@ MBT_API int mbt_session_default(struct mbt_session **out, const char *path);
 MBT_API int mbt_session_run(struct mbt_session *s);
 MBT_API void mbt_session_stop(struct mbt_session *s);
 
-/* Add torrents — cfg may be NULL for defaults */
+/*
+ * Add torrents. cfg may be NULL for defaults. out may be NULL; on success it
+ * gets the torrent. The session owns the torrent. Adding a torrent the session
+ * has returns that torrent, and cfg has no effect.
+ */
 MBT_API int mbt_session_add_torrent_file(struct mbt_session *s, const char *path,
-                                          struct mbt_add_torrent_cfg *cfg);
+                                          struct mbt_add_torrent_cfg *cfg,
+                                          struct mbt_torrent **out);
 MBT_API int mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
-                                         struct mbt_add_torrent_cfg *cfg);
+                                         struct mbt_add_torrent_cfg *cfg,
+                                         struct mbt_torrent **out);
 MBT_API int mbt_session_add_magnet(struct mbt_session *s, const char *uri,
-                                    struct mbt_add_torrent_cfg *cfg);
+                                    struct mbt_add_torrent_cfg *cfg,
+                                    struct mbt_torrent **out);
 MBT_API int mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
-                                      struct mbt_add_torrent_cfg *cfg);
+                                      struct mbt_add_torrent_cfg *cfg,
+                                      struct mbt_torrent **out);
 
 /* Remove/query */
 MBT_API int mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih);

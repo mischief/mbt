@@ -64,7 +64,7 @@ main(void)
 	assert(rv == 0);
 
 	/* 4. Add torrent from buffer */
-	rv = mbt_session_add_torrent_buf(session, encoded, enc_len, NULL);
+	rv = mbt_session_add_torrent_buf(session, encoded, enc_len, NULL, NULL);
 	assert(rv == 0);
 	free(encoded);
 

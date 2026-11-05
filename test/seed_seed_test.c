@@ -73,7 +73,7 @@ int main(void)
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s1, enc, enc_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s1, enc, enc_len, NULL, NULL); assert(rv == 0);
 	struct mbt_torrent *t1 = mbt_session_torrent_first(s1);
 	test_wait_verified(ev, t1);
 	assert(mbt_torrent_complete(t1));
@@ -95,7 +95,7 @@ int main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", ih_hex, mbt_session_listen_port(s1));
-	rv = mbt_session_add_magnet(s2, magnet, NULL); assert(rv == 0);
+	rv = mbt_session_add_magnet(s2, magnet, NULL, NULL); assert(rv == 0);
 
 	/* Run for 5s — should be enough for connect + choke + disconnect */
 	struct mbt_ev_timer *to;

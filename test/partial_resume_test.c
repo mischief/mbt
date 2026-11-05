@@ -72,7 +72,7 @@ int main(void)
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL, NULL); assert(rv == 0);
 
 	/* Leecher: pre-fill only first 4 pieces (partial resume) */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
@@ -98,7 +98,7 @@ int main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, mbt_session_listen_port(s1));
-	rv = mbt_session_add_magnet(s2, magnet, NULL); assert(rv == 0);
+	rv = mbt_session_add_magnet(s2, magnet, NULL, NULL); assert(rv == 0);
 
 	/* Verify partial resume: should have 4/8 already */
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);

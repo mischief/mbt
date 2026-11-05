@@ -192,7 +192,7 @@ leecher(struct mbt_storage_memory *mem, int maintain, const char *hex,
 	mbt_utp_ctx_set_rx_hook(mbt_session_utp_ctx(s), fw_rx, fw);
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, relay_port);
-	assert(mbt_session_add_magnet(s, magnet, NULL) == 0);
+	assert(mbt_session_add_magnet(s, magnet, NULL, NULL) == 0);
 	return s;
 }
 
@@ -224,7 +224,7 @@ main(int argc, char **argv)
 	};
 	struct mbt_session *r;
 	assert(mbt_session_new(&r, &rcfg) == 0);
-	assert(mbt_session_add_torrent_buf(r, enc, enc_len, NULL) == 0);
+	assert(mbt_session_add_torrent_buf(r, enc, enc_len, NULL, NULL) == 0);
 	uint16_t rport = mbt_session_listen_port(r);
 
 	struct firewall fwa = { .name = "A" }, fwc = { .name = "C" };

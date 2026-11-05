@@ -138,7 +138,7 @@ main(void)
 	assert(rv == 0);
 	mbt_session_enable_dht_local(s1);
 
-	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len, NULL);
+	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len, NULL, NULL);
 	assert(rv == 0);
 
 	/* Pre-fill seeder storage with test data (piece by piece) */
@@ -165,7 +165,7 @@ main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", infohash_hex, mbt_session_listen_port(s1));
-	rv = mbt_session_add_magnet(s2, magnet, NULL);
+	rv = mbt_session_add_magnet(s2, magnet, NULL, NULL);
 	assert(rv == 0);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);

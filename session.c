@@ -37,6 +37,8 @@
 #include "mbt/storage.h"
 #include "mbt/timers.h"
 
+#define TORRENT_FILE_MAX (64 * 1024 * 1024)
+
 static int session_state_restore_cb(const struct mbt_state_entry *e, void *arg);
 
 /* --- Torrent list entry --- */
@@ -1077,7 +1079,7 @@ session_lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		if (s->cb.on_lsd_announce) {
 			if (s->cb.on_lsd_announce(s, ih, info->remote, info->port, s->cb.arg)) {
 				if (!st) {
-					mbt_session_add_infohash(s, ih, NULL);
+					mbt_session_add_infohash(s, ih, NULL, NULL);
 					st = session_find(s, ih);
 				}
 				if (st)
@@ -1363,7 +1365,7 @@ session_state_restore_cb(const struct mbt_state_entry *e, void *arg)
 		.data_dir = e->data_dir,
 		.storage  = own,
 	};
-	int rv = mbt_session_add_torrent_buf(s, e->metadata, e->metadata_len, &cfg);
+	int rv = mbt_session_add_torrent_buf(s, e->metadata, e->metadata_len, &cfg, NULL);
 	mbt_storage_unref(own);
 	if (rv < 0)
 		mbt_log_warn(MBT_LOG_SESSION, "state restore: failed to add torrent: %s", strerror(-rv));
@@ -1398,13 +1400,18 @@ session_on_error(struct mbt_torrent *t, int err, void *arg)
 }
 
 int
-mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih, struct mbt_add_torrent_cfg *acfg)
+mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
+    struct mbt_add_torrent_cfg *acfg, struct mbt_torrent **out)
 {
-	/* Already have it? */
-	if (session_find(s, ih))
-		return 0;
+	struct session_torrent *st = session_find(s, ih);
 
-	struct session_torrent *st = calloc(1, sizeof(*st));
+	if (st) {
+		if (out)
+			*out = st->torrent;
+		return 0;
+	}
+
+	st = calloc(1, sizeof(*st));
 	if (!st)
 		return -ENOMEM;
 
@@ -1449,16 +1456,20 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih, struct 
 		mbt_lsd_announce(s->lsd, hex, s->listen_port);
 	}
 
+	if (out)
+		*out = st->torrent;
 	return 0;
 }
 
 int
-mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len, struct mbt_add_torrent_cfg *cfg)
+mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
+    struct mbt_add_torrent_cfg *cfg, struct mbt_torrent **out)
 {
 	int rv;
 	struct mbt_metainfo *mi = NULL;
 	struct mbt_infohash *ih;
-	struct mbt_torrent *t;
+	struct mbt_torrent *t = NULL;
+	struct session_torrent *sta;
 	size_t raw_len;
 
 	rv = mbt_metainfo_parse(&mi, data, len);
@@ -1467,35 +1478,39 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
 	ih = mbt_metainfo_infohash(mi);
 	if (!ih) { mbt_metainfo_free(mi); return -EINVAL; }
 
-	int existed = session_find(s, ih) != NULL;
+	sta = session_find(s, ih);
+	int existed = sta != NULL;
 
-	rv = mbt_session_add_infohash(s, ih, cfg);
+	/* The torrent has its metadata: a second add changes nothing. */
+	if (existed && mbt_torrent_has_metadata(sta->torrent)) {
+		if (out)
+			*out = sta->torrent;
+		mbt_metainfo_free(mi);
+		return 0;
+	}
+
+	rv = mbt_session_add_infohash(s, ih, cfg, &t);
 	if (rv < 0) { mbt_metainfo_free(mi); return rv; }
 
-	t = mbt_session_find_torrent(s, ih);
-	if (t) {
-		const void *raw = mbt_metainfo_raw_info(mi, &raw_len);
-		rv = mbt_torrent_set_metadata(t, raw, raw_len);
-		if (rv < 0) {
-			if (!existed)
-				mbt_session_remove_torrent(s, ih);
-			mbt_metainfo_free(mi);
-			return rv;
-		}
-		if (s->state_ops && s->state_ops->save)
-			s->state_ops->save(s->state_ctx, t);
+	const void *raw = mbt_metainfo_raw_info(mi, &raw_len);
+	rv = mbt_torrent_set_metadata(t, raw, raw_len);
+	if (rv < 0) {
+		if (!existed)
+			mbt_session_remove_torrent(s, ih);
+		mbt_metainfo_free(mi);
+		return rv;
 	}
+	if (s->state_ops && s->state_ops->save)
+		s->state_ops->save(s->state_ctx, t);
 
 	/* Extract tracker URLs */
-	struct session_torrent *sta = session_find(s, ih);
-	if (sta) {
-		for (int i = 0; i < mbt_metainfo_tracker_count(mi) && sta->tracker_count < 16; i++) {
-			char *u = strdup(mbt_metainfo_tracker(mi, i));
-			if (u) sta->trackers[sta->tracker_count++] = u;
-		}
-		if (sta->tracker_count > 0)
-			session_do_announce(s, sta);
-	}
+	sta = session_find(s, ih);
+	int before = sta->tracker_count;
+
+	for (int i = 0; i < mbt_metainfo_tracker_count(mi); i++)
+		(void)mbt_session_add_tracker(s, t, mbt_metainfo_tracker(mi, i));
+	if (sta->tracker_count > before)
+		session_do_announce(s, sta);
 
 	/* Bootstrap DHT from torrent's nodes list */
 	if (s->dht) {
@@ -1504,34 +1519,81 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
 			                  mbt_metainfo_node_port(mi, i));
 	}
 
+	if (out)
+		*out = t;
 	mbt_metainfo_free(mi);
 	return 0;
 }
 
-int
-mbt_session_add_torrent_file(struct mbt_session *s, const char *path, struct mbt_add_torrent_cfg *cfg)
+/* Read a whole file, up to TORRENT_FILE_MAX bytes. */
+static int
+read_torrent_file(const char *path, unsigned char **out, size_t *lenp)
 {
 	FILE *fp = fopen(path, "rb");
-	if (!fp) return -errno;
+	unsigned char *buf = NULL;
+	size_t cap = 0, len = 0;
+	int rv = 0;
 
-	unsigned char *buf = malloc(4 * 1024 * 1024);
-	if (!buf) { fclose(fp); return -ENOMEM; }
+	if (!fp)
+		return -errno;
+	for (;;) {
+		if (len == cap) {
+			unsigned char *nb;
 
-	size_t len = fread(buf, 1, 4 * 1024 * 1024, fp);
+			if (cap == TORRENT_FILE_MAX) {
+				rv = -EFBIG;
+				break;
+			}
+			cap = cap == 0 ? 64 * 1024 : cap * 2;
+			if ((nb = realloc(buf, cap)) == NULL) {
+				rv = -ENOMEM;
+				break;
+			}
+			buf = nb;
+		}
+		size_t n = fread(buf + len, 1, cap - len, fp);
+
+		len += n;
+		if (n == 0) {
+			if (ferror(fp))
+				rv = -EIO;
+			break;
+		}
+	}
 	fclose(fp);
+	if (rv == 0 && len == 0)
+		rv = -EIO;
+	if (rv < 0) {
+		free(buf);
+		return rv;
+	}
+	*out = buf;
+	*lenp = len;
+	return 0;
+}
 
-	if (len == 0) { free(buf); return -EIO; }
+int
+mbt_session_add_torrent_file(struct mbt_session *s, const char *path,
+    struct mbt_add_torrent_cfg *cfg, struct mbt_torrent **out)
+{
+	unsigned char *buf = NULL;
+	size_t len = 0;
+	int rv = read_torrent_file(path, &buf, &len);
 
-	int rv = mbt_session_add_torrent_buf(s, buf, len, cfg);
+	if (rv < 0)
+		return rv;
+	rv = mbt_session_add_torrent_buf(s, buf, len, cfg, out);
 	free(buf);
 	return rv;
 }
 
 int
-mbt_session_add_magnet(struct mbt_session *s, const char *uri, struct mbt_add_torrent_cfg *cfg)
+mbt_session_add_magnet(struct mbt_session *s, const char *uri,
+    struct mbt_add_torrent_cfg *cfg, struct mbt_torrent **out)
 {
 	struct mbt_magnet m;
 	struct mbt_infohash *ih = NULL;
+	struct mbt_torrent *t = NULL;
 	int rv;
 
 	rv = mbt_magnet_parse(uri, &m);
@@ -1544,7 +1606,7 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri, struct mbt_add_to
 		return rv;
 	}
 
-	rv = mbt_session_add_infohash(s, ih, cfg);
+	rv = mbt_session_add_infohash(s, ih, cfg, &t);
 	if (rv < 0) {
 		mbt_infohash_unref(ih);
 		mbt_magnet_free(&m);
@@ -1558,15 +1620,16 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri, struct mbt_add_to
 	/* Announce to trackers from magnet */
 	struct session_torrent *st = session_find(s, ih);
 	if (st) {
-		for (int i = 0; i < m.tracker_count && st->tracker_count < 16; i++) {
-			char *u = strdup(m.trackers[i]);
-			if (u)
-				st->trackers[st->tracker_count++] = u;
-		}
-		if (st->tracker_count > 0)
+		int before = st->tracker_count;
+
+		for (int i = 0; i < m.tracker_count; i++)
+			(void)mbt_session_add_tracker(s, t, m.trackers[i]);
+		if (st->tracker_count > before)
 			session_do_announce(s, st);
 	}
 
+	if (out)
+		*out = t;
 	mbt_infohash_unref(ih);
 	mbt_magnet_free(&m);
 	return 0;
@@ -1830,7 +1893,7 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 	/* Find or create torrent */
 	st = session_find(s, ih);
 	if (!st) {
-		rv = mbt_session_add_infohash(s, ih, NULL);
+		rv = mbt_session_add_infohash(s, ih, NULL, NULL);
 		if (rv < 0)
 			return rv;
 		st = session_find(s, ih);

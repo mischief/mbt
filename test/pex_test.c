@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
 	};
 	struct mbt_session *seeder;
 	mbt_session_new(&seeder, &scfg);
-	mbt_session_add_torrent_buf(seeder, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(seeder, encoded, enc_len, NULL, NULL);
 	uint16_t seeder_port = mbt_session_listen_port(seeder);
 
 	/* Leecher B: connects only to seeder */
@@ -111,7 +111,7 @@ int main(int argc, char *argv[])
 	char magnet_b[256];
 	snprintf(magnet_b, sizeof(magnet_b),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, seeder_port);
-	mbt_session_add_magnet(leecher_b, magnet_b, NULL);
+	mbt_session_add_magnet(leecher_b, magnet_b, NULL, NULL);
 	struct mbt_torrent *tb = mbt_session_torrent_first(leecher_b);
 
 	/* Leecher C: connects only to seeder */
@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
 	char magnet_c[256];
 	snprintf(magnet_c, sizeof(magnet_c),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, seeder_port);
-	mbt_session_add_magnet(leecher_c, magnet_c, NULL);
+	mbt_session_add_magnet(leecher_c, magnet_c, NULL, NULL);
 	struct mbt_torrent *tc = mbt_session_torrent_first(leecher_c);
 
 	/* Run for 5s: rate-limited seeder at 256KB/s means leechers are still

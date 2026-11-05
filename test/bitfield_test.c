@@ -103,7 +103,7 @@ int main(void)
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s2, enc, enc_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s2, enc, enc_len, NULL, NULL); assert(rv == 0);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
 	assert(t2);
@@ -128,7 +128,7 @@ int main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", ih_hex, mbt_session_listen_port(s2));
-	rv = mbt_session_add_magnet(s1, magnet, NULL); assert(rv == 0);
+	rv = mbt_session_add_magnet(s1, magnet, NULL, NULL); assert(rv == 0);
 
 	struct mbt_torrent *t1 = mbt_session_torrent_first(s1);
 	assert(t1);

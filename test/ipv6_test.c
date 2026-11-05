@@ -86,7 +86,7 @@ test_peer_to_peer_v6(void)
 	};
 	struct mbt_session *sS;
 	mbt_session_new(&sS, &cfgS);
-	mbt_session_add_torrent_buf(sS, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(sS, encoded, enc_len, NULL, NULL);
 
 	/* Leecher connects via IPv6 */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
@@ -98,7 +98,7 @@ test_peer_to_peer_v6(void)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s&x.pe=[::1]:%hu", hex, mbt_session_listen_port(sS));
-	mbt_session_add_magnet(sL, magnet, NULL);
+	mbt_session_add_magnet(sL, magnet, NULL, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };
@@ -169,7 +169,7 @@ test_tracker_v6(void)
 	};
 	struct mbt_session *sS;
 	mbt_session_new(&sS, &cfgS);
-	mbt_session_add_torrent_buf(sS, enc2, enc2_len, NULL);
+	mbt_session_add_torrent_buf(sS, enc2, enc2_len, NULL, NULL);
 
 	/* Leecher via tracker */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
@@ -183,7 +183,7 @@ test_tracker_v6(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&tr=udp://[::1]:%hu/announce", hex, tracker_port);
-	mbt_session_add_magnet(sL, magnet, NULL);
+	mbt_session_add_magnet(sL, magnet, NULL, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

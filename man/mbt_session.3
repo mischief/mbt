@@ -46,13 +46,17 @@
 .Ft void
 .Fn mbt_session_stop "struct mbt_session *s"
 .Ft int
-.Fn mbt_session_add_torrent_file "struct mbt_session *s" "const char *path"
+.Fn mbt_session_add_torrent_file "struct mbt_session *s" "const char *path" \
+"struct mbt_add_torrent_cfg *cfg" "struct mbt_torrent **out"
 .Ft int
-.Fn mbt_session_add_torrent_buf "struct mbt_session *s" "const void *data" "size_t len"
+.Fn mbt_session_add_torrent_buf "struct mbt_session *s" "const void *data" "size_t len" \
+"struct mbt_add_torrent_cfg *cfg" "struct mbt_torrent **out"
 .Ft int
-.Fn mbt_session_add_magnet "struct mbt_session *s" "const char *uri"
+.Fn mbt_session_add_magnet "struct mbt_session *s" "const char *uri" \
+"struct mbt_add_torrent_cfg *cfg" "struct mbt_torrent **out"
 .Ft int
-.Fn mbt_session_add_infohash "struct mbt_session *s" "struct mbt_infohash *ih"
+.Fn mbt_session_add_infohash "struct mbt_session *s" "struct mbt_infohash *ih" \
+"struct mbt_add_torrent_cfg *cfg" "struct mbt_torrent **out"
 .Ft int
 .Fn mbt_session_remove_torrent "struct mbt_session *s" "struct mbt_infohash *ih"
 .Ft "struct mbt_torrent *"
@@ -103,8 +107,10 @@ Torrents added to a session share these resources.
 creates a session with explicit configuration.
 The
 .Fa cfg
-structure controls storage backend, piece picker, listen port,
+structure controls the default storage, piece picker, listen port,
 timeouts, and optional HTTP tracker callback.
+The session takes its own reference to
+.Fa cfg->default_storage .
 .Pp
 .Fn mbt_session_default
 creates a session with sensible defaults: file storage at
@@ -124,7 +130,7 @@ Callers that run their own event loop do not need to call this.
 .Fn mbt_session_add_torrent_file
 loads a
 .Pa .torrent
-file from disk.
+file from disk, up to 64 MiB.
 .Fn mbt_session_add_torrent_buf
 parses bencoded metainfo from a buffer.
 .Fn mbt_session_add_magnet
@@ -132,6 +138,23 @@ adds a torrent by magnet URI; metadata is fetched from peers
 via BEP 9.
 .Fn mbt_session_add_infohash
 adds a bare infohash with no metadata or trackers (useful with DHT).
+.Pp
+.Fa cfg
+may be NULL.
+Its
+.Fa storage
+field selects the storage of this torrent, in place of the session default.
+The torrent takes its own reference.
+Several torrents can use one storage.
+.Pp
+.Fa out
+may be NULL.
+On success it gets the torrent.
+The session owns the torrent.
+.Pp
+Adding a torrent the session has returns that torrent and ignores
+.Fa cfg .
+Metainfo for a torrent with no metadata supplies its metadata.
 .Pp
 All add functions return 0 on success or a negative errno on failure.
 .Ss Torrent enumeration
@@ -208,7 +231,7 @@ mbt_session_default(&s, "/tmp/downloads");
 mbt_session_set_download_rate(s, 1024 * 1024); /* 1 MB/s */
 mbt_session_enable_dht(s);
 mbt_session_dht_bootstrap(s, "router.bittorrent.com", 6881);
-mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...");
+mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...", NULL, NULL);
 mbt_session_run(s);
 mbt_session_free(s);
 .Ed

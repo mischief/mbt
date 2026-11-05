@@ -318,16 +318,16 @@ main(int argc, char *argv[])
 
 	/* Add torrent or magnet */
 	if (strncmp(argv[0], "magnet:", 7) == 0) {
-		rv = mbt_session_add_magnet(session, argv[0], NULL);
+		rv = mbt_session_add_magnet(session, argv[0], NULL, NULL);
 		if (rv < 0)
 			errx(1, "add_magnet: %s", strerror(-rv));
 	} else {
-		rv = mbt_session_add_torrent_file(session, argv[0], NULL);
+		rv = mbt_session_add_torrent_file(session, argv[0], NULL, NULL);
 		if (rv < 0 && strlen(argv[0]) == 40) {
 			/* Try as raw SHA1 infohash hex */
 			char mag[64];
 			snprintf(mag, sizeof(mag), "magnet:?xt=urn:btih:%.40s", argv[0]);
-			rv = mbt_session_add_magnet(session, mag, NULL);
+			rv = mbt_session_add_magnet(session, mag, NULL, NULL);
 		}
 		if (rv < 0)
 			errx(1, "add_torrent: %s", strerror(-rv));

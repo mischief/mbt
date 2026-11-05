@@ -120,7 +120,7 @@ int main(void)
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s1, torrent_buf, torrent_len, NULL, NULL); assert(rv == 0);
 
 	/* Leecher: connects via tracker */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
@@ -131,7 +131,7 @@ int main(void)
 	};
 	struct mbt_session *s2;
 	rv = mbt_session_new(&s2, &cfg2); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s2, torrent_buf, torrent_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s2, torrent_buf, torrent_len, NULL, NULL); assert(rv == 0);
 
 	/* Set completion callback on leecher */
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);

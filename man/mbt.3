@@ -124,13 +124,11 @@ Minimal download client:
 .Bd -literal
 #include <mbt/session.h>
 
-struct mbt_session_config cfg = {
-    .default_storage = mbt_storage_file_new("."),
-};
+struct mbt_session *s;
 
-struct mbt_session *s = mbt_session_new(&cfg);
+mbt_session_default(&s, ".");
 mbt_session_enable_lsd(s);
-mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...");
+mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...", NULL, NULL);
 mbt_session_run(s);  /* blocks until shutdown */
 mbt_session_free(s);
 .Ed

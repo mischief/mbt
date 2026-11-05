@@ -76,7 +76,7 @@ run_with_picker(mbt_picker_fn picker, const char *name)
 	};
 	struct mbt_session *s1;
 	mbt_session_new(&s1, &cfg1);
-	mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL, NULL);
 
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
 	struct mbt_session_config cfg2 = {
@@ -98,7 +98,7 @@ run_with_picker(mbt_picker_fn picker, const char *name)
 
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu", hex, mbt_session_listen_port(s1));
-	mbt_session_add_magnet(s2, magnet, NULL);
+	mbt_session_add_magnet(s2, magnet, NULL, NULL);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
 	struct mbt_torrent_callbacks cb = { .on_piece_complete = on_piece, .on_complete = on_complete };

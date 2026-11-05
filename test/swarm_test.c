@@ -217,7 +217,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "swarm_test: seeder session_new failed (bad config?)\n");
 			return 1;
 		}
-		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len, NULL);
+		mbt_session_add_torrent_buf(seeders[i], encoded, enc_len, NULL, NULL);
 	}
 
 	/* Build peer list string for magnet (only used when no tracker) */
@@ -253,7 +253,7 @@ int main(int argc, char *argv[])
 			         hex, tracker_port);
 		else
 			snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s%s", hex, peers);
-		mbt_session_add_magnet(leechers[i], magnet, NULL);
+		mbt_session_add_magnet(leechers[i], magnet, NULL, NULL);
 
 		struct mbt_torrent *t = mbt_session_torrent_first(leechers[i]);
 		struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

@@ -71,7 +71,7 @@ int main(void)
 	};
 	struct mbt_session *sA;
 	rv = mbt_session_new(&sA, &cfgA); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL, NULL); assert(rv == 0);
 
 	/* Seeder B: pieces 2,3 */
 	struct mbt_storage_memory *memB = mbt_storage_memory_new();
@@ -81,7 +81,7 @@ int main(void)
 	};
 	struct mbt_session *sB;
 	rv = mbt_session_new(&sB, &cfgB); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL, NULL); assert(rv == 0);
 
 	/* Seeder C: pieces 4,5 */
 	struct mbt_storage_memory *memC = mbt_storage_memory_new();
@@ -91,7 +91,7 @@ int main(void)
 	};
 	struct mbt_session *sC;
 	rv = mbt_session_new(&sC, &cfgC); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(sC, encoded, enc_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(sC, encoded, enc_len, NULL, NULL); assert(rv == 0);
 
 	/* Leecher: connects to all three via x.pe */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
@@ -116,7 +116,7 @@ int main(void)
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
 	         hex, mbt_session_listen_port(sA), mbt_session_listen_port(sB), mbt_session_listen_port(sC));
-	rv = mbt_session_add_magnet(sL, magnet, NULL); assert(rv == 0);
+	rv = mbt_session_add_magnet(sL, magnet, NULL, NULL); assert(rv == 0);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

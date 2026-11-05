@@ -90,7 +90,7 @@ add(struct mbt_session *s, struct fixture *f)
 {
 	struct mbt_torrent *t;
 
-	assert(mbt_session_add_torrent_buf(s, f->enc, f->enc_len, NULL) == 0);
+	assert(mbt_session_add_torrent_buf(s, f->enc, f->enc_len, NULL, NULL) == 0);
 	t = mbt_session_find_torrent(s, mbt_metainfo_infohash(f->mi));
 	assert(t);
 	return t;

@@ -71,7 +71,7 @@ int main(void)
 	};
 	struct mbt_session *s1;
 	mbt_session_new(&s1, &cfg1);
-	mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL, NULL);
 
 	/* Seeder 2 */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
@@ -81,7 +81,7 @@ int main(void)
 	};
 	struct mbt_session *s2;
 	mbt_session_new(&s2, &cfg2);
-	mbt_session_add_torrent_buf(s2, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(s2, encoded, enc_len, NULL, NULL);
 
 	/* Leecher: downloads all 10 pieces, endgame triggers immediately
 	 * since NUM_PIECES (10) == ENDGAME_THRESHOLD (10) */
@@ -106,7 +106,7 @@ int main(void)
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&x.pe=127.0.0.1:%hu&x.pe=127.0.0.1:%hu",
 	         hex, mbt_session_listen_port(s1), mbt_session_listen_port(s2));
-	mbt_session_add_magnet(sL, magnet, NULL);
+	mbt_session_add_magnet(sL, magnet, NULL, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

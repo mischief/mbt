@@ -107,7 +107,7 @@ int main(void)
 	};
 	struct mbt_session *s1;
 	rv = mbt_session_new(&s1, &cfg1); assert(rv == 0);
-	rv = mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL); assert(rv == 0);
+	rv = mbt_session_add_torrent_buf(s1, encoded, enc_len, NULL, NULL); assert(rv == 0);
 
 	/* Leecher — magnet only, no .torrent */
 	struct mbt_storage_memory *mem2 = mbt_storage_memory_new();
@@ -120,7 +120,7 @@ int main(void)
 	char magnet[256];
 	snprintf(magnet, sizeof(magnet),
 	         "magnet:?xt=urn:btih:%s&tr=udp://127.0.0.1:%hu/announce", hex, tracker_port);
-	rv = mbt_session_add_magnet(s2, magnet, NULL); assert(rv == 0);
+	rv = mbt_session_add_magnet(s2, magnet, NULL, NULL); assert(rv == 0);
 
 	struct mbt_torrent *t2 = mbt_session_torrent_first(s2);
 	struct mbt_torrent_callbacks cb = { .on_complete = on_complete };

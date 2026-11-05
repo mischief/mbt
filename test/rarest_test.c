@@ -85,7 +85,7 @@ int main(void)
 	};
 	struct mbt_session *sA;
 	mbt_session_new(&sA, &cfgA);
-	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(sA, encoded, enc_len, NULL, NULL);
 	test_wait_verified(ev, mbt_session_torrent_first(sA));
 
 	/* Seeder B: has only pieces 0-3 (first half) */
@@ -96,7 +96,7 @@ int main(void)
 	};
 	struct mbt_session *sB;
 	mbt_session_new(&sB, &cfgB);
-	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL, NULL);
 	test_wait_verified(ev, mbt_session_torrent_first(sB));
 
 	/* Leecher: add_torrent_buf so piece_count is known from the start.
@@ -110,7 +110,7 @@ int main(void)
 	};
 	struct mbt_session *sL;
 	mbt_session_new(&sL, &cfgL);
-	mbt_session_add_torrent_buf(sL, encoded, enc_len, NULL);
+	mbt_session_add_torrent_buf(sL, encoded, enc_len, NULL, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
 	test_wait_verified(ev, tL);

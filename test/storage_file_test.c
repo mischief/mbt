@@ -73,7 +73,7 @@ int main(void)
 	rv = mbt_session_new(&session, &cfg);
 	assert(rv == 0);
 
-	rv = mbt_session_add_torrent_file(session, tpath, NULL);
+	rv = mbt_session_add_torrent_file(session, tpath, NULL, NULL);
 	assert(rv == 0);
 
 	struct mbt_torrent *t = mbt_session_torrent_first(session);

@@ -77,7 +77,7 @@ one(int disable_tcp, int disable_utp, const char *name)
 	uint16_t port = mbt_session_listen_port(s);
 	snprintf(port_str, sizeof(port_str), ":%hu", port);
 	snprintf(magnet, sizeof(magnet), "magnet:?xt=urn:btih:%s", ih_hex);
-	assert(mbt_session_add_magnet(s, magnet, NULL) == 0);
+	assert(mbt_session_add_magnet(s, magnet, NULL, NULL) == 0);
 	assert(mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, ih_hex) == 0);
 
 	/* first dial: reaches ourselves, rejected, address learned */

@@ -96,15 +96,18 @@ Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_lsd`, `fuzz_dht`, `fuzz_magnet`.
 struct mbt_ev *ev;
 mbt_ev_new_default(&ev);
 
+struct mbt_storage *st = mbt_storage_file_new("downloads");
 struct mbt_session_config cfg = {
     .ev = ev,
+    .default_storage = st,
     .listen_port = 6881,
     .download_rate = 1024 * 1024, /* 1 MB/s */
 };
 struct mbt_session *s;
 mbt_session_new(&s, &cfg);
+mbt_storage_unref(st); /* the session holds a reference */
 mbt_session_enable_dht(s);
-mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...");
+mbt_session_add_magnet(s, "magnet:?xt=urn:btih:...", NULL, NULL);
 mbt_session_run(s);
 
 mbt_session_free(s);

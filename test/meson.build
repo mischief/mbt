@@ -61,6 +61,8 @@ test('storage_file', storage_file_test)
 
 storage_shared_test = executable('storage_shared_test', 'storage_shared_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('storage_shared', storage_shared_test, timeout: 60)
+session_add_test = executable('session_add_test', 'session_add_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('session_add', session_add_test, timeout: 60)
 
 torrent_path_test = executable('torrent_path_test', 'torrent_path_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('torrent_path', torrent_path_test)
