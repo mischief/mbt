@@ -1752,13 +1752,14 @@ l_dht(lua_State *L)
 	bool has_id = false;
 	struct ldht *ld;
 	uint16_t port = 0;
-	int ttl = 0;
+	int ttl = 0, max_stored = 0;
 	int rv;
 
 	if (!lua_isnoneornil(L, 1)) {
 		luaL_checktype(L, 1, LUA_TTABLE);
 		port = (uint16_t)opt_int(L, 1, "port", 0);
 		ttl = (int)opt_int(L, 1, "peer_ttl", 0);
+		max_stored = (int)opt_int(L, 1, "max_stored", 0);
 		lua_getfield(L, 1, "id");
 		if (!lua_isnil(L, -1)) {
 			parse_node_id(L, -1, id);
@@ -1780,6 +1781,8 @@ l_dht(lua_State *L)
 		mbt_dht_set_node_id(ld->d, id);
 	if (ttl > 0)
 		mbt_dht_set_peer_ttl(ld->d, ttl);
+	if (max_stored > 0 && (rv = mbt_dht_set_max_stored(ld->d, max_stored)) < 0)
+		return fail(L, rv);
 	if (lua_istable(L, 1)) {
 		lua_getfield(L, 1, "verify");
 		if (lua_isfunction(L, -1)) {

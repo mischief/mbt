@@ -61,6 +61,10 @@ MBT_API uint16_t mbt_dht_port(struct mbt_dht *d);
 /* How long an announce lasts on this node. The default is two hours. */
 MBT_API void mbt_dht_set_peer_ttl(struct mbt_dht *d, int seconds);
 
+/* How many infohashes this node stores peers for. The default is 64. Each
+ * takes about 300 bytes. When full, the one announced longest ago gives way. */
+MBT_API int mbt_dht_set_max_stored(struct mbt_dht *d, int max);
+
 /* Override the node ID (call before bootstrap) */
 MBT_API void mbt_dht_set_node_id(struct mbt_dht *d, const uint8_t id[20]);
 

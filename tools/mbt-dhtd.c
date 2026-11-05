@@ -19,19 +19,21 @@ static void usage(const char *prog)
 	fprintf(stderr, "  -p port       DHT listen port (default: 6881)\n");
 	fprintf(stderr, "  -b host:port  bootstrap node (default: dht.transmissionbt.com:6881)\n");
 	fprintf(stderr, "  -d            enable debug logging\n");
+	fprintf(stderr, "  -s count      infohashes to store peers for (default: 4096)\n");
 	exit(1);
 }
 
 int main(int argc, char *argv[])
 {
-	int port = 6881, debug = 0, rv, ch;
+	int port = 6881, debug = 0, max_stored = 4096, rv, ch;
 	const char *bootstrap = "dht.transmissionbt.com:6881";
 
-	while ((ch = getopt(argc, argv, "p:b:dh")) != -1) {
+	while ((ch = getopt(argc, argv, "p:b:ds:h")) != -1) {
 		switch (ch) {
 		case 'p': port = mbt_arg_int(optarg, 0, UINT16_MAX); break;
 		case 'b': bootstrap = optarg; break;
 		case 'd': debug = 1; break;
+		case 's': max_stored = mbt_arg_int(optarg, 1, 1 << 24); break;
 		default: usage(argv[0]);
 		}
 	}
@@ -49,6 +51,8 @@ int main(int argc, char *argv[])
 	struct mbt_dht *dht;
 	rv = mbt_dht_new(&dht, ev, port);
 	if (rv < 0) { fprintf(stderr, "dht_new: %s\n", strerror(-rv)); return 1; }
+	rv = mbt_dht_set_max_stored(dht, max_stored);
+	if (rv < 0) { fprintf(stderr, "max_stored: %s\n", strerror(-rv)); return 1; }
 
 	/* Parse bootstrap host:port */
 	char host[256];

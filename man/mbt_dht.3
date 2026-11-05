@@ -18,6 +18,7 @@
 .Nm mbt_dht_port ,
 .Nm mbt_dht_set_node_id ,
 .Nm mbt_dht_set_peer_ttl ,
+.Nm mbt_dht_set_max_stored ,
 .Nm mbt_dht_set_verify ,
 .Nm mbt_dht_get_immutable ,
 .Nm mbt_dht_put_immutable ,
@@ -55,8 +56,13 @@
 .Sh DESCRIPTION
 .Fn mbt_dht_set_peer_ttl
 sets how long an announce from another node lasts, by default two hours.
-A node keeps 8 peers for each of 64 infohashes, and the oldest give way.
+A node keeps 8 peers for each infohash, and the oldest give way.
 Announce again each hour.
+.Pp
+.Fn mbt_dht_set_max_stored
+sets how many infohashes the node stores, by default 64.
+Each takes about 300 bytes.
+It returns 0 or a negative errno.
 .Pp
 .Fn mbt_dht_query
 sends a raw KRPC query to an IP literal, for tests and tools.

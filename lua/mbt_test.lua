@@ -561,6 +561,20 @@ do
 		    {target = hash})).r.num == 0)
 		store:close()
 
+		-- the store size is a setting, and the oldest hash gives way
+		store = assert(mbt.dht{max_stored = 100})
+		for i = 1, 100 do
+			announce(string.format("%020d", i), 6000)
+		end
+		r = assert(b:query("127.0.0.1", store:port(), "sample_infohashes", {target = hash}))
+		assert(r.r.num == 100 and #r.r.samples == 400)
+		mbt.sleep(1100)
+		announce(string.format("%020d", 101), 6000)
+		assert(#values(string.format("%020d", 101)) == 1)
+		r = assert(b:query("127.0.0.1", store:port(), "sample_infohashes", {target = hash}))
+		assert(r.r.num == 100)
+		store:close()
+
 		-- a lookup across many nodes tells only the closest ones
 		local crowd = {}
 		for i = 1, 30 do

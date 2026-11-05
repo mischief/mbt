@@ -140,6 +140,24 @@ struct dht_query {
 	void *arg;
 };
 
+#define DHT_DEFAULT_MAX_STORED 64
+#define DHT_STORED_PEERS 8
+#define DHT_PEER_TTL_SEC (2 * 60 * 60)
+
+/* Compact, since a node can hold thousands of these. */
+struct dht_peer {
+	time_t at;
+	uint8_t family;
+	uint8_t addr[16];
+	uint16_t port;    /* network order */
+};
+
+struct dht_stored {
+	uint8_t infohash[20];
+	struct dht_peer peers[DHT_STORED_PEERS];
+	int peer_count;
+};
+
 struct mbt_dht {
 	SLIST_HEAD(, dht_query) queries;
 	struct mbt_ev *ev;
@@ -153,19 +171,11 @@ struct mbt_dht {
 	int bucket_count;
 
 	/* Peer storage: announced peers for infohashes we've seen */
-#define DHT_MAX_STORED 64
-#define DHT_STORED_PEERS 8
-#define DHT_PEER_TTL_SEC (2 * 60 * 60)
-	struct {
-		uint8_t infohash[20];
-		struct {
-			struct sockaddr_storage addr;
-			time_t at;
-		} peers[DHT_STORED_PEERS];
-		int peer_count;
-	} stored[DHT_MAX_STORED];
+	struct dht_stored *stored;
 	int stored_count;
+	int stored_max;
 	int peer_ttl;              /* seconds an announce lasts */
+	time_t stored_swept;       /* last run of stored_expire */
 
 	/* Active lookups */
 	struct dht_lookup lookups[MAX_LOOKUPS];
@@ -943,6 +953,9 @@ stored_expire(struct mbt_dht *d)
 {
 	time_t now = time(NULL);
 
+	if (now == d->stored_swept)
+		return;
+	d->stored_swept = now;
 	for (int i = 0; i < d->stored_count; ) {
 		int kept = 0;
 
@@ -969,12 +982,44 @@ stored_newest(struct mbt_dht *d, int slot)
 	return newest;
 }
 
+/* The slot whose newest announce is the oldest. */
+static int
+stored_oldest(struct mbt_dht *d)
+{
+	int slot = 0;
+
+	for (int i = 1; i < d->stored_count; i++)
+		if (stored_newest(d, i) < stored_newest(d, slot))
+			slot = i;
+	return slot;
+}
+
+static void
+peer_pack(struct dht_peer *p, const struct sockaddr_storage *addr)
+{
+	memset(p, 0, sizeof(*p));
+	p->family = (uint8_t)addr->ss_family;
+	if (addr->ss_family == AF_INET6) {
+		const struct sockaddr_in6 *s6 = (const struct sockaddr_in6 *)addr;
+
+		memcpy(p->addr, &s6->sin6_addr, 16);
+		p->port = s6->sin6_port;
+	} else {
+		const struct sockaddr_in *s4 = (const struct sockaddr_in *)addr;
+
+		memcpy(p->addr, &s4->sin_addr, 4);
+		p->port = s4->sin_port;
+	}
+}
+
 /* Keep the newest announces: when full, the oldest gives way. */
 static void
 stored_put(struct mbt_dht *d, const uint8_t *infohash, const struct sockaddr_storage *addr)
 {
+	struct dht_peer packed;
 	int slot = -1, target;
 
+	peer_pack(&packed, addr);
 	stored_expire(d);
 	for (int i = 0; i < d->stored_count; i++) {
 		if (memcmp(d->stored[i].infohash, infohash, 20) == 0) {
@@ -983,21 +1028,17 @@ stored_put(struct mbt_dht *d, const uint8_t *infohash, const struct sockaddr_sto
 		}
 	}
 	if (slot < 0) {
-		if (d->stored_count < DHT_MAX_STORED) {
-			slot = d->stored_count++;
-		} else {
-			slot = 0;
-			for (int i = 1; i < d->stored_count; i++)
-				if (stored_newest(d, i) < stored_newest(d, slot))
-					slot = i;
-		}
+		slot = d->stored_count < d->stored_max ? d->stored_count++ : stored_oldest(d);
 		memcpy(d->stored[slot].infohash, infohash, 20);
 		d->stored[slot].peer_count = 0;
 	}
 
 	target = -1;
 	for (int j = 0; j < d->stored[slot].peer_count; j++) {
-		if (sa_equal(&d->stored[slot].peers[j].addr, addr)) {
+		struct dht_peer *p = &d->stored[slot].peers[j];
+
+		if (p->family == packed.family && p->port == packed.port &&
+		    memcmp(p->addr, packed.addr, sizeof(p->addr)) == 0) {
 			target = j;
 			break;
 		}
@@ -1012,8 +1053,8 @@ stored_put(struct mbt_dht *d, const uint8_t *infohash, const struct sockaddr_sto
 					target = j;
 		}
 	}
-	d->stored[slot].peers[target].addr = *addr;
-	d->stored[slot].peers[target].at = time(NULL);
+	packed.at = time(NULL);
+	d->stored[slot].peers[target] = packed;
 }
 
 static void
@@ -1207,22 +1248,15 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 					_cleanup_be_ struct mbt_be_value *vals = NULL;
 					if (mbt_be_list_new(&vals) < 0) goto out;
 					for (int j = 0; j < d->stored[i].peer_count; j++) {
-						struct sockaddr_storage *pa = &d->stored[i].peers[j].addr;
-						if (pa->ss_family == AF_INET6) {
-							uint8_t cp6[18];
-							memcpy(cp6, &((struct sockaddr_in6 *)pa)->sin6_addr, 16);
-							memcpy(cp6 + 16, &((struct sockaddr_in6 *)pa)->sin6_port, 2);
-							_cleanup_be_ struct mbt_be_value *pv = NULL;
-							if (mbt_be_string_new(&pv, cp6, 18) < 0) goto out;
-							mbt_be_list_append(vals, pv);
-						} else {
-							uint8_t cp4[6];
-							memcpy(cp4, &((struct sockaddr_in *)pa)->sin_addr, 4);
-							memcpy(cp4 + 4, &((struct sockaddr_in *)pa)->sin_port, 2);
-							_cleanup_be_ struct mbt_be_value *pv = NULL;
-							if (mbt_be_string_new(&pv, cp4, 6) < 0) goto out;
-							mbt_be_list_append(vals, pv);
-						}
+						struct dht_peer *pa = &d->stored[i].peers[j];
+						uint8_t cp[18];
+						size_t alen = pa->family == AF_INET6 ? 16 : 4;
+						_cleanup_be_ struct mbt_be_value *pv = NULL;
+
+						memcpy(cp, pa->addr, alen);
+						memcpy(cp + alen, &pa->port, 2);
+						if (mbt_be_string_new(&pv, cp, alen + 2) < 0) goto out;
+						mbt_be_list_append(vals, pv);
 					}
 					if (mbt_be_dict_append(rb, "values", vals) < 0) goto out;
 					found_stored = 1;
@@ -1316,21 +1350,14 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
 			}
-			/* Build samples: up to 20 random infohashes */
+			/* Build samples: up to 20 random infohashes, by reservoir */
 			int nsamp = d->stored_count < 20 ? d->stored_count : 20;
 			uint8_t samples[20 * 20];
-			if (nsamp == d->stored_count) {
-				for (int i = 0; i < nsamp; i++)
-					memcpy(samples + i * 20, d->stored[i].infohash, 20);
-			} else {
-				/* Fisher-Yates partial shuffle */
-				int idx[DHT_MAX_STORED];
-				for (int i = 0; i < d->stored_count; i++) idx[i] = i;
-				for (int i = 0; i < nsamp; i++) {
-					int j = i + rand() % (d->stored_count - i);
-					int tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
-					memcpy(samples + i * 20, d->stored[idx[i]].infohash, 20);
-				}
+			for (int i = 0; i < d->stored_count; i++) {
+				int at = i < nsamp ? i : (int)mbt_random_uniform((uint32_t)i + 1);
+
+				if (at < nsamp)
+					memcpy(samples + at * 20, d->stored[i].infohash, 20);
 			}
 			/* Closest nodes to target */
 			int nclosest = routing_closest(d, tgt->string.buf, closest, K, 1);
@@ -1580,6 +1607,12 @@ mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
 	d->owns_mux = 0;
 
 	d->peer_ttl = DHT_PEER_TTL_SEC;
+	d->stored_max = DHT_DEFAULT_MAX_STORED;
+	d->stored = calloc((size_t)d->stored_max, sizeof(*d->stored));
+	if (!d->stored) {
+		free(d);
+		return -ENOMEM;
+	}
 
 	/* Derive stable node ID from machine-id, or fall back to random */
 	dht_init_node_id(d->id, mbt_udp_mux_port(mux));
@@ -1634,6 +1667,7 @@ mbt_dht_free(struct mbt_dht *d)
 		free(b);
 		b = next;
 	}
+	free(d->stored);
 	mbt_ratelimit_free(d->send_limit);
 	if (d->mux) {
 		mbt_udp_mux_set_dht(d->mux, NULL, NULL);
@@ -1881,6 +1915,23 @@ uint16_t
 mbt_dht_port(struct mbt_dht *d)
 {
 	return mbt_udp_mux_port(d->mux);
+}
+
+int
+mbt_dht_set_max_stored(struct mbt_dht *d, int max)
+{
+	struct dht_stored *stored;
+
+	if (max < 1)
+		return -EINVAL;
+	while (d->stored_count > max)
+		d->stored[stored_oldest(d)] = d->stored[--d->stored_count];
+	stored = realloc(d->stored, (size_t)max * sizeof(*stored));
+	if (!stored)
+		return -ENOMEM;
+	d->stored = stored;
+	d->stored_max = max;
+	return 0;
 }
 
 void
