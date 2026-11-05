@@ -190,6 +190,12 @@ if get_option('tests')
   subdir('fuzz')
 endif
 
+# Lua module
+which_lua = get_option('lua')
+if which_lua != 'false'
+  subdir('lua')
+endif
+
 # Tools
 # Installed binaries find libmbt in a non-system prefix.
 mbt_rpath = get_option('prefix') == '/usr' ? '' : get_option('prefix') / get_option('libdir')

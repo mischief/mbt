@@ -1,3 +1,5 @@
 option('event_backend', type: 'combo', choices: ['auto', 'sd-event', 'libevent', 'libevent1', 'poll'], value: 'auto', description: 'Event loop backend (auto = sd-event on Linux, libevent1 on OpenBSD, libevent elsewhere, poll = built-in poll(2) loop)')
 option('tests', type: 'boolean', value: true, description: 'Build and run tests')
 option('dns_backend', type: 'combo', choices: ['auto', 'blocking', 'cares', 'asr'], value: 'auto', description: 'Async DNS backend')
+option('lua', type: 'combo', choices: ['false', 'lua5.4'], value: 'false', description: 'Lua for the require("mbt") module')
+option('lua-module-directory', type: 'string', value: '', description: 'override Lua C module directory')
