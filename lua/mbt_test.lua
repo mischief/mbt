@@ -471,7 +471,7 @@ do
 		assert(seen.addr == "127.0.0.1" and seen.port == a:port())
 
 		assert(#assert(b:get_peers(ih)) == 0)
-		assert(b:announce(ih, 7001))
+		assert(b:announce(ih, 7001) >= 1)
 		mbt.sleep(50)
 		local peers = assert(c:get_peers(ih))
 		assert(#peers == 1 and peers[1].addr == "127.0.0.1" and peers[1].port == 7001)
@@ -488,6 +488,28 @@ do
 		r = assert(b:query("127.0.0.1", a:port(), "announce_peer",
 		    {info_hash = string.rep("y", 20), port = 7002, token = "bad"}))
 		assert(r.y == "e" and r.e[1] == 203 and r.e[2] == "bad token")
+		local function is_error(reply, code)
+			assert(reply.y == "e" and reply.e[1] == code, reply.y)
+		end
+		local peer_of = string.rep("q", 20)
+
+		is_error(assert(b:query("127.0.0.1", a:port(), "nosuch")), 204)
+		is_error(assert(b:query("127.0.0.1", a:port(), "ping", {id = false})), 203)
+		is_error(assert(b:query("127.0.0.1", a:port(), "ping", {id = "short"})), 203)
+		is_error(assert(b:query("127.0.0.1", a:port(), "find_node")), 203)
+		is_error(assert(b:query("127.0.0.1", a:port(), "get_peers",
+		    {info_hash = "short"})), 203)
+		is_error(assert(b:query("127.0.0.1", a:port(), "get")), 203)
+
+		r = assert(b:query("127.0.0.1", a:port(), "get_peers", {info_hash = peer_of}))
+		is_error(assert(b:query("127.0.0.1", a:port(), "announce_peer",
+		    {info_hash = peer_of, token = r.r.token})), 203)
+		assert(assert(b:query("127.0.0.1", a:port(), "announce_peer",
+		    {info_hash = peer_of, port = 1234, token = r.r.token, implied_port = 1})).y == "r")
+		r = assert(b:query("127.0.0.1", a:port(), "get_peers", {info_hash = peer_of}))
+		local hi, lo = r.r.values[1]:byte(5, 6)
+		assert(hi * 256 + lo == b:port())
+
 		assert(b:query("not an ip", 1, "ping") == nil)
 		assert(b:query("127.0.0.1", 1, "ping", {x = print}) == nil)
 		assert(b:send_raw("127.0.0.1", a:port(), "garbage"))

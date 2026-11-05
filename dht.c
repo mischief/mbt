@@ -50,6 +50,8 @@ struct mbt_ev_timer;
 #define LOOKUP_TIMEOUT_US (10 * 1000000ULL) /* 10s per lookup */
 #define QUERY_TIMEOUT_US (5 * 1000000ULL)   /* 5s per raw query */
 #define LOOKUP_TICK_US (500 * 1000ULL)
+#define DHT_ERR_PROTOCOL 203
+#define DHT_ERR_METHOD 204
 #define LOOKUP_NODE_TIMEOUT_SEC 2           /* then a node counts as silent */
 #define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
@@ -517,6 +519,31 @@ dht_send(struct mbt_dht *d, const struct sockaddr_storage *addr,
 	                          (const struct sockaddr *)addr, salen);
 }
 
+/* BEP 5 error reply. t is the transaction string of the query. */
+static void
+dht_send_error(struct mbt_dht *d, const struct sockaddr_storage *addr,
+               struct mbt_be_value *t, int code, const char *text)
+{
+	_cleanup_be_ struct mbt_be_value *msg = NULL, *list = NULL, *c = NULL, *m = NULL;
+	unsigned char *enc;
+	size_t enc_len;
+
+	if (mbt_be_dict_new(&msg) < 0 ||
+	    mbt_be_dict_append_string(msg, "t", t->string.buf, t->string.len) < 0 ||
+	    mbt_be_dict_append_string(msg, "y", "e", 1) < 0 ||
+	    mbt_be_list_new(&list) < 0 ||
+	    mbt_be_integer_new(&c, code) < 0 ||
+	    mbt_be_string_new(&m, (const uint8_t *)text, strlen(text)) < 0)
+		return;
+	mbt_be_list_append(list, c);
+	mbt_be_list_append(list, m);
+	if (mbt_be_dict_append(msg, "e", list) < 0 ||
+	    mbt_be_value_encode(msg, &enc, &enc_len) < 0)
+		return;
+	dht_send(d, addr, enc, enc_len);
+	free(enc);
+}
+
 static int
 dht_send_find_node(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *target)
 {
@@ -918,7 +945,12 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		struct mbt_be_value *t = mbt_be_find(msg, "t");
 		struct mbt_be_value *a = mbt_be_find(msg, "a");
 
-		if (!q || !t || !a) goto out;
+		if (!t || t->type != BE_STRING)
+			goto out;
+		if (!q || q->type != BE_STRING || !a || a->type != BE_DICTIONARY) {
+			dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad query");
+			goto out;
+		}
 
 		char _qaddr[64];
 		mbt_log_debug(MBT_LOG_DHT, "query %.*s from %s",
@@ -927,8 +959,11 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 
 		/* Add querying node to routing table */
 		struct mbt_be_value *qid = mbt_be_find(a, "id");
-		if (qid && qid->type == BE_STRING && qid->string.len == 20 &&
-		    routing_heard(d, qid->string.buf, &from))
+		if (!qid || qid->type != BE_STRING || qid->string.len != 20) {
+			dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad id");
+			goto out;
+		}
+		if (routing_heard(d, qid->string.buf, &from))
 			goto out;
 
 		if (mbt_be_streq(q, "ping")) {
@@ -948,8 +983,10 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		} else if (mbt_be_streq(q, "find_node")) {
 			/* Respond with closest nodes */
 			struct mbt_be_value *target_v = mbt_be_find(a, "target");
-			if (!target_v || target_v->type != BE_STRING || target_v->string.len != 20)
+			if (!target_v || target_v->type != BE_STRING || target_v->string.len != 20) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
+			}
 			struct dht_node closest[K];
 			int n = routing_closest(d, target_v->string.buf, closest, K, 1);
 			uint8_t compact[K * NODE_COMPACT_LEN];
@@ -987,8 +1024,10 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		} else if (mbt_be_streq(q, "get_peers")) {
 			/* Check if we have stored peers for this infohash */
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
-			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.len != 20)
+			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.len != 20) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
+			}
 			uint8_t token[TOKEN_LEN];
 			dht_make_token(d, &from, token);
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
@@ -1064,30 +1103,27 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			struct mbt_be_value *ih_v = mbt_be_find(a, "info_hash");
 			struct mbt_be_value *port_v = mbt_be_find(a, "port");
 			struct mbt_be_value *tok_v = mbt_be_find(a, "token");
-			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.len != 20)
+			if (!ih_v || ih_v->type != BE_STRING || ih_v->string.len != 20) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
+			}
 			if (!tok_v || tok_v->type != BE_STRING ||
 			    !dht_verify_token(d, &from, tok_v->string.buf, tok_v->string.len)) {
-				_cleanup_be_ struct mbt_be_value *err = NULL, *el = NULL, *ec = NULL, *em = NULL;
-				if (mbt_be_dict_new(&err) < 0) goto out;
-				if (mbt_be_dict_append_string(err, "t", t->string.buf, t->string.len) < 0) goto out;
-				if (mbt_be_dict_append_string(err, "y", "e", 1) < 0) goto out;
-				if (mbt_be_list_new(&el) < 0) goto out;
-				if (mbt_be_integer_new(&ec, 203) < 0) goto out;
-				if (mbt_be_string_new(&em, (const uint8_t *)"bad token", 9) < 0) goto out;
-				mbt_be_list_append(el, ec);
-				mbt_be_list_append(el, em);
-				if (mbt_be_dict_append(err, "e", el) < 0) goto out;
-				unsigned char *enc; size_t enc_len;
-				if (mbt_be_value_encode(err, &enc, &enc_len) < 0) goto out;
-				dht_send(d, &from, enc, enc_len);
-				free(enc);
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad token");
 				goto out;
 			}
 			uint16_t from_port = (from.ss_family == AF_INET6) ?
 				ntohs(((struct sockaddr_in6 *)&from)->sin6_port) :
 				ntohs(((struct sockaddr_in *)&from)->sin_port);
-			uint16_t aport = port_v ? (uint16_t)port_v->integer : from_port;
+			struct mbt_be_value *implied = mbt_be_find(a, "implied_port");
+			int use_source = implied && implied->type == BE_INTEGER && implied->integer != 0;
+
+			if (!use_source && (!port_v || port_v->type != BE_INTEGER ||
+			    port_v->integer <= 0 || port_v->integer > UINT16_MAX)) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad port");
+				goto out;
+			}
+			uint16_t aport = use_source ? from_port : (uint16_t)port_v->integer;
 			/* Find or create storage slot */
 			int slot = -1;
 			for (int i = 0; i < d->stored_count; i++) {
@@ -1123,8 +1159,10 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		} else if (mbt_be_streq(q, "sample_infohashes")) {
 			/* BEP 51: return sample of stored infohashes */
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
-			if (!tgt || tgt->type != BE_STRING || tgt->string.len != 20)
+			if (!tgt || tgt->type != BE_STRING || tgt->string.len != 20) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
+			}
 			/* Build samples: up to 20 random infohashes */
 			int nsamp = d->stored_count < 20 ? d->stored_count : 20;
 			uint8_t samples[20 * 20];
@@ -1173,8 +1211,10 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		} else if (mbt_be_streq(q, "get")) {
 			/* BEP 44: get */
 			struct mbt_be_value *tgt = mbt_be_find(a, "target");
-			if (!tgt || tgt->type != BE_STRING || tgt->string.len != 20)
+			if (!tgt || tgt->type != BE_STRING || tgt->string.len != 20) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 				goto out;
+			}
 			struct dht_item *it = dht_item_find(d, tgt->string.buf);
 			_cleanup_be_ struct mbt_be_value *resp = NULL, *rb = NULL;
 			if (mbt_be_dict_new(&resp) < 0) goto out;
@@ -1213,7 +1253,10 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		} else if (mbt_be_streq(q, "put")) {
 			/* BEP 44: put */
 			struct mbt_be_value *v_val = mbt_be_find(a, "v");
-			if (!v_val) goto out;
+			if (!v_val) {
+				dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
+				goto out;
+			}
 			unsigned char *v_enc = NULL; size_t v_enc_len = 0;
 			if (mbt_be_value_encode(v_val, &v_enc, &v_enc_len) < 0) goto out;
 			if (v_enc_len > MBT_DHT_MAX_VALUE) { free(v_enc); goto out; }
@@ -1250,6 +1293,8 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) goto out;
 			dht_send(d, &from, enc, enc_len);
 			free(enc);
+		} else {
+			dht_send_error(d, &from, t, DHT_ERR_METHOD, "unknown method");
 		}
 	}
 	/* Ignore errors ('e') */
@@ -1538,7 +1583,7 @@ mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen_por
 		}
 	}
 	mbt_log_info(MBT_LOG_DHT, "announced to %d nodes", sent);
-	return 0;
+	return sent;
 }
 
 static int

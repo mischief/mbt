@@ -89,6 +89,7 @@ Sends a find_node request to a known node to populate the local routing table.
 Searches the DHT for peers associated with the given infohash.
 .It Fn mbt_dht_announce
 Announces the caller's presence as a peer for the specified infohash.
+Returns the number of nodes told, or -EINVAL with no prior get_peers.
 .El
 .Sh DATA STORAGE (BEP 44)
 .Bl -tag -width 12

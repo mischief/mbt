@@ -155,8 +155,8 @@ It stays alive while Lua can reach it. Its lookups need `mbt.run` or
 - `d:get_peers(infohash)` waits inside a coroutine until the lookup ends, and
   returns a list of tables with `addr` and `port`. Up to 8 lookups run at one
   time.
-- `d:announce(infohash, port)` announces to the nodes that the last get_peers
-  for this infohash reached.
+- `d:announce(infohash, port)` announces to the nodes that gave a token in the
+  last get_peers for this infohash, and returns how many.
 - `d:id()` returns our node id in hex.
 - `d:query(addr, port, name[, args])` sends a raw KRPC query to an IP address,
   waits inside a coroutine, and returns the whole reply as a table: bencode

@@ -29,7 +29,8 @@ MBT_API int mbt_dht_bootstrap(struct mbt_dht *d, const char *addr, uint16_t port
 MBT_API int mbt_dht_get_peers(struct mbt_dht *d, struct mbt_infohash *ih,
                       mbt_dht_peers_cb peers_cb, mbt_dht_done_cb done_cb, void *arg);
 
-/* Announce ourselves as a peer for an infohash (call after get_peers) */
+/* Announce ourselves as a peer for an infohash (call after get_peers).
+ * Returns the number of nodes told, or -EINVAL with no prior get_peers. */
 MBT_API int mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen_port);
 
 /* Visit each node in the routing table. cb must not call into d. */

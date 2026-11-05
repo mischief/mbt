@@ -2055,7 +2055,7 @@ l_dht_announce(lua_State *L)
 	mbt_infohash_unref(ih);
 	if (rv < 0)
 		return fail(L, rv);
-	lua_pushboolean(L, 1);
+	lua_pushinteger(L, rv);
 	return 1;
 }
 
