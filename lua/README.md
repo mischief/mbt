@@ -42,6 +42,7 @@ removed torrent.
     `s:listen_port()`.
   - `tcp`, `utp`: default true.
   - `dht`, `lsd`, `pcp`: default false.
+  - `dht_max_stored`: infohashes the session's DHT node stores (default 64).
   - `picker`: `"rarest"` (default), `"random"` or `"sequential"`.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
   - `max_peers`, `max_pieces_per_peer`, `min_peers_before_download`, `reqq`,
@@ -144,7 +145,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 
 ## DHT
 
-`mbt.dht{port = 0, id = hex, verify = fn, peer_ttl = 7200, max_stored = 64}` makes a DHT node on its own, with
+`mbt.dht{port = 0, id = hex, verify = fn, peer_ttl = 7200, max_stored = 64,
+max_items = 64, send_rate = 20}` makes a DHT node on its own, with
 no session. `port` 0 binds a free port. `id` is 40 hex digits, and the default
 comes from the machine and port. `verify` is `function(k, sig, payload)` for
 BEP 44 mutable items: return true to accept. It runs at once under libmbt, so

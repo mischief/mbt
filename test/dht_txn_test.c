@@ -87,7 +87,7 @@ main(void)
 	assert(bind(fd, (struct sockaddr *)&me, sizeof(me)) == 0);
 	assert(getsockname(fd, (struct sockaddr *)&me, &len) == 0);
 
-	assert(mbt_dht_new(&d, ev, 0) == 0);
+	assert(mbt_dht_new(&d, &(struct mbt_dht_config){.ev = ev, .port = 0}) == 0);
 	assert(mbt_infohash_new(&ih, MBT_INFOHASH_SHA1, HASH) == 0);
 	assert(mbt_dht_bootstrap(d, "127.0.0.1", ntohs(me.sin_port)) == 0);
 	assert(mbt_dht_get_peers(d, ih, on_peer, on_done, NULL) == 0);

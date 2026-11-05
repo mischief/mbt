@@ -804,6 +804,7 @@ l_session(lua_State *L)
 	cfg.mbt_lsd_announce = opt_bool(L, 1, "lsd", false);
 	cfg.enable_pcp = opt_bool(L, 1, "pcp", false);
 	cfg.picker = opt_picker(L, 1);
+	cfg.dht.max_stored = (int)opt_int(L, 1, "dht_max_stored", 0);
 	opt_timers(L, 1, &cfg.timers);
 	lsd = cfg.mbt_lsd_announce != 0;
 	dht = opt_bool(L, 1, "dht", false);
@@ -1748,53 +1749,49 @@ static int
 l_dht(lua_State *L)
 {
 	struct cctx *c = ctx_of(L);
+	struct mbt_dht_config cfg = {.ev = c->ev};
 	uint8_t id[NODE_ID_LEN];
-	bool has_id = false;
+	bool has_verify = false;
 	struct ldht *ld;
-	uint16_t port = 0;
-	int ttl = 0, max_stored = 0;
 	int rv;
 
 	if (!lua_isnoneornil(L, 1)) {
 		luaL_checktype(L, 1, LUA_TTABLE);
-		port = (uint16_t)opt_int(L, 1, "port", 0);
-		ttl = (int)opt_int(L, 1, "peer_ttl", 0);
-		max_stored = (int)opt_int(L, 1, "max_stored", 0);
+		cfg.port = (uint16_t)opt_int(L, 1, "port", 0);
+		cfg.peer_ttl = (int)opt_int(L, 1, "peer_ttl", 0);
+		cfg.max_stored = (int)opt_int(L, 1, "max_stored", 0);
+		cfg.max_items = (int)opt_int(L, 1, "max_items", 0);
+		cfg.send_rate = (int)opt_int(L, 1, "send_rate", 0);
 		lua_getfield(L, 1, "id");
 		if (!lua_isnil(L, -1)) {
 			parse_node_id(L, -1, id);
-			has_id = true;
+			cfg.node_id = id;
 		}
-		lua_pop(L, 1);
+		lua_getfield(L, 1, "verify");
+		has_verify = lua_isfunction(L, -1);
+		lua_pop(L, 2);
 	}
 	ld = lua_newuserdatauv(L, sizeof(*ld), 1);
 	memset(ld, 0, sizeof(*ld));
 	ld->c = c;
 	TAILQ_INIT(&ld->pending);
 	luaL_setmetatable(L, DHT_META);
-	rv = mbt_dht_new(&ld->d, c->ev, port);
+	if (has_verify) {
+		cfg.verify = dht_verify_cb;
+		cfg.verify_arg = ld;
+	}
+	rv = mbt_dht_new(&ld->d, &cfg);
 	if (rv < 0) {
 		ld->d = NULL;
 		return fail(L, rv);
 	}
-	if (has_id)
-		mbt_dht_set_node_id(ld->d, id);
-	if (ttl > 0)
-		mbt_dht_set_peer_ttl(ld->d, ttl);
-	if (max_stored > 0 && (rv = mbt_dht_set_max_stored(ld->d, max_stored)) < 0)
-		return fail(L, rv);
-	if (lua_istable(L, 1)) {
+	if (has_verify) {
 		lua_getfield(L, 1, "verify");
-		if (lua_isfunction(L, -1)) {
-			lua_setiuservalue(L, -2, 1);
-			mbt_dht_set_verify(ld->d, dht_verify_cb, ld);
-			lua_getfield(L, LUA_REGISTRYINDEX, SESSIONS_KEY);
-			lua_pushvalue(L, -2);
-			lua_rawsetp(L, -2, ld);
-			lua_pop(L, 1);
-		} else {
-			lua_pop(L, 1);
-		}
+		lua_setiuservalue(L, -2, 1);
+		lua_getfield(L, LUA_REGISTRYINDEX, SESSIONS_KEY);
+		lua_pushvalue(L, -2);
+		lua_rawsetp(L, -2, ld);
+		lua_pop(L, 1);
 	}
 	return 1;
 }

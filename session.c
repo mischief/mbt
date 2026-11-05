@@ -126,6 +126,7 @@ struct mbt_session {
 	void *http_arg;
 	void (*http_free)(void *arg);
 	struct mbt_tracker_group *tracker_group;
+	struct mbt_dht_config dht_cfg;
 	uint8_t peer_id[20];
 
 	struct mbt_session_callbacks cb;
@@ -887,6 +888,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
 	s->http_free = cfg->http_free;
+	s->dht_cfg = cfg->dht;
 
 	STAILQ_INIT(&s->torrents);
 	STAILQ_INIT(&s->pending);
@@ -1181,8 +1183,11 @@ mbt_session_enable_dht(struct mbt_session *s)
 	struct mbt_udp_mux *mux = session_get_mux(s);
 	if (!mux)
 		return -EADDRINUSE;
-	int rv = mbt_dht_new_mux(&s->dht, s->ev, mux,
-	                         s->listen_port ? s->listen_port : 6881);
+	struct mbt_dht_config dht_cfg = s->dht_cfg;
+
+	dht_cfg.ev = s->ev;
+	dht_cfg.port = s->listen_port ? s->listen_port : 6881;
+	int rv = mbt_dht_new_mux(&s->dht, &dht_cfg, mux);
 	if (rv < 0)
 		return rv;
 
@@ -1210,8 +1215,11 @@ mbt_session_enable_dht_local(struct mbt_session *s)
 	struct mbt_udp_mux *mux = session_get_mux(s);
 	if (!mux)
 		return -EADDRINUSE;
-	int rv = mbt_dht_new_mux(&s->dht, s->ev, mux,
-	                         s->listen_port ? s->listen_port : 6881);
+	struct mbt_dht_config dht_cfg = s->dht_cfg;
+
+	dht_cfg.ev = s->ev;
+	dht_cfg.port = s->listen_port ? s->listen_port : 6881;
+	int rv = mbt_dht_new_mux(&s->dht, &dht_cfg, mux);
 	if (rv < 0)
 		return rv;
 

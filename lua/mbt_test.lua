@@ -575,6 +575,17 @@ do
 		assert(r.r.num == 100)
 		store:close()
 
+		-- the item store: a put keeps an item alive, and the oldest gives way
+		local shelf = assert(mbt.dht{max_items = 2})
+		local one = assert(shelf:put("one"))
+		mbt.sleep(1100)
+		local two = assert(shelf:put("two"))
+		mbt.sleep(1100)
+		assert(shelf:put("one") == one)
+		local three = assert(shelf:put("three"))
+		assert(shelf:get(one) and shelf:get(three) and shelf:get(two) == nil)
+		shelf:close()
+
 		-- silent nodes cost a lookup little more than one node timeout
 		local slowpoke = assert(mbt.dht())
 		for p = 1, 6 do

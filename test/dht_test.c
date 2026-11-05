@@ -76,17 +76,17 @@ int main(void)
 
 	mbt_ev_new_default(&ev);
 
-	rv = mbt_dht_new(&node_a, ev, 10001); assert(rv == 0);
-	rv = mbt_dht_new(&node_b, ev, 10002); assert(rv == 0);
-	rv = mbt_dht_new(&node_c, ev, 10003); assert(rv == 0);
-
 	/* Deterministic IDs */
 	uint8_t id_a[20] = {0x10};
 	uint8_t id_b[20] = {0x80};
 	uint8_t id_c[20] = {0xF0};
-	mbt_dht_set_node_id(node_a, id_a);
-	mbt_dht_set_node_id(node_b, id_b);
-	mbt_dht_set_node_id(node_c, id_c);
+	struct mbt_dht_config cfg_a = {.ev = ev, .port = 10001, .node_id = id_a};
+	struct mbt_dht_config cfg_b = {.ev = ev, .port = 10002, .node_id = id_b};
+	struct mbt_dht_config cfg_c = {.ev = ev, .port = 10003, .node_id = id_c};
+
+	rv = mbt_dht_new(&node_a, &cfg_a); assert(rv == 0);
+	rv = mbt_dht_new(&node_b, &cfg_b); assert(rv == 0);
+	rv = mbt_dht_new(&node_c, &cfg_c); assert(rv == 0);
 
 	/* Everyone bootstraps from everyone (small network) */
 	mbt_dht_bootstrap(node_a, "127.0.0.1", 10002);

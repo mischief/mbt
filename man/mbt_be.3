@@ -10,6 +10,7 @@
 .Nm mbt_be_unrefp ,
 .Nm mbt_be_dict_new ,
 .Nm mbt_be_dict_append ,
+.Nm mbt_be_dict_append_key ,
 .Nm mbt_be_dict_append_number ,
 .Nm mbt_be_dict_append_string ,
 .Nm mbt_be_list_new ,
@@ -31,6 +32,7 @@
 .Fn mbt_be_unrefp "struct mbt_be_value **v"
 .Fn mbt_be_dict_new "struct mbt_be_value **out"
 .Fn mbt_be_dict_append "struct mbt_be_value *dict" "char *key" "struct mbt_be_value *value"
+.Fn mbt_be_dict_append_key "struct mbt_be_value *dict" "const void *key" "size_t key_len" "struct mbt_be_value *value"
 .Fn mbt_be_dict_append_number "struct mbt_be_value *dict" "char *key" "int64_t num"
 .Fn mbt_be_dict_append_string "struct mbt_be_value *dict" "char *key" "const void *buf" "size_t len"
 .Fn mbt_be_list_new "struct mbt_be_value **out"

@@ -2,6 +2,7 @@
 #ifndef MBT_SESSION_H
 #define MBT_SESSION_H
 
+#include "dht.h"
 #include "export.h"
 
 #include <stdint.h>
@@ -56,6 +57,7 @@ struct mbt_session_config {
 	void *http_arg;
 	/* Runs first in mbt_session_free, with http_arg. May be NULL. It must fail pending requests. */
 	void (*http_free)(void *arg);
+	struct mbt_dht_config dht;  /* for mbt_session_enable_dht; ev and port are ignored */
 
 	struct mbt_timers timers;  /* 0-initialized = all defaults */
 

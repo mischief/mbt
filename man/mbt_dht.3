@@ -16,10 +16,6 @@
 .Nm mbt_dht_immutable_target ,
 .Nm mbt_dht_mutable_target ,
 .Nm mbt_dht_port ,
-.Nm mbt_dht_set_node_id ,
-.Nm mbt_dht_set_peer_ttl ,
-.Nm mbt_dht_set_max_stored ,
-.Nm mbt_dht_set_verify ,
 .Nm mbt_dht_get_immutable ,
 .Nm mbt_dht_put_immutable ,
 .Nm mbt_dht_get_mutable ,
@@ -28,7 +24,7 @@
 .Sh SYNOPSIS
 .In mbt/dht.h
 .Ft int
-.Fn mbt_dht_new "struct mbt_dht **out" "struct mbt_ev *ev" "uint16_t port"
+.Fn mbt_dht_new "struct mbt_dht **out" "const struct mbt_dht_config *cfg"
 .Ft void
 .Fn mbt_dht_free "struct mbt_dht *d"
 .Ft int
@@ -41,12 +37,14 @@
 .Fn mbt_dht_node_count "struct mbt_dht *d"
 .Ft uint16_t
 .Fn mbt_dht_port "struct mbt_dht *d"
-.Ft void
-.Fn mbt_dht_set_node_id "struct mbt_dht *d" "const uint8_t id[20]"
-.Ft void
-.Fn mbt_dht_set_verify "struct mbt_dht *d" "mbt_dht_verify_cb cb" "void *arg"
 .Ft int
 .Fn mbt_dht_get_immutable "struct mbt_dht *d" "const uint8_t target[20]" "mbt_dht_item_cb cb" "void *arg"
+.Ft int
+.Fn mbt_dht_get_item "struct mbt_dht *d" "const uint8_t target[20]" "mbt_dht_item_cb cb" "void *arg"
+.Ft void
+.Fn mbt_dht_immutable_target "const void *v" "size_t vlen" "uint8_t target[20]"
+.Ft void
+.Fn mbt_dht_mutable_target "const uint8_t *k" "const char *salt" "size_t salt_len" "uint8_t target[20]"
 .Ft int
 .Fn mbt_dht_put_immutable "struct mbt_dht *d" "const void *v" "size_t vlen" "mbt_dht_done_cb done_cb" "void *arg"
 .Ft int
@@ -54,15 +52,32 @@
 .Ft int
 .Fn mbt_dht_put_mutable "struct mbt_dht *d" "const uint8_t k[32]" "const uint8_t sig[64]" "int64_t seq" "const char *salt" "size_t salt_len" "const void *v" "size_t vlen" "mbt_dht_done_cb done_cb" "void *arg"
 .Sh DESCRIPTION
-.Fn mbt_dht_set_peer_ttl
-sets how long an announce from another node lasts, by default two hours.
-A node keeps 8 peers for each infohash, and the oldest give way.
+.Fn mbt_dht_new
+takes a
+.Vt struct mbt_dht_config .
+Zero fields select defaults.
+.Fa ev
+is required.
+.Fa port
+0 binds a free port.
+.Fa node_id
+is 20 bytes, by default from the machine id and port.
+.Fa max_stored
+sets how many infohashes the node stores, by default 64, about 300 bytes each.
+A node keeps 8 peers for each, and the oldest give way.
+.Fa max_items
+sets how many BEP 44 items it stores, by default 64.
+When full, the oldest item gives way.
+.Fa peer_ttl
+sets how long an announce lasts, by default 7200 seconds.
 Announce again each hour.
-.Pp
-.Fn mbt_dht_set_max_stored
-sets how many infohashes the node stores, by default 64.
-Each takes about 300 bytes.
-It returns 0 or a negative errno.
+.Fa send_rate
+limits queries per second, by default 20.
+.Fa verify
+checks signatures of mutable items, and without it they are refused.
+A session takes this configuration in its
+.Fa dht
+field.
 .Pp
 .Fn mbt_dht_query
 sends a raw KRPC query to an IP literal, for tests and tools.

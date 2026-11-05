@@ -151,7 +151,10 @@ struct dht_query {
 	void *arg;
 };
 
+#define DHT_DEFAULT_MAX_ITEMS 64
+#define DHT_ITEM_EXPIRE 7200
 #define DHT_DEFAULT_MAX_STORED 64
+#define DHT_DEFAULT_SEND_RATE 20
 #define DHT_STORED_PEERS 8
 #define DHT_PEER_TTL_SEC (2 * 60 * 60)
 
@@ -167,6 +170,19 @@ struct dht_stored {
 	uint8_t infohash[20];
 	struct dht_peer peers[DHT_STORED_PEERS];
 	int peer_count;
+};
+
+struct dht_item {
+	uint8_t target[20];
+	uint8_t *v;
+	size_t vlen;
+	uint8_t k[MBT_DHT_PUBKEY_LEN];
+	uint8_t sig[MBT_DHT_SIG_LEN];
+	int64_t seq;
+	char *salt;
+	size_t salt_len;
+	int mutable;
+	time_t stored_at;
 };
 
 struct mbt_dht {
@@ -207,21 +223,9 @@ struct mbt_dht {
 	struct mbt_ratelimit *send_limit;
 
 	/* BEP 44: item storage */
-#define DHT_MAX_ITEMS 64
-#define DHT_ITEM_EXPIRE 7200
-	struct dht_item {
-		uint8_t target[20];
-		uint8_t *v;
-		size_t vlen;
-		uint8_t k[MBT_DHT_PUBKEY_LEN];
-		uint8_t sig[MBT_DHT_SIG_LEN];
-		int64_t seq;
-		char *salt;
-		size_t salt_len;
-		int mutable;
-		time_t stored_at;
-	} items[DHT_MAX_ITEMS];
+	struct dht_item *items;
 	int item_count;
+	int item_max;
 
 	mbt_dht_verify_cb verify_cb;
 	void *verify_arg;
@@ -1586,14 +1590,14 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 /* --- Public API --- */
 
 int
-mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
+mbt_dht_new(struct mbt_dht **out, const struct mbt_dht_config *cfg)
 {
 	/* Standalone: own a private mux on this port. */
 	struct mbt_udp_mux *mux;
-	int rv = mbt_udp_mux_new(&mux, ev, port);
+	int rv = mbt_udp_mux_new(&mux, cfg->ev, cfg->port);
 	if (rv < 0)
 		return rv;
-	rv = mbt_dht_new_mux(out, ev, mux, mbt_udp_mux_port(mux));
+	rv = mbt_dht_new_mux(out, cfg, mux);
 	if (rv < 0) {
 		mbt_udp_mux_free(mux);
 		return rv;
@@ -1603,19 +1607,36 @@ mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port)
 }
 
 int
-mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
-                struct mbt_udp_mux *mux, uint16_t port)
+mbt_dht_new_mux(struct mbt_dht **out, const struct mbt_dht_config *cfg, struct mbt_udp_mux *mux)
 {
+	if (cfg->max_stored < 0 || cfg->max_items < 0 || cfg->peer_ttl < 0 || cfg->send_rate < 0)
+		return -EINVAL;
+
 	struct mbt_dht *d = calloc(1, sizeof(*d));
 	if (!d) return -ENOMEM;
 
+	struct mbt_ev *ev = cfg->ev;
+
 	d->ev = ev;
-	d->port = port;
+	d->port = cfg->port;
+	d->verify_cb = cfg->verify;
+	d->verify_arg = cfg->verify_arg;
 	srand(time(NULL) ^ getpid());
 
 	/* Initialize routing table with one bucket covering all IDs */
 	d->buckets = calloc(1, sizeof(struct dht_bucket));
-	if (!d->buckets) { free(d); return -ENOMEM; }
+	d->peer_ttl = cfg->peer_ttl ? cfg->peer_ttl : DHT_PEER_TTL_SEC;
+	d->stored_max = cfg->max_stored ? cfg->max_stored : DHT_DEFAULT_MAX_STORED;
+	d->stored = calloc((size_t)d->stored_max, sizeof(*d->stored));
+	d->item_max = cfg->max_items ? cfg->max_items : DHT_DEFAULT_MAX_ITEMS;
+	d->items = calloc((size_t)d->item_max, sizeof(*d->items));
+	if (!d->buckets || !d->stored || !d->items) {
+		free(d->buckets);
+		free(d->stored);
+		free(d->items);
+		free(d);
+		return -ENOMEM;
+	}
 	SLIST_INIT(&d->buckets->nodes);
 	d->bucket_count = 1;
 
@@ -1623,16 +1644,11 @@ mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
 	d->mux = mux;
 	d->owns_mux = 0;
 
-	d->peer_ttl = DHT_PEER_TTL_SEC;
-	d->stored_max = DHT_DEFAULT_MAX_STORED;
-	d->stored = calloc((size_t)d->stored_max, sizeof(*d->stored));
-	if (!d->stored) {
-		free(d);
-		return -ENOMEM;
-	}
-
 	/* Derive stable node ID from machine-id, or fall back to random */
-	dht_init_node_id(d->id, mbt_udp_mux_port(mux));
+	if (cfg->node_id)
+		memcpy(d->id, cfg->node_id, sizeof(d->id));
+	else
+		dht_init_node_id(d->id, mbt_udp_mux_port(mux));
 	mbt_udp_mux_set_dht(mux, dht_mux_handler, d);
 
 	/* Refresh timer — first fire at 5s to populate routing table quickly */
@@ -1643,12 +1659,13 @@ mbt_dht_new_mux(struct mbt_dht **out, struct mbt_ev *ev,
 	random_bytes(d->token_secret_prev, TOKEN_SECRET_LEN);
 	mbt_ev_timer_new(ev, &d->token_timer, TOKEN_ROTATE_US, dht_token_rotate_cb, d);
 
-	/* Rate limit: 20 queries/sec, burst of 40 */
-	mbt_ratelimit_new(&d->send_limit, 20, 40);
+	int rate = cfg->send_rate ? cfg->send_rate : DHT_DEFAULT_SEND_RATE;
+
+	mbt_ratelimit_new(&d->send_limit, (uint64_t)rate, (uint64_t)rate * 2);
 
 	char hex[41];
 	mbt_hex_encode(d->id, 20, hex, sizeof(hex));
-	mbt_log_info(MBT_LOG_DHT, "DHT started, node_id=%s port=%hu", hex, port);
+	mbt_log_info(MBT_LOG_DHT, "DHT started, node_id=%s port=%hu", hex, d->port);
 
 	*out = d;
 	return 0;
@@ -1668,10 +1685,11 @@ mbt_dht_free(struct mbt_dht *d)
 	}
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
 	if (d->token_timer) mbt_ev_timer_free(d->token_timer);
-	for (int i = 0; i < DHT_MAX_ITEMS; i++) {
+	for (int i = 0; i < d->item_count; i++) {
 		free(d->items[i].v);
 		free(d->items[i].salt);
 	}
+	free(d->items);
 	/* Free routing table */
 	struct dht_bucket *b = d->buckets;
 	while (b) {
@@ -1934,72 +1952,53 @@ mbt_dht_port(struct mbt_dht *d)
 	return mbt_udp_mux_port(d->mux);
 }
 
-int
-mbt_dht_set_max_stored(struct mbt_dht *d, int max)
-{
-	struct dht_stored *stored;
-
-	if (max < 1)
-		return -EINVAL;
-	while (d->stored_count > max)
-		d->stored[stored_oldest(d)] = d->stored[--d->stored_count];
-	stored = realloc(d->stored, (size_t)max * sizeof(*stored));
-	if (!stored)
-		return -ENOMEM;
-	d->stored = stored;
-	d->stored_max = max;
-	return 0;
-}
-
-void
-mbt_dht_set_peer_ttl(struct mbt_dht *d, int seconds)
-{
-	d->peer_ttl = seconds;
-}
-
-void
-mbt_dht_set_node_id(struct mbt_dht *d, const uint8_t id[20])
-{
-	memcpy(d->id, id, 20);
-}
-
 /* --- BEP 44 --- */
 
 static struct dht_item *
 dht_item_find(struct mbt_dht *d, const uint8_t *target)
 {
+	time_t now = time(NULL);
+
 	for (int i = 0; i < d->item_count; i++)
-		if (memcmp(d->items[i].target, target, 20) == 0)
+		if (memcmp(d->items[i].target, target, 20) == 0 &&
+		    now - d->items[i].stored_at <= DHT_ITEM_EXPIRE)
 			return &d->items[i];
 	return NULL;
 }
 
+static void
+dht_item_drop(struct mbt_dht *d, struct dht_item *it)
+{
+	free(it->v);
+	free(it->salt);
+	*it = d->items[--d->item_count];
+}
+
+/* Room for a new item: expired ones go, and when full the oldest gives way. */
 static struct dht_item *
 dht_item_alloc(struct mbt_dht *d, const uint8_t *target)
 {
 	time_t now = time(NULL);
+
 	for (int i = 0; i < d->item_count; ) {
-		if (now - d->items[i].stored_at > DHT_ITEM_EXPIRE) {
-			free(d->items[i].v);
-			free(d->items[i].salt);
-			d->items[i] = d->items[--d->item_count];
-		} else {
+		if (now - d->items[i].stored_at > DHT_ITEM_EXPIRE)
+			dht_item_drop(d, &d->items[i]);
+		else
 			i++;
-		}
 	}
-	if (d->item_count >= DHT_MAX_ITEMS) return NULL;
+	if (d->item_count >= d->item_max) {
+		int oldest = 0;
+
+		for (int i = 1; i < d->item_count; i++)
+			if (d->items[i].stored_at < d->items[oldest].stored_at)
+				oldest = i;
+		dht_item_drop(d, &d->items[oldest]);
+	}
 	struct dht_item *it = &d->items[d->item_count++];
 	memset(it, 0, sizeof(*it));
 	memcpy(it->target, target, 20);
 	it->stored_at = now;
 	return it;
-}
-
-void
-mbt_dht_set_verify(struct mbt_dht *d, mbt_dht_verify_cb cb, void *arg)
-{
-	d->verify_cb = cb;
-	d->verify_arg = arg;
 }
 
 void
@@ -2050,12 +2049,13 @@ mbt_dht_put_immutable(struct mbt_dht *d, const void *v, size_t vlen,
 		it = dht_item_alloc(d, target);
 		if (!it) return -ENOMEM;
 		it->v = malloc(vlen);
-		if (!it->v) { d->item_count--; return -ENOMEM; }
+		if (!it->v) { dht_item_drop(d, it); return -ENOMEM; }
 		memcpy(it->v, v, vlen);
 		it->vlen = vlen;
 		it->mutable = 0;
 		it->seq = -1;
 	}
+	it->stored_at = time(NULL);
 	(void)done_cb; (void)arg;
 	return 0;
 }
@@ -2118,7 +2118,7 @@ mbt_dht_put_mutable(struct mbt_dht *d,
 		if (!it) return -ENOMEM;
 	}
 	it->v = malloc(vlen);
-	if (!it->v) { d->item_count--; return -ENOMEM; }
+	if (!it->v) { dht_item_drop(d, it); return -ENOMEM; }
 	memcpy(it->v, v, vlen);
 	it->vlen = vlen;
 	memcpy(it->k, k, MBT_DHT_PUBKEY_LEN);

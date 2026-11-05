@@ -259,12 +259,14 @@ test_dht_v6(void)
 	mbt_ev_new_default(&ev);
 
 	/* 3 DHT nodes on ::1 with distinct IDs */
-	mbt_dht_new(&dht_a, ev, 10101);
-	mbt_dht_new(&dht_b, ev, 10102);
-	mbt_dht_new(&dht_c, ev, 10103);
-	uint8_t id_a[20] = {0x11}; mbt_dht_set_node_id(dht_a, id_a);
-	uint8_t id_b[20] = {0x22}; mbt_dht_set_node_id(dht_b, id_b);
-	uint8_t id_c[20] = {0x33}; mbt_dht_set_node_id(dht_c, id_c);
+	uint8_t id_a[20] = {0x11}, id_b[20] = {0x22}, id_c[20] = {0x33};
+	struct mbt_dht_config cfg_a = {.ev = ev, .port = 10101, .node_id = id_a};
+	struct mbt_dht_config cfg_b = {.ev = ev, .port = 10102, .node_id = id_b};
+	struct mbt_dht_config cfg_c = {.ev = ev, .port = 10103, .node_id = id_c};
+
+	mbt_dht_new(&dht_a, &cfg_a);
+	mbt_dht_new(&dht_b, &cfg_b);
+	mbt_dht_new(&dht_c, &cfg_c);
 
 	/* Bootstrap over IPv6 */
 	mbt_dht_bootstrap(dht_a, "::1", 10102);

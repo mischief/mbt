@@ -139,7 +139,7 @@ int main(void)
 	assert(rv == 0);
 
 	struct mbt_dht *d;
-	rv = mbt_dht_new(&d, ev, 0);
+	rv = mbt_dht_new(&d, &(struct mbt_dht_config){.ev = ev, .port = 0});
 	assert(rv == 0);
 	uint16_t port = mbt_dht_port(d);
 

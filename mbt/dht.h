@@ -17,8 +17,31 @@ typedef void (*mbt_dht_peers_cb)(const char *addr, uint16_t port, void *arg);
 /* Callback: called when a get_peers lookup completes (all rounds done) */
 typedef void (*mbt_dht_done_cb)(void *arg);
 
-/* Create DHT instance bound to a UDP port */
-MBT_API int mbt_dht_new(struct mbt_dht **out, struct mbt_ev *ev, uint16_t port);
+#define MBT_DHT_PUBKEY_LEN 32
+#define MBT_DHT_SIG_LEN    64
+#define MBT_DHT_MAX_VALUE   1000
+
+/* Callback: verify mutable put signature. Return 0 = reject, nonzero = accept.
+ * buf/buflen is the signed payload (e.g. "3:seqi1e1:v12:Hello World!"). */
+typedef int (*mbt_dht_verify_cb)(const uint8_t k[MBT_DHT_PUBKEY_LEN],
+                                 const uint8_t sig[MBT_DHT_SIG_LEN],
+                                 const void *buf, size_t buflen, void *arg);
+
+/* DHT node configuration. Zero values select the defaults. */
+struct mbt_dht_config {
+	struct mbt_ev *ev;
+	uint16_t port;              /* 0 = bind a free port */
+	const uint8_t *node_id;     /* 20 bytes; NULL = from machine and port */
+	int max_stored;             /* infohashes stored, about 300 bytes each; default 64 */
+	int max_items;              /* BEP 44 items stored, up to about 1.3 KB each; default 64 */
+	int peer_ttl;               /* seconds an announce lasts; default 7200 */
+	int send_rate;              /* queries per second; default 20 */
+	mbt_dht_verify_cb verify;   /* NULL = refuse mutable items */
+	void *verify_arg;
+};
+
+/* Create a DHT node. */
+MBT_API int mbt_dht_new(struct mbt_dht **out, const struct mbt_dht_config *cfg);
 MBT_API void mbt_dht_free(struct mbt_dht *d);
 
 /* Bootstrap: send find_node to a known node to populate routing table */
@@ -58,31 +81,7 @@ MBT_API int mbt_dht_node_count(struct mbt_dht *d);
 /* Port the DHT is listening on (useful with port=0) */
 MBT_API uint16_t mbt_dht_port(struct mbt_dht *d);
 
-/* How long an announce lasts on this node. The default is two hours. */
-MBT_API void mbt_dht_set_peer_ttl(struct mbt_dht *d, int seconds);
-
-/* How many infohashes this node stores peers for. The default is 64. Each
- * takes about 300 bytes. When full, the one announced longest ago gives way. */
-MBT_API int mbt_dht_set_max_stored(struct mbt_dht *d, int max);
-
-/* Override the node ID (call before bootstrap) */
-MBT_API void mbt_dht_set_node_id(struct mbt_dht *d, const uint8_t id[20]);
-
 /* --- BEP 44: Arbitrary data storage --- */
-
-#define MBT_DHT_PUBKEY_LEN 32
-#define MBT_DHT_SIG_LEN    64
-#define MBT_DHT_MAX_VALUE   1000
-
-/* Callback: verify mutable put signature. Return 0 = reject, nonzero = accept.
- * buf/buflen is the signed payload (e.g. "3:seqi1e1:v12:Hello World!"). */
-typedef int (*mbt_dht_verify_cb)(const uint8_t k[MBT_DHT_PUBKEY_LEN],
-                                 const uint8_t sig[MBT_DHT_SIG_LEN],
-                                 const void *buf, size_t buflen, void *arg);
-
-/* Set the signature verification callback for mutable items.
- * Without this, mutable puts are rejected. */
-MBT_API void mbt_dht_set_verify(struct mbt_dht *d, mbt_dht_verify_cb cb, void *arg);
 
 /* Callback: called when a BEP 44 get completes */
 typedef void (*mbt_dht_item_cb)(const uint8_t *value, size_t vlen,

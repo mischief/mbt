@@ -67,7 +67,9 @@ main(int argc, char *argv[])
 	if (rv < 0) errx(1, "event: %s", strerror(-rv));
 
 	struct mbt_dht *dht;
-	rv = mbt_dht_new(&dht, ev, 6881);
+	struct mbt_dht_config cfg = {.ev = ev, .port = 6881};
+
+	rv = mbt_dht_new(&dht, &cfg);
 	if (rv < 0) errx(1, "dht: %s", strerror(-rv));
 
 	/* Bootstrap from well-known nodes */

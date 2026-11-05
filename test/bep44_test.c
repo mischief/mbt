@@ -50,8 +50,8 @@ int main(void)
 
 	/* Create two DHT nodes on localhost */
 	struct mbt_dht *a, *b;
-	rv = mbt_dht_new(&a, ev, 0); assert(rv == 0);
-	rv = mbt_dht_new(&b, ev, 0); assert(rv == 0);
+	rv = mbt_dht_new(&a, &(struct mbt_dht_config){.ev = ev, .port = 0}); assert(rv == 0);
+	rv = mbt_dht_new(&b, &(struct mbt_dht_config){.ev = ev, .port = 0}); assert(rv == 0);
 
 	/* Bootstrap B → A */
 	rv = mbt_dht_bootstrap(b, "127.0.0.1", mbt_dht_port(a));
