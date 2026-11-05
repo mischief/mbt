@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: ISC
 // Fuzz target: metainfo (.torrent) parsing
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <mbt/metainfo.h>
 #include <sys/types.h>
@@ -28,10 +29,17 @@ int main(void)
 		int len = __AFL_FUZZ_TESTCASE_LEN;
 		if (len < 2) continue;
 
+		/* An exact allocation lets ASan see reads past the input. */
+		unsigned char *in = malloc(len);
+		if (!in)
+			continue;
+		memcpy(in, buf, len);
+
 		struct mbt_metainfo *mi = NULL;
-		mbt_metainfo_parse(&mi, buf, len);
+		mbt_metainfo_parse(&mi, in, len);
 		if (mi)
 			mbt_metainfo_free(mi);
+		free(in);
 	}
 	return 0;
 }

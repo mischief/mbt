@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: ISC
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 
 #include "mbt/be.h"
@@ -41,14 +43,18 @@ main(int argc, char *argv[])
 		// check for a required/useful minimum input length
 		if (len < 2) continue;
 
-		/* Setup function call, e.g. struct target *tmp = libtarget_init() */
-		/* Call function to be fuzzed, e.g.: */
+		/* An exact allocation lets ASan see reads past the input. */
+		unsigned char *in = malloc(len);
+		if (!in)
+			continue;
+		memcpy(in, buf, len);
+
 		be = NULL;
-		rv = mbt_be_value_parse(buf, len, &be);
+		rv = mbt_be_value_parse(in, len, &be);
 		(void)rv;
-		/* Reset state. e.g. libtarget_free(tmp) */
 		if(be)
 			mbt_be_unref(be);
+		free(in);
 	}
 
 	return 0;

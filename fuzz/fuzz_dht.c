@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: ISC
 // Fuzz target: DHT message parsing (bencode dict with DHT semantics)
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <mbt/be.h>
 #include <sys/types.h>
@@ -28,9 +29,18 @@ int main(void)
 		int len = __AFL_FUZZ_TESTCASE_LEN;
 		if (len < 2) continue;
 
+		/* An exact allocation lets ASan see reads past the input. */
+		unsigned char *in = malloc(len);
+		if (!in)
+			continue;
+		memcpy(in, buf, len);
+
 		struct mbt_be_value *msg = NULL;
-		int rv = mbt_be_value_parse(buf, len, &msg);
-		if (rv <= 0) continue;
+		int rv = mbt_be_value_parse(in, len, &msg);
+		if (rv <= 0) {
+			free(in);
+			continue;
+		}
 
 		/* Exercise DHT-style field lookups */
 		struct mbt_be_value *y = mbt_be_find(msg, "y");
@@ -48,6 +58,7 @@ int main(void)
 		}
 
 		mbt_be_unref(msg);
+		free(in);
 	}
 	return 0;
 }

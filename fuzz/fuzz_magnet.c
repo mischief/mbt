@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 // Fuzz target: magnet URI parsing
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <mbt/magnet.h>
@@ -28,8 +29,10 @@ int main(void)
 		int len = __AFL_FUZZ_TESTCASE_LEN;
 		if (len < 8 || len > 4095) continue;
 
-		/* Null-terminate for string parsing */
-		char uri[4096];
+		/* An exact allocation lets ASan see reads past the terminator. */
+		char *uri = malloc(len + 1);
+		if (!uri)
+			continue;
 		memcpy(uri, buf, len);
 		uri[len] = '\0';
 
@@ -37,6 +40,7 @@ int main(void)
 		int rv = mbt_magnet_parse(uri, &m);
 		if (rv == 0)
 			mbt_magnet_free(&m);
+		free(uri);
 	}
 	return 0;
 }
