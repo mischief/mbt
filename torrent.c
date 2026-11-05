@@ -40,6 +40,7 @@ struct mbt_session;
 enum {
 	BLOCK_SIZE = 16384,
 	METADATA_BLOCK_SIZE = 16384,
+	METADATA_MAX = 64 * 1024 * 1024,
 	MAX_PEERS = 50,
 	PIPELINE_DEPTH = 512,  /* default max per-peer pipeline */
 	PIPELINE_INIT = 4,     /* slow-start initial window */
@@ -942,10 +943,13 @@ on_active(struct mbt_peer *p, void *arg)
 	}
 
 	/* If we need metadata, request it */
-	if (mbt_peer_metadata_size(p) > 0 && t->piece_count == 0) {
+	if (mbt_peer_metadata_size(p) > 0 && mbt_peer_metadata_size(p) <= METADATA_MAX &&
+	    t->piece_count == 0) {
 		if (!t->metadata) {
+			t->metadata = calloc(1, mbt_peer_metadata_size(p));
+			if (!t->metadata)
+				return;
 			t->metadata_len = mbt_peer_metadata_size(p);
-			t->metadata = calloc(1, t->metadata_len);
 			t->metadata_pieces = (t->metadata_len + METADATA_BLOCK_SIZE - 1) / METADATA_BLOCK_SIZE;
 			mbt_bitmap_new_bits(&t->metadata_recv, t->metadata_pieces);
 			t->metadata_last_progress = now_usec(); /* start the stall clock */
@@ -1279,7 +1283,8 @@ on_metadata(struct mbt_peer *p, int piece, const void *data, size_t len, void *a
 {
 	struct mbt_torrent *t = arg;
 
-	if (!t->metadata)
+	/* Complete metadata is immutable: it holds the piece hashes. */
+	if (!t->metadata || t->piece_count > 0)
 		return;
 
 	size_t offset = (size_t)piece * METADATA_BLOCK_SIZE;
@@ -2133,24 +2138,13 @@ metadata_files_free(struct mbt_torrent *t)
 	t->total_length = 0;
 }
 
-int
-mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
+/* Fill the torrent from an info dict. On failure the caller clears it. */
+static int
+metadata_parse(struct mbt_torrent *t, const void *info, size_t len)
 {
 	_cleanup_be_ struct mbt_be_value *be = NULL;
 	struct mbt_be_value *tmp;
 	int rv;
-
-	/* Already have metadata parsed — skip */
-	if (t->piece_count > 0)
-		return 0;
-
-	/* Store raw metadata for BEP 9 serving */
-	if (!t->metadata) {
-		t->metadata = malloc(len);
-		if (!t->metadata) return -ENOMEM;
-		memcpy(t->metadata, info, len);
-		t->metadata_len = len;
-	}
 
 	rv = mbt_be_value_parse(info, len, &be);
 	if (rv < 0)
@@ -2165,7 +2159,8 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 
 	/* Extract piece length */
 	tmp = mbt_be_find(be, "piece length");
-	if (!tmp || tmp->type != BE_INTEGER)
+	if (!tmp || tmp->type != BE_INTEGER || tmp->integer <= 0 ||
+	    tmp->integer > UINT32_MAX)
 		return -EINVAL;
 	t->piece_length = (uint32_t)tmp->integer;
 
@@ -2177,15 +2172,17 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 	/* Extract total length (single-file) or compute from files list */
 	tmp = mbt_be_find(be, "length");
 	if (tmp && tmp->type == BE_INTEGER) {
+		if (tmp->integer <= 0)
+			return -EINVAL;
 		t->total_length = (uint64_t)tmp->integer;
 		/* Single-file: one entry in file table */
-		t->file_count = 1;
 		t->files = calloc(1, sizeof(struct mbt_file));
-		if (t->files) {
-			t->files[0].path = t->name ? strdup(t->name) : strdup("download");
-			t->files[0].offset = 0;
-			t->files[0].length = t->total_length;
-		}
+		if (!t->files)
+			return -ENOMEM;
+		t->file_count = 1;
+		t->files[0].path = t->name ? strdup(t->name) : strdup("download");
+		t->files[0].offset = 0;
+		t->files[0].length = t->total_length;
 	} else {
 		/* Multi-file: build file table from files list */
 		struct mbt_be_value *files = mbt_be_find(be, "files");
@@ -2196,38 +2193,50 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 		struct mbt_be_value *f;
 		int count = 0;
 		TAILQ_FOREACH(f, &files->listhead, next)
-			if (f->type == BE_DICTIONARY) count++;
+			count++;
 
 		t->files = calloc(count, sizeof(struct mbt_file));
 		if (!t->files)
 			return -ENOMEM;
+		t->file_count = count;
 
 		uint64_t offset = 0;
 		int idx = 0;
 		TAILQ_FOREACH(f, &files->listhead, next) {
-			if (f->type != BE_DICTIONARY) continue;
 			struct mbt_be_value *flen = mbt_be_find(f, "length");
-			if (!flen || flen->type != BE_INTEGER) continue;
+			if (!flen || flen->type != BE_INTEGER || flen->integer < 0 ||
+			    (uint64_t)flen->integer > UINT64_MAX - offset)
+				return -EINVAL;
 
-			/* Build path from path list */
+			/* A path that does not fit stays NULL: metadata_paths_ok refuses it. */
 			struct mbt_be_value *path_list = mbt_be_find(f, "path");
 			if (path_list && path_list->type == BE_LIST) {
-				/* Join path components with / */
-				char pathbuf[1024] = {0};
+				char pathbuf[1024];
 				size_t pos = 0;
+				int bad = 0;
 				struct mbt_be_value *comp;
+
+				pathbuf[0] = '\0';
 				TAILQ_FOREACH(comp, &path_list->listhead, next) {
-					if (comp->type != BE_STRING) continue;
-					if (pos > 0 && pos < sizeof(pathbuf) - 1)
-						pathbuf[pos++] = '/';
-					size_t clen = comp->string.len;
-					if (pos + clen < sizeof(pathbuf)) {
-						memcpy(pathbuf + pos, comp->string.buf, clen);
-						pos += clen;
+					size_t clen;
+
+					if (comp->type != BE_STRING) {
+						bad = 1;
+						break;
 					}
+					clen = comp->string.len;
+					if (pos + clen + 2 > sizeof(pathbuf)) {
+						bad = 1;
+						break;
+					}
+					if (pos > 0)
+						pathbuf[pos++] = '/';
+					memcpy(pathbuf + pos, comp->string.buf, clen);
+					pos += clen;
+					pathbuf[pos] = '\0';
 				}
-				pathbuf[pos] = '\0';
-				t->files[idx].path = strdup(pathbuf);
+				if (!bad)
+					t->files[idx].path = strdup(pathbuf);
 			}
 
 			struct mbt_be_value *attr = mbt_be_find(f, "attr");
@@ -2240,7 +2249,6 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 			offset += t->files[idx].length;
 			idx++;
 		}
-		t->file_count = idx;
 		t->total_length = offset;
 
 		if (t->total_length == 0)
@@ -2249,29 +2257,62 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 
 	if (!metadata_paths_ok(t)) {
 		mbt_log_warn(MBT_LOG_TORRENT, "rejecting metadata: unsafe file path");
-		metadata_files_free(t);
 		return -EINVAL;
 	}
 
 	/* Extract piece hashes */
 	tmp = mbt_be_find(be, "pieces");
-	if (!tmp || tmp->type != BE_STRING)
+	if (!tmp || tmp->type != BE_STRING || tmp->string.len == 0 ||
+	    tmp->string.len % 20 != 0)
 		return -EINVAL;
+	if (tmp->string.len / 20 !=
+	    (t->total_length - 1) / t->piece_length + 1) {
+		mbt_log_warn(MBT_LOG_TORRENT, "rejecting metadata: piece count does not match length");
+		return -EINVAL;
+	}
 
 	t->piece_count = (uint32_t)(tmp->string.len / 20);
 	t->pieces_hash_len = tmp->string.len;
+	t->pieces_hash = t->metadata + tmp->src_off + tmp->src_len - tmp->string.len;
+	return 0;
+}
 
-	/* Locate the pieces data in the raw metadata buffer.
-	 * Bencoded format: "6:pieces" + "<len>:" + <data>. */
-	{
-		char needle[32];
-		int nlen = snprintf(needle, sizeof(needle), "6:pieces%zu:", tmp->string.len);
-		const uint8_t *p = memmem(info, len, needle, nlen);
-		if (!p)
-			return -EINVAL;
-		/* p + nlen points to the hash data within the info buffer;
-		 * t->metadata is a copy of info at the same layout. */
-		t->pieces_hash = t->metadata + (p + nlen - (const uint8_t *)info);
+int
+mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
+{
+	int rv;
+
+	/* Already have metadata parsed — skip */
+	if (t->piece_count > 0)
+		return 0;
+
+	/* Store raw metadata for BEP 9 serving. It replaces a partial fetch. */
+	if (t->metadata != info) {
+		uint8_t *copy = malloc(len);
+
+		if (!copy)
+			return -ENOMEM;
+		memcpy(copy, info, len);
+		free(t->metadata);
+		mbt_bitmap_unrefp(&t->metadata_recv);
+		t->metadata = copy;
+		t->metadata_len = len;
+		t->metadata_have = 0;
+		t->metadata_pieces = 0;
+	}
+
+	rv = metadata_parse(t, info, len);
+	if (rv < 0) {
+		metadata_files_free(t);
+		t->piece_count = 0;
+		t->pieces_hash = NULL;
+		t->pieces_hash_len = 0;
+		if (t->metadata != info) {
+			free(t->metadata);
+			t->metadata = NULL;
+			t->metadata_len = 0;
+		}
+		return rv;
 	}
 
 	/* Allocate bucket queue entries */

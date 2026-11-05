@@ -25,6 +25,8 @@ struct mbt_be_value
 	int n_ref;
 	struct mbt_be_value *up;
 	char *key;
+	/* Parsed dict values only: encoded bytes, relative to the start of the dict. */
+	size_t src_off, src_len;
 	TAILQ_ENTRY(mbt_be_value) next;
 	union {
 		long long integer;

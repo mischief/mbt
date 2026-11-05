@@ -100,6 +100,29 @@ compute_infohash(struct mbt_metainfo *mi)
 	mbt_infohash_new(&mi->ih, MBT_INFOHASH_SHA1, mi->infohash_hex);
 }
 
+/* Join the components of a file's path list. NULL if malformed or too long. */
+static char *
+join_path(struct mbt_be_value *list)
+{
+	char path[4096];
+	size_t n = 0;
+	struct mbt_be_value *comp;
+
+	path[0] = '\0';
+	TAILQ_FOREACH(comp, &list->listhead, next) {
+		if (comp->type != BE_STRING)
+			return NULL;
+		if (n + comp->string.len + 2 > sizeof(path))
+			return NULL;
+		if (n > 0)
+			path[n++] = '/';
+		memcpy(path + n, comp->string.buf, comp->string.len);
+		n += comp->string.len;
+		path[n] = '\0';
+	}
+	return strdup(path);
+}
+
 int
 mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 {
@@ -109,43 +132,24 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 
 	const unsigned char *buf = data;
 
-	/* Find raw info dict */
-	unsigned char *p = memmem(buf, len, "4:infod", 7);
-	if (!p) p = memmem(buf, len, "4:info", 6);
-	if (!p) { mbt_metainfo_free(mi); return -EINVAL; }
-
-	const unsigned char *info_start = p + 6;
-	int depth = 0;
-	const unsigned char *i = info_start;
-	const unsigned char *end = buf + len;
-	while (i < end) {
-		if (*i == 'd' || *i == 'l') { depth++; i++; }
-		else if (*i == 'e') { depth--; i++; if (depth == 0) break; }
-		else if (*i == 'i') { i = memchr(i, 'e', end - i); if (i) i++; else break; }
-		else if (*i >= '0' && *i <= '9') {
-			const unsigned char *colon = memchr(i, ':', end - i);
-			if (!colon) break;
-			size_t slen = strtoul((char *)i, NULL, 10);
-			i = colon + 1 + slen;
-			if (i > end) { i = end; break; }
-		} else { break; }
-	}
-	size_t info_len = (size_t)(i - info_start);
-	if (info_len == 0) { mbt_metainfo_free(mi); return -EINVAL; }
-
-	mi->raw_info = malloc(info_len);
-	if (!mi->raw_info) { mbt_metainfo_free(mi); return -ENOMEM; }
-	memcpy(mi->raw_info, info_start, info_len);
-	mi->raw_info_len = info_len;
-	compute_infohash(mi);
-
 	/* Parse bencode */
 	struct mbt_be_value *be = NULL;
 	rv = mbt_be_value_parse(buf, len, &be);
 	if (rv <= 0) { mbt_metainfo_free(mi); return -EINVAL; }
 
 	struct mbt_be_value *info = mbt_be_find(be, "info");
-	if (!info) { mbt_be_unref(be); mbt_metainfo_free(mi); return -EINVAL; }
+	if (!info || info->type != BE_DICTIONARY) {
+		mbt_be_unref(be);
+		mbt_metainfo_free(mi);
+		return -EINVAL;
+	}
+
+	/* The infohash covers the original bytes. The parse tree sorts keys. */
+	mi->raw_info = malloc(info->src_len);
+	if (!mi->raw_info) { mbt_be_unref(be); mbt_metainfo_free(mi); return -ENOMEM; }
+	memcpy(mi->raw_info, buf + info->src_off, info->src_len);
+	mi->raw_info_len = info->src_len;
+	compute_infohash(mi);
 
 	/* Name */
 	struct mbt_be_value *v = mbt_be_find(info, "name");
@@ -186,17 +190,19 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 			TAILQ_FOREACH(f, &files->listhead, next) {
 				struct mbt_be_value *fl = mbt_be_find(f, "length");
 				struct mbt_be_value *fp = mbt_be_find(f, "path");
-				if (fl) mi->files[idx].length = (uint64_t)fl->integer;
+				if (!fl || fl->type != BE_INTEGER || fl->integer < 0 ||
+				    !fp || fp->type != BE_LIST) {
+					mbt_be_unref(be);
+					mbt_metainfo_free(mi);
+					return -EINVAL;
+				}
+				mi->files[idx].length = (uint64_t)fl->integer;
 				mi->total_length += mi->files[idx].length;
-				if (fp && fp->type == BE_LIST) {
-					/* Join path components */
-					char path[4096] = {0};
-					struct mbt_be_value *comp;
-					TAILQ_FOREACH(comp, &fp->listhead, next) {
-						if (path[0]) strcat(path, "/");
-						strncat(path, (char *)comp->string.buf, comp->string.len);
-					}
-					mi->files[idx].path = strdup(path);
+				mi->files[idx].path = join_path(fp);
+				if (!mi->files[idx].path) {
+					mbt_be_unref(be);
+					mbt_metainfo_free(mi);
+					return -EINVAL;
 				}
 				idx++;
 			}

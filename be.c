@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
+#include <limits.h>
 #include <assert.h>
 #include <stdint.h>
 #include <sys/queue.h>
@@ -12,8 +13,8 @@
 #include "mbt/be.h"
 
 enum {
-	/* 9,999,999 */
-	BE_MAX_STR_LEN = 7,
+	/* Digits of a string length, and the colon. */
+	BE_MAX_STR_LEN = 11,
 
 	/* roughly int64 */
 	BE_MAX_INT_LEN = 20,
@@ -135,7 +136,7 @@ static int
 be_value_parse_string(const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
 	const unsigned char *p = buf, *cp;
-	size_t spn;
+	size_t spn, hdr;
 	ptrdiff_t pdif;
 	int rv;
 	unsigned long insz;
@@ -158,7 +159,8 @@ be_value_parse_string(const unsigned char *buf, size_t sz, struct mbt_be_value *
 		return rv;
 
 	insz = strtoul((const char *)p, NULL, 10);
-	if(insz > sz){
+	hdr = (size_t)pdif + 1;
+	if(insz > sz - hdr){
 		mbt_be_unref(v);
 		return -ERANGE;
 	}
@@ -245,7 +247,14 @@ be_value_parse_list(int depth, const unsigned char *buf, size_t sz, struct mbt_b
 	if(rv < 0)
 		return rv;
 
-	while(*p && *p != 'e'){
+	while(1){
+		if((size_t)chr >= sz){
+			mbt_be_unref(v);
+			return -EINVAL;
+		}
+		if(*p == 'e')
+			break;
+
 		rv = be_value_parse_inner(depth, p, sz - chr, &inner);
 		if(rv < 0){
 			mbt_be_unref(v);
@@ -282,7 +291,14 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 	if(rv < 0)
 		return rv;
 
-	while(p < buf+sz && *p && *p != 'e'){
+	while(1){
+		if((size_t)chr >= sz){
+			mbt_be_unref(v);
+			return -EINVAL;
+		}
+		if(*p == 'e')
+			break;
+
 		switch(p[0]){
 		case '0': case '1': case '2': case '3': 
 		case '4': case '5': case '6': case '7': 
@@ -313,6 +329,8 @@ be_value_parse_dictionary(int depth, const unsigned char *buf, size_t sz, struct
 		inner->key = (char *)key->string.buf;
 		key->string.buf = NULL;
 		mbt_be_unref(key);
+		inner->src_off = (size_t)chr;
+		inner->src_len = (size_t)rv;
 
 		be_insert(v, inner);
 		mbt_be_unref(inner); /* drop creator ref; parent holds its own */
@@ -358,6 +376,8 @@ be_value_parse_inner(int depth, const unsigned char *buf, size_t sz, struct mbt_
 int
 mbt_be_value_parse(const unsigned char *buf, size_t sz, struct mbt_be_value **out)
 {
+	if(sz > INT_MAX)
+		return -EFBIG;
 	return be_value_parse_inner(0, buf, sz, out);
 }
 

@@ -87,6 +87,8 @@ test('tracker_server', tracker_server_test, timeout: 15)
 
 metainfo_test = executable('metainfo_test', 'metainfo_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('metainfo', metainfo_test)
+bencode_test = executable('bencode_test', 'bencode_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('bencode', bencode_test)
 
 magnet_flow_test = executable('magnet_flow_test', 'magnet_flow_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('magnet_flow', magnet_flow_test, timeout: 15)
