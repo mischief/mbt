@@ -1673,6 +1673,34 @@ mbt_session_add_magnet(struct mbt_session *s, const char *uri,
 	return 0;
 }
 
+/* Connects in flight hold a pointer to t and report to it when they end. */
+static void
+session_cancel_connects(struct mbt_session *s, struct mbt_torrent *t)
+{
+	struct pending_connect *pc, *pc_next;
+	struct pending_utp_connect *puc, *puc_next;
+
+	for (pc = STAILQ_FIRST(&s->pending); pc != NULL; pc = pc_next) {
+		pc_next = STAILQ_NEXT(pc, next);
+		if (pc->torrent != t)
+			continue;
+		STAILQ_REMOVE(&s->pending, pc, pending_connect, next);
+		if (pc->io)
+			mbt_ev_io_free(pc->io);
+		if (pc->timeout)
+			mbt_ev_timer_free(pc->timeout);
+		close(pc->fd);
+		free(pc);
+	}
+	for (puc = STAILQ_FIRST(&s->pending_utp); puc != NULL; puc = puc_next) {
+		puc_next = STAILQ_NEXT(puc, next);
+		if (puc->torrent != t)
+			continue;
+		STAILQ_REMOVE(&s->pending_utp, puc, pending_utp_connect, next);
+		pending_utp_connect_free(puc, 1);
+	}
+}
+
 int
 mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 {
@@ -1681,6 +1709,7 @@ mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 		return -ENOENT;
 
 	STAILQ_REMOVE(&s->torrents, st, session_torrent, next);
+	session_cancel_connects(s, st->torrent);
 	mbt_torrent_free(st->torrent);
 	mbt_infohash_unref(st->ih);
 	if (st->reannounce_timer)

@@ -5,7 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 #include "mbt/event.h"
 #include "mbt/infohash.h"
@@ -17,6 +21,9 @@
 
 #define PIECE_LEN 16384
 #define FILE_LEN 100
+#define DIAL_WAIT_SEC 5
+#define UTP_HEADER 20
+#define UTP_ST_RESET_VER 0x31
 #define TRACKER "udp://127.0.0.1:1/announce"
 #define BIG_TAIL (5 * 1024 * 1024)
 #define OVER_LIMIT (65 * 1024 * 1024)
@@ -139,6 +146,62 @@ test_read_piece(struct mbt_session *s, struct mbt_ev *ev, const unsigned char *e
 	assert(mbt_session_remove_torrent(s, mbt_torrent_infohash(t)) == 0);
 }
 
+/* A connect in flight must not touch a torrent removed under it. */
+static void
+test_remove_while_dialing(struct mbt_session *s, struct mbt_ev *ev,
+    const unsigned char *enc, size_t enc_len)
+{
+	struct sockaddr_in sin = {.sin_family = AF_INET};
+	socklen_t len = sizeof(sin);
+	struct mbt_torrent *t = NULL;
+	time_t end;
+	int fd;
+
+	sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	assert((fd = socket(AF_INET, SOCK_DGRAM, 0)) >= 0);
+	assert(bind(fd, (struct sockaddr *)&sin, sizeof(sin)) == 0);
+	assert(getsockname(fd, (struct sockaddr *)&sin, &len) == 0);
+
+	/* A session dials only for a torrent that needs data. */
+	char path[256];
+
+	path_of(path, sizeof(path), "a.bin");
+	assert(unlink(path) == 0);
+	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL, &t) == 0);
+	test_wait_verified(ev, t);
+	assert(!mbt_torrent_complete(t));
+	assert(mbt_session_add_peer(s, mbt_torrent_infohash(t), "127.0.0.1",
+	    ntohs(sin.sin_port), MBT_SOURCE_MANUAL, 0) == 0);
+	/* Catch the SYN, drop the torrent, then answer as the peer: a reset. */
+	uint8_t syn[64];
+	struct sockaddr_in from;
+	socklen_t fromlen = sizeof(from);
+	ssize_t n = -1;
+
+	end = time(NULL) + DIAL_WAIT_SEC;
+	while (n < UTP_HEADER && time(NULL) < end) {
+		test_ev_step(ev, 10);
+		n = recvfrom(fd, syn, sizeof(syn), MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen);
+	}
+	assert(n >= UTP_HEADER);
+	assert(mbt_session_remove_torrent(s, mbt_torrent_infohash(t)) == 0);
+
+	uint16_t id = (uint16_t)(syn[2] << 8 | syn[3]);
+
+	for (int i = 0; i < 2; i++) {
+		uint8_t reset[UTP_HEADER] = {UTP_ST_RESET_VER};
+		uint16_t cid = (uint16_t)(id + i);
+
+		reset[2] = (uint8_t)(cid >> 8);
+		reset[3] = (uint8_t)cid;
+		assert(sendto(fd, reset, sizeof(reset), 0, (struct sockaddr *)&from, fromlen) ==
+		    sizeof(reset));
+	}
+	for (int i = 0; i < 20; i++)
+		test_ev_step(ev, 5);
+	close(fd);
+}
+
 static void
 test_file_limits(struct mbt_session *s)
 {
@@ -200,6 +263,7 @@ main(void)
 	test_repeat(s, enc, enc_len);
 	test_magnet_then_metainfo(s, enc, enc_len);
 	test_read_piece(s, ev, enc, enc_len);
+	test_remove_while_dialing(s, ev, enc, enc_len);
 	test_file_limits(s);
 	test_fallback_private(s);
 	free(enc);

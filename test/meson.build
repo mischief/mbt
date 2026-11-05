@@ -219,3 +219,5 @@ tracker_cancel_test = executable('tracker_cancel_test', 'tracker_cancel_test.c',
 test('tracker_cancel', tracker_cancel_test, timeout: 60)
 storage_move_test = executable('storage_move_test', 'storage_move_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('storage_move', storage_move_test, timeout: 60)
+dht_txn_test = executable('dht_txn_test', 'dht_txn_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('dht_txn', dht_txn_test, timeout: 30)
