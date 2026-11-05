@@ -2059,6 +2059,50 @@ mbt_torrent_peerdb(struct mbt_torrent *t)
 
 
 
+/* Peers supply these paths. Refuse any that can leave the data directory. */
+static int
+path_ok(const char *path)
+{
+	const char *p = path;
+
+	if (!p || *p == '\0' || *p == '/')
+		return 0;
+	for (;;) {
+		size_t n = strcspn(p, "/");
+
+		if (n == 0 || (n == 1 && p[0] == '.') ||
+		    (n == 2 && p[0] == '.' && p[1] == '.'))
+			return 0;
+		if (p[n] == '\0')
+			return 1;
+		p += n + 1;
+	}
+}
+
+static int
+metadata_paths_ok(struct mbt_torrent *t)
+{
+	if (t->name && !path_ok(t->name))
+		return 0;
+	if (!t->files)
+		return 0;
+	for (int i = 0; i < t->file_count; i++)
+		if (!path_ok(t->files[i].path))
+			return 0;
+	return 1;
+}
+
+static void
+metadata_files_free(struct mbt_torrent *t)
+{
+	for (int i = 0; t->files && i < t->file_count; i++)
+		free(t->files[i].path);
+	free(t->files);
+	t->files = NULL;
+	t->file_count = 0;
+	t->total_length = 0;
+}
+
 int
 mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 {
@@ -2166,6 +2210,12 @@ mbt_torrent_set_metadata(struct mbt_torrent *t, const void *info, size_t len)
 
 		if (t->total_length == 0)
 			return -EINVAL;
+	}
+
+	if (!metadata_paths_ok(t)) {
+		mbt_log_warn(MBT_LOG_TORRENT, "rejecting metadata: unsafe file path");
+		metadata_files_free(t);
+		return -EINVAL;
 	}
 
 	/* Extract piece hashes */
