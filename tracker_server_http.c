@@ -4,6 +4,7 @@
  *
  * Minimal HTTP/1.0 server handling GET /announce requests.
  */
+#include <sys/queue.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -17,8 +18,12 @@
 
 #include "mbt/tracker_server.h"
 #include "mbt/be.h"
+#include "mbt/event.h"
 #include "mbt/log.h"
 #include "net.h"
+
+#define HTTP_MAX_CONNS 256
+#define HTTP_CONN_TIMEOUT_USEC (10 * 1000000ULL)
 
 /* Forward declarations from tracker_store.c */
 struct ts_torrent;
@@ -39,6 +44,20 @@ struct mbt_tracker_http {
 	int owns_store;
 	struct mbt_listener listener;
 	uint16_t port;
+	TAILQ_HEAD(, http_conn) conns;
+	int nconns;
+};
+
+/* A connection that has not sent its request line. */
+struct http_conn {
+	TAILQ_ENTRY(http_conn) entries;
+	struct mbt_tracker_http *th;
+	int fd;
+	struct mbt_ev_io *io;
+	struct mbt_ev_timer *timer;
+	struct sockaddr_storage from;
+	size_t len;
+	char buf[4096];
 };
 
 /* URL-decode info_hash (20 raw bytes from percent-encoded query) */
@@ -58,19 +77,14 @@ urldecode_infohash(const char *s, uint8_t *out)
 	return (n == 20) ? 0 : -1;
 }
 
+/* buf holds a NUL-terminated request line. The caller closes cfd. */
 static void
-handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *from)
+handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *from, char *buf)
 {
-	char buf[4096];
-	ssize_t n = recv(cfd, buf, sizeof(buf) - 1, 0);
-	if (n <= 0) { close(cfd); return; }
-	buf[n] = '\0';
-
 	/* Parse: GET /announce?... HTTP/1.x */
 	if (strncmp(buf, "GET /announce?", 14) != 0) {
 		const char *err = "HTTP/1.0 404 Not Found\r\nContent-Length: 0\r\n\r\n";
 		send(cfd, err, strlen(err), MSG_NOSIGNAL);
-		close(cfd);
 		return;
 	}
 
@@ -119,14 +133,14 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	}
 
 	struct ts_torrent *t = mbt_tracker_store_get_or_create(th->store, info_hash);
-	if (!t) { close(cfd); return; }
+	if (!t) return;
 
 	int is_seeder = (left == 0);
 	mbt_tracker_store_add_peer(th->store, t, &peer_addr, is_seeder);
 
 	/* Build bencoded response */
 	_cleanup_be_ struct mbt_be_value *resp = NULL;
-	if (mbt_be_dict_new(&resp) < 0) { close(cfd); return; }
+	if (mbt_be_dict_new(&resp) < 0) return;
 	mbt_be_dict_append_number(resp, "interval", 120);
 
 	if (compact) {
@@ -136,7 +150,7 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	}
 
 	unsigned char *enc; size_t enc_len;
-	if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) { close(cfd); return; }
+	if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) return;
 
 	/* Send HTTP response */
 	char hdr[128];
@@ -145,7 +159,47 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	send(cfd, hdr, hdr_len, MSG_NOSIGNAL);
 	send(cfd, enc, enc_len, MSG_NOSIGNAL);
 	free(enc);
-	close(cfd);
+}
+
+static void
+conn_free(struct http_conn *c)
+{
+	TAILQ_REMOVE(&c->th->conns, c, entries);
+	c->th->nconns--;
+	mbt_ev_timer_free(c->timer);
+	mbt_ev_io_free(c->io);
+	close(c->fd);
+	free(c);
+}
+
+static void
+conn_timeout(struct mbt_ev_timer *timer, void *v)
+{
+	(void)timer;
+	conn_free(v);
+}
+
+/* Read until the request line ends. A client must not stall the server. */
+static void
+conn_read(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
+{
+	struct http_conn *c = v;
+	ssize_t n;
+
+	(void)io; (void)events;
+	n = recv(fd, c->buf + c->len, sizeof(c->buf) - 1 - c->len, 0);
+	if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+		return;
+	if (n <= 0) {
+		conn_free(c);
+		return;
+	}
+	c->len += (size_t)n;
+	c->buf[c->len] = '\0';
+	if (memchr(c->buf, '\n', c->len) == NULL && c->len < sizeof(c->buf) - 1)
+		return;
+	handle_request(c->th, c->fd, &c->from, c->buf);
+	conn_free(c);
 }
 
 static void
@@ -156,10 +210,30 @@ http_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	socklen_t fromlen = sizeof(from);
 	(void)io; (void)events;
 
-	int cfd = accept4(fd, (struct sockaddr *)&from, &fromlen, SOCK_CLOEXEC);
+	int cfd = accept4(fd, (struct sockaddr *)&from, &fromlen, SOCK_CLOEXEC | SOCK_NONBLOCK);
 	if (cfd < 0) return;
 
-	handle_request(th, cfd, &from);
+	struct http_conn *c = th->nconns < HTTP_MAX_CONNS ? calloc(1, sizeof(*c)) : NULL;
+	if (!c) {
+		close(cfd);
+		return;
+	}
+	c->th = th;
+	c->fd = cfd;
+	c->from = from;
+	if (mbt_ev_io_new(th->ev, &c->io, cfd, MBT_EV_READ, conn_read, c) < 0) {
+		close(cfd);
+		free(c);
+		return;
+	}
+	if (mbt_ev_timer_new(th->ev, &c->timer, HTTP_CONN_TIMEOUT_USEC, conn_timeout, c) < 0) {
+		mbt_ev_io_free(c->io);
+		close(cfd);
+		free(c);
+		return;
+	}
+	TAILQ_INSERT_TAIL(&th->conns, c, entries);
+	th->nconns++;
 }
 
 /* --- Public API --- */
@@ -173,6 +247,7 @@ mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev, uint16_t 
 	th->ev = ev;
 	if (store) { th->store = store; th->owns_store = 0; } else { mbt_tracker_store_new(&th->store); th->owns_store = 1; }
 	th->port = port;
+	TAILQ_INIT(&th->conns);
 
 	int rv = mbt_listen_tcp(&th->listener, ev, port, http_accept_cb, th);
 	if (rv < 0) { free(th); return rv; }
@@ -187,6 +262,8 @@ mbt_tracker_http_free(struct mbt_tracker_http *th)
 {
 	if (!th) return;
 	mbt_listener_close(&th->listener);
+	while (!TAILQ_EMPTY(&th->conns))
+		conn_free(TAILQ_FIRST(&th->conns));
 	if (th->store && th->owns_store) mbt_tracker_store_free(th->store);
 	free(th);
 }

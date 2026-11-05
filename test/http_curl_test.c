@@ -3,13 +3,11 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <netinet/in.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -246,58 +244,15 @@ session_on(const char *dir)
 	return s;
 }
 
-static uint16_t
-free_port(void)
-{
-	struct sockaddr_in sin = {.sin_family = AF_INET};
-	socklen_t len = sizeof(sin);
-	int fd;
-
-	sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	assert((fd = socket(AF_INET, SOCK_STREAM, 0)) >= 0);
-	assert(bind(fd, (struct sockaddr *)&sin, sizeof(sin)) == 0);
-	assert(getsockname(fd, (struct sockaddr *)&sin, &len) == 0);
-	close(fd);
-	return ntohs(sin.sin_port);
-}
-
-/*
- * The tracker reads each request with a blocking read, so it needs its own
- * process. Fork before the parent makes its loop: sd-event does not cross fork.
- */
-static pid_t
-tracker_start(uint16_t port)
-{
-	int fds[2];
-	char ready;
-	pid_t pid;
-
-	assert(pipe(fds) == 0);
-	assert((pid = fork()) >= 0);
-	if (pid == 0) {
-		struct mbt_ev *tev;
-		struct mbt_tracker_store *store;
-		struct mbt_tracker_http *tracker;
-
-		assert(mbt_ev_new_default(&tev) == 0);
-		assert(mbt_tracker_store_new(&store) == 0);
-		assert(mbt_tracker_http_new(&tracker, tev, port, store) == 0);
-		assert(write(fds[1], "x", 1) == 1);
-		mbt_ev_run(tev);
-		_exit(0);
-	}
-	assert(read(fds[0], &ready, 1) == 1);
-	close(fds[0]);
-	close(fds[1]);
-	return pid;
-}
-
 /* Two sessions find each other through an HTTP tracker and transfer. */
 static void
-test_tracker_transfer(uint16_t tracker_port)
+test_tracker_transfer(void)
 {
 	char tmp[] = "/tmp/mbt_http_XXXXXX", seed_dir[64], leech_dir[64], announce[64];
+	struct mbt_tracker_store *store;
+	struct mbt_tracker_http *tracker;
 	struct mbt_torrent *st = NULL, *lt = NULL;
+	struct server probe;
 	char cmd[128];
 	size_t len;
 
@@ -306,7 +261,20 @@ test_tracker_transfer(uint16_t tracker_port)
 	snprintf(leech_dir, sizeof(leech_dir), "%s/leech", tmp);
 	assert(mkdir(seed_dir, 0755) == 0);
 	assert(mkdir(leech_dir, 0755) == 0);
-	snprintf(announce, sizeof(announce), "http://127.0.0.1:%hu/announce", tracker_port);
+	assert(mbt_tracker_store_new(&store) == 0);
+	server_start(&probe, NULL);
+	server_stop(&probe);
+	assert(mbt_tracker_http_new(&tracker, ev, probe.port, store) == 0);
+	snprintf(announce, sizeof(announce), "http://127.0.0.1:%hu/announce", probe.port);
+
+	/* A client that sends nothing must not stall the tracker. */
+	struct sockaddr_in sin = {.sin_family = AF_INET, .sin_port = htons(probe.port)};
+	int silent = socket(AF_INET, SOCK_STREAM, 0);
+
+	sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	assert(connect(silent, (struct sockaddr *)&sin, sizeof(sin)) == 0);
+	for (int i = 0; i < 5; i++)
+		test_ev_step(ev, 1);
 
 	void *enc = make_torrent(seed_dir, announce, &len);
 	struct mbt_session *seed = session_on(seed_dir);
@@ -324,6 +292,9 @@ test_tracker_transfer(uint16_t tracker_port)
 	}
 	mbt_session_free(leech);
 	mbt_session_free(seed);
+	mbt_tracker_http_free(tracker);
+	mbt_tracker_store_free(store);
+	close(silent);
 	free(enc);
 	snprintf(cmd, sizeof(cmd), "rm -rf %s", tmp);
 	assert(system(cmd) == 0);
@@ -360,8 +331,6 @@ int
 main(void)
 {
 	struct mbt_http_curl *h;
-	uint16_t tracker_port = free_port();
-	pid_t tracker = tracker_start(tracker_port);
 
 	assert(mbt_ev_new_default(&ev) == 0);
 	assert(mbt_http_curl_new(&h, ev) == 0);
@@ -370,11 +339,9 @@ main(void)
 	test_refused(h);
 	mbt_http_curl_free(h);
 	test_loop_runs_and_free_cancels();
-	test_tracker_transfer(tracker_port);
+	test_tracker_transfer();
 	test_session_free_pending();
 	mbt_ev_destroy(ev);
-	kill(tracker, SIGKILL);
-	waitpid(tracker, NULL, 0);
 	fprintf(stderr, "http_curl_test: PASS\n");
 	return 0;
 }
