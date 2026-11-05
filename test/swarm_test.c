@@ -48,6 +48,36 @@ static void on_complete(struct mbt_torrent *t, void *arg)
 static void timeout_cb(struct mbt_ev_timer *t, void *a)
 { (void)t; (void)a; mbt_ev_stop(ev); }
 
+static void
+dump_sessions(const char *kind, struct mbt_session **ss, int n)
+{
+	for (int i = 0; i < n; i++) {
+		struct mbt_torrent *t = mbt_session_torrent_first(ss[i]);
+
+		if (!t) {
+			fprintf(stderr, "%s %d: no torrent\n", kind, i);
+			continue;
+		}
+		fprintf(stderr, "%s %d: state=%d error=%d have=%u/%u metadata=%d peers=%d\n",
+		        kind, i, (int)mbt_torrent_state(t), mbt_torrent_error(t),
+		        mbt_torrent_have_count(t), mbt_torrent_piece_count(t),
+		        mbt_torrent_has_metadata(t), mbt_torrent_peer_count(t));
+		for (int j = 0; j < mbt_torrent_peer_count(t); j++) {
+			struct mbt_peer_stats ps;
+
+			if (mbt_torrent_peer_stats(t, j, &ps) < 0)
+				continue;
+			fprintf(stderr, "  peer %s:%hu choked=%d interested=%d snubbed=%d "
+			        "outstanding=%d hash_failures=%d score=%d source=%d utp=%d "
+			        "down=%llu up=%llu\n",
+			        ps.addr ? ps.addr : "?", ps.conn_port, ps.choked, ps.interested,
+			        ps.snubbed, ps.outstanding, ps.hash_failures, ps.score,
+			        (int)ps.source, ps.utp, (unsigned long long)ps.downloaded,
+			        (unsigned long long)ps.uploaded);
+		}
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	signal(SIGPIPE, SIG_IGN);
@@ -235,11 +265,16 @@ int main(int argc, char *argv[])
 	        use_tracker ? " [tracker]" : " [direct]",
 	        disable_tcp ? "utp-only" : disable_utp ? "tcp-only" : "mixed");
 
+	/* Below the 60 s meson timeout, so a hang reaches the dump. */
 	struct mbt_ev_timer *to;
-	mbt_ev_timer_new(ev, &to, 60 * 1000000ULL, timeout_cb, NULL);
+	mbt_ev_timer_new(ev, &to, 45 * 1000000ULL, timeout_cb, NULL);
 	mbt_ev_run(ev);
 
 	fprintf(stderr, "swarm: %d/%d leechers completed\n", completions, num_leechers);
+	if (completions != num_leechers) {
+		dump_sessions("seeder", seeders, num_seeders);
+		dump_sessions("leecher", leechers, num_leechers);
+	}
 	assert(completions == num_leechers);
 	fprintf(stderr, "swarm_test: PASS\n");
 
