@@ -127,6 +127,10 @@ local function run(d, s, opts)
 	local function sample(node)
 		local r = d:query(node.addr, node.port, "sample_infohashes", {target = random_id()})
 
+		-- Most nodes lack BEP 51, but they still lead to other nodes.
+		if r ~= nil and r.y == "e" then
+			r = d:query(node.addr, node.port, "find_node", {target = random_id()})
+		end
 		in_flight = in_flight - 1
 		if r == nil or type(r.r) ~= "table" then
 			return
@@ -236,6 +240,9 @@ local function run(d, s, opts)
 			running = running + 1
 			stats.started = stats.started + 1
 			mbt.spawn(fetch, h)
+		end
+		if node_head > node_tail and hash_head > hash_tail and in_flight == 0 and running == 0 then
+			break
 		end
 		mbt.sleep(TICK_MS)
 	end
