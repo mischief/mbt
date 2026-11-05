@@ -32,6 +32,10 @@ MBT_API int mbt_dht_get_peers(struct mbt_dht *d, struct mbt_infohash *ih,
 /* Announce ourselves as a peer for an infohash (call after get_peers) */
 MBT_API int mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen_port);
 
+/* Visit each node in the routing table. cb must not call into d. */
+typedef void (*mbt_dht_node_cb)(const uint8_t id[20], const char *addr, uint16_t port, void *arg);
+MBT_API void mbt_dht_foreach_node(struct mbt_dht *d, mbt_dht_node_cb cb, void *arg);
+
 /* Number of nodes in routing table */
 MBT_API int mbt_dht_node_count(struct mbt_dht *d);
 

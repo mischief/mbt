@@ -553,8 +553,10 @@ dht_send_ping(struct mbt_dht *d, const struct sockaddr_storage *addr)
 static struct dht_lookup *
 lookup_find_for_target(struct mbt_dht *d, const uint8_t *target)
 {
+	/* A finished lookup keeps its tokens until its slot is reused. */
 	for (int i = 0; i < MAX_LOOKUPS; i++)
-		if (d->lookups[i].active && memcmp(d->lookups[i].target, target, 20) == 0)
+		if (d->lookups[i].node_count > 0 &&
+		    memcmp(d->lookups[i].target, target, 20) == 0)
 			return &d->lookups[i];
 	return NULL;
 }
@@ -1256,8 +1258,10 @@ mbt_dht_free(struct mbt_dht *d)
 			mbt_ev_timer_free(d->lookups[i].timer);
 	if (d->refresh_timer) mbt_ev_timer_free(d->refresh_timer);
 	if (d->token_timer) mbt_ev_timer_free(d->token_timer);
-	for (int i = 0; i < DHT_MAX_ITEMS; i++)
+	for (int i = 0; i < DHT_MAX_ITEMS; i++) {
 		free(d->items[i].v);
+		free(d->items[i].salt);
+	}
 	/* Free routing table */
 	struct dht_bucket *b = d->buckets;
 	while (b) {
@@ -1392,6 +1396,32 @@ mbt_dht_announce(struct mbt_dht *d, struct mbt_infohash *ih, uint16_t listen_por
 	}
 	mbt_log_info(MBT_LOG_DHT, "announced to %d nodes", sent);
 	return 0;
+}
+
+void
+mbt_dht_foreach_node(struct mbt_dht *d, mbt_dht_node_cb cb, void *arg)
+{
+	for (struct dht_bucket *b = d->buckets; b; b = b->next) {
+		struct dht_node *n;
+
+		SLIST_FOREACH(n, &b->nodes, entry) {
+			char addr[INET6_ADDRSTRLEN];
+			uint16_t port;
+
+			if (n->addr.ss_family == AF_INET6) {
+				const struct sockaddr_in6 *in = (const struct sockaddr_in6 *)&n->addr;
+
+				inet_ntop(AF_INET6, &in->sin6_addr, addr, sizeof(addr));
+				port = ntohs(in->sin6_port);
+			} else {
+				const struct sockaddr_in *in = (const struct sockaddr_in *)&n->addr;
+
+				inet_ntop(AF_INET, &in->sin_addr, addr, sizeof(addr));
+				port = ntohs(in->sin_port);
+			}
+			cb(n->id, addr, port, arg);
+		}
+	}
 }
 
 int

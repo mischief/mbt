@@ -8,6 +8,7 @@
 .Nm mbt_dht_get_peers ,
 .Nm mbt_dht_announce ,
 .Nm mbt_dht_node_count ,
+.Nm mbt_dht_foreach_node ,
 .Nm mbt_dht_port ,
 .Nm mbt_dht_set_node_id ,
 .Nm mbt_dht_set_verify ,
@@ -45,6 +46,13 @@
 .Ft int
 .Fn mbt_dht_put_mutable "struct mbt_dht *d" "const uint8_t k[32]" "const uint8_t sig[64]" "int64_t seq" "const char *salt" "size_t salt_len" "const void *v" "size_t vlen" "mbt_dht_done_cb done_cb" "void *arg"
 .Sh DESCRIPTION
+.Fn mbt_dht_foreach_node
+calls
+.Fa cb
+with the id, address and port of each node in the routing table.
+.Fa cb
+must not call into the DHT.
+.Pp
 The
 .Nm mbt_dht
 module provides a BitTorrent DHT implementation, supporting both standard node operations and BEP 44 (Arbitrary data storage) capabilities.
