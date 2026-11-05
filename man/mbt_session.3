@@ -112,6 +112,19 @@ timeouts, and optional HTTP tracker callback.
 The session takes its own reference to
 .Fa cfg->default_storage .
 .Pp
+.Fa cfg->http
+runs HTTP and HTTPS tracker requests, and
+.Fa cfg->http_arg
+is its last argument.
+Without it these trackers do not work.
+When set,
+.Fa cfg->http_free
+runs first in
+.Fn mbt_session_free .
+It must end pending requests, because they report to the session.
+See
+.Xr mbt_http_curl 3 .
+.Pp
 .Fn mbt_session_default
 creates a session with sensible defaults: file storage at
 .Fa path ,

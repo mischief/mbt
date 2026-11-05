@@ -1,0 +1,66 @@
+.Dd November 4, 2026
+.Dt MBT_HTTP_CURL 3
+.Os
+.Sh NAME
+.Nm mbt_http_curl_new ,
+.Nm mbt_http_curl_free ,
+.Nm mbt_http_curl_fn
+.Nd Non-blocking HTTP client for tracker announces.
+.Sh SYNOPSIS
+.In mbt/http_curl.h
+.Ft int
+.Fn mbt_http_curl_new "struct mbt_http_curl **out" "struct mbt_ev *ev"
+.Ft void
+.Fn mbt_http_curl_free "void *c"
+.Ft int
+.Fn mbt_http_curl_fn "struct mbt_http_request *req" "mbt_http_done_fn done" \
+"void *done_arg" "void *arg"
+.Sh DESCRIPTION
+These functions exist only in builds with libcurl.
+They run HTTP and HTTPS requests on the event loop
+.Fa ev ,
+so a slow tracker does not stop peer traffic.
+.Pp
+.Fn mbt_http_curl_new
+makes a client.
+.Pp
+.Fn mbt_http_curl_fn
+is an
+.Vt mbt_http_fn .
+Pass the client as
+.Fa arg .
+.Pp
+.Fn mbt_http_curl_free
+frees the client.
+Each pending request finishes as a failure before it returns.
+.Pp
+A request fails after 15 seconds, on an HTTP status of 400 or more, or when the
+reply is over 8 MiB.
+.Pp
+A client serves one session.
+Give it to the session with
+.Fa http_free ,
+so that
+.Xr mbt_session_free 3
+frees it first:
+.Bd -literal -offset indent
+struct mbt_http_curl *h;
+
+mbt_http_curl_new(&h, ev);
+cfg.http = mbt_http_curl_fn;
+cfg.http_arg = h;
+cfg.http_free = mbt_http_curl_free;
+.Ed
+.Pp
+The session owns the client after
+.Xr mbt_session_new 3
+succeeds.
+.Sh RETURN VALUES
+.Fn mbt_http_curl_new
+and
+.Fn mbt_http_curl_fn
+return 0 on success or a negative errno value on failure.
+.Sh SEE ALSO
+.Xr mbt_session 3
+.Sh CAVEATS
+DNS lookups stop the loop if libcurl has no threaded or c-ares resolver.

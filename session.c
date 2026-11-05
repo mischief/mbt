@@ -122,6 +122,7 @@ struct mbt_session {
 	uint32_t utp_window_pkts;  /* validated uTP window (packets); 0 = default */
 	mbt_http_fn http;
 	void *http_arg;
+	void (*http_free)(void *arg);
 	uint8_t peer_id[20];
 
 	struct mbt_session_callbacks cb;
@@ -881,6 +882,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->utp_window_pkts = cfg->utp_window_pkts;
 	s->http = cfg->http;
 	s->http_arg = cfg->http_arg;
+	s->http_free = cfg->http_free;
 
 	STAILQ_INIT(&s->torrents);
 	STAILQ_INIT(&s->pending);
@@ -926,6 +928,10 @@ mbt_session_free(struct mbt_session *s)
 {
 	if (!s)
 		return;
+
+	/* Pending announces report to s. */
+	if (s->http_free)
+		s->http_free(s->http_arg);
 
 	mbt_listener_close(&s->listener);
 	if (s->lsd_announce_timer)

@@ -211,3 +211,7 @@ test('utp_throughput', utp_throughput_test, timeout: 900, suite: 'slow')
 tcp_throughput_test = executable('tcp_throughput_test', 'tcp_throughput_test.c',
   link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tcp_throughput', tcp_throughput_test, timeout: 900, suite: 'slow')
+if libcurl_dep.found()
+  http_curl_test = executable('http_curl_test', 'http_curl_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+  test('http_curl', http_curl_test, timeout: 60)
+endif

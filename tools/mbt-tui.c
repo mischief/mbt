@@ -11,12 +11,12 @@
 #include <sys/ioctl.h>
 #include <sys/termios.h>
 #include <ncurses.h>
-#include <curl/curl.h>
 #include <stdint.h>
 #include <unistd.h>
 
 #include "mbt/event.h"
 #include "mbt/infohash.h"
+#include "mbt/http_curl.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/peer.h"
@@ -26,47 +26,6 @@
 
 struct mbt_ev_io;
 struct mbt_ev_timer;
-
-/* --- HTTP tracker via curl (async-shaped, blocks internally) --- */
-struct curl_buf { char *data; size_t len; };
-
-static size_t
-curl_write_cb(void *ptr, size_t size, size_t nmemb, void *v)
-{
-	struct curl_buf *b = v;
-	size_t total = size * nmemb;
-	char *tmp = realloc(b->data, b->len + total);
-	if (!tmp) return 0;
-	memcpy(tmp + b->len, ptr, total);
-	b->data = tmp;
-	b->len += total;
-	return total;
-}
-
-static int
-curl_http_fn(struct mbt_http_request *req, mbt_http_done_fn done_cb, void *done_arg, void *arg)
-{
-	(void)arg;
-	CURL *c = curl_easy_init();
-	if (!c) return -1;
-	struct curl_buf buf = {0};
-	curl_easy_setopt(c, CURLOPT_URL, req->url);
-	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(c, CURLOPT_WRITEDATA, &buf);
-	curl_easy_setopt(c, CURLOPT_TIMEOUT, 15L);
-	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-	CURLcode rc = curl_easy_perform(c);
-	curl_easy_cleanup(c);
-	struct mbt_http_response resp = {0};
-	if (rc == CURLE_OK) {
-		resp.data = buf.data;
-		resp.len = buf.len;
-	} else {
-		free(buf.data);
-	}
-	done_cb(&resp, done_arg);
-	return 0;
-}
 
 static struct mbt_ev *ev;
 static struct mbt_session *session;
@@ -547,12 +506,18 @@ main(int argc, char *argv[])
 	win_cmd = newwin(1, COLS, LINES - 1, 0);
 	draw_all();
 
+	struct mbt_http_curl *http = NULL;
+
+	if (mbt_http_curl_new(&http, ev) < 0)
+		return 1;
 	struct mbt_session_config cfg = {
 		.ev = ev,
 		.default_storage = mbt_storage_file_new("."),
 		.listen_port = 0,
 		.mbt_lsd_announce = 1,
-		.http = curl_http_fn,
+		.http = mbt_http_curl_fn,
+		.http_arg = http,
+		.http_free = mbt_http_curl_free,
 	};
 	mbt_session_new(&session, &cfg);
 	mbt_session_enable_dht(session);

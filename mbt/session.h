@@ -53,6 +53,8 @@ struct mbt_session_config {
 	const char *pcp_gateway; /* NULL = auto-detect */
 	mbt_http_fn http;      /* HTTP callback for HTTP/HTTPS trackers (NULL = disabled) */
 	void *http_arg;
+	/* Runs first in mbt_session_free, with http_arg. May be NULL. It must fail pending requests. */
+	void (*http_free)(void *arg);
 
 	struct mbt_timers timers;  /* 0-initialized = all defaults */
 

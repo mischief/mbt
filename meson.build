@@ -147,6 +147,13 @@ _verscript = '-Wl,--version-script=' + meson.current_source_dir() / 'libmbt.map'
 libmbt_link_args = cc.has_link_argument(_verscript) ? [_verscript] : []
 libmbt_link_depends = libmbt_link_args.length() > 0 ? files('libmbt.map') : []
 
+libcurl_dep = dependency('libcurl', required: get_option('curl'))
+if libcurl_dep.found()
+  bt_src += 'http_curl.c'
+  deps += libcurl_dep
+  add_project_arguments('-DHAVE_CURL', language: 'c')
+endif
+
 libmbt = library('mbt', bt_src, dependencies: deps, install: true,
                  include_directories: mbt_inc,
                  soversion: 0,
@@ -162,6 +169,7 @@ install_headers(
   'mbt/dht.h',
   'mbt/event.h',
   'mbt/hex.h',
+  'mbt/http_curl.h',
   'mbt/holepunch.h',
   'mbt/infohash.h',
   'mbt/log.h',
@@ -205,9 +213,8 @@ executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directorie
 executable('mbt-dhtd', 'tools/mbt-dhtd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 
-libcurl_dep = dependency('libcurl', required: false)
 if libcurl_dep.found()
-  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [libcurl_dep], install: true, install_rpath: mbt_rpath)
+  executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 endif
 
 # Fuzz
@@ -219,5 +226,5 @@ if not ncurses_dep.found()
   ncurses_dep = dependency('ncurses', required: false)
 endif
 if ncurses_dep.found() and libcurl_dep.found()
-  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep, libcurl_dep], install: true, install_rpath: mbt_rpath)
+  executable('mbt-tui', 'tools/mbt-tui.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps + [ncurses_dep], install: true, install_rpath: mbt_rpath)
 endif

@@ -6,10 +6,10 @@
 #include <unistd.h>
 #include <time.h>
 #include <err.h>
-#include <curl/curl.h>
 #include <stdint.h>
 
 #include "mbt/event.h"
+#include "mbt/http_curl.h"
 #include "mbt/session.h"
 #include "mbt/torrent.h"
 #include "mbt/tracker.h"
@@ -22,55 +22,6 @@ struct mbt_torrent;
 static struct mbt_session *session;
 static int seed_mode;
 static int no_progress;
-
-/* --- curl HTTP callback (async-shaped, blocks internally) --- */
-
-struct curl_buf {
-	char *data;
-	size_t len;
-};
-
-static size_t
-curl_write_cb(void *ptr, size_t size, size_t nmemb, void *v)
-{
-	struct curl_buf *b = v;
-	size_t total = size * nmemb;
-	char *tmp = realloc(b->data, b->len + total);
-	if (!tmp) return 0;
-	memcpy(tmp + b->len, ptr, total);
-	b->data = tmp;
-	b->len += total;
-	return total;
-}
-
-static int
-curl_http_fn(struct mbt_http_request *req, mbt_http_done_fn done_cb, void *done_arg, void *arg)
-{
-	(void)arg;
-	CURL *c = curl_easy_init();
-	if (!c) return -1;
-
-	struct curl_buf buf = {0};
-
-	curl_easy_setopt(c, CURLOPT_URL, req->url);
-	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(c, CURLOPT_WRITEDATA, &buf);
-	curl_easy_setopt(c, CURLOPT_TIMEOUT, 15L);
-	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-
-	CURLcode rc = curl_easy_perform(c);
-	curl_easy_cleanup(c);
-
-	struct mbt_http_response resp = {0};
-	if (rc == CURLE_OK) {
-		resp.data = buf.data;
-		resp.len = buf.len;
-	} else {
-		free(buf.data);
-	}
-	done_cb(&resp, done_arg);
-	return 0;
-}
 
 /* --- Callbacks --- */
 
@@ -196,6 +147,7 @@ int
 main(int argc, char *argv[])
 {
 	int rv, ch;
+	struct mbt_http_curl *http = NULL;
 	const char *download_dir = ".";
 	int debug = 0;
 	int trace = 0;
@@ -281,7 +233,6 @@ main(int argc, char *argv[])
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
-	curl_global_init(CURL_GLOBAL_DEFAULT);
 
 	mbt_log_set(mbt_log_stderr, NULL);
 	if (debug)
@@ -297,7 +248,12 @@ main(int argc, char *argv[])
 	cfg.default_storage = mbt_storage_file_new(download_dir);
 	cfg.picker = picker;
 	cfg.listen_port = listen_port;
-	cfg.http = curl_http_fn;
+	rv = mbt_http_curl_new(&http, cfg.ev);
+	if (rv < 0)
+		errx(1, "http: %s", strerror(-rv));
+	cfg.http = mbt_http_curl_fn;
+	cfg.http_arg = http;
+	cfg.http_free = mbt_http_curl_free;
 	cfg.enable_pcp = use_pcp;
 	cfg.download_rate = dl_rate;
 	cfg.disable_tcp = disable_tcp;
@@ -354,6 +310,5 @@ main(int argc, char *argv[])
 
 	mbt_session_free(session);
 	mbt_ev_destroy(cfg.ev);
-	curl_global_cleanup();
 	return rv < 0 ? 1 : 0;
 }
