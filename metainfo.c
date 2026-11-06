@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -24,6 +25,8 @@
 #include "banned.h"
 
 #define MAX_TRACKERS 16
+#define MAX_WEBSEEDS 16
+#define MAX_URL_LEN 2048
 #define MAX_FILES 4096
 #define DEFAULT_PIECE_LEN 262144
 
@@ -46,6 +49,8 @@ struct mbt_metainfo {
 
 	char *trackers[MAX_TRACKERS];
 	int tracker_count;
+	char *webseeds[MAX_WEBSEEDS];
+	int webseed_count;
 
 	struct { char host[64]; uint16_t port; } nodes[MAX_TRACKERS];
 	int node_count;
@@ -84,6 +89,8 @@ mbt_metainfo_free(struct mbt_metainfo *mi)
 	free(mi->files);
 	for (int i = 0; i < mi->tracker_count; i++)
 		free(mi->trackers[i]);
+	for (int i = 0; i < mi->webseed_count; i++)
+		free(mi->webseeds[i]);
 	if (mi->ih) mbt_infohash_unref(mi->ih);
 	free(mi);
 }
@@ -125,6 +132,25 @@ join_path(struct mbt_be_value *list)
 		path[n] = '\0';
 	}
 	return strdup(path);
+}
+
+/* Keep an http or https URL. A torrent can list any bytes here. */
+static int
+webseed_add(struct mbt_metainfo *mi, const char *url, size_t len)
+{
+	char *copy;
+
+	if (len == 0 || len > MAX_URL_LEN || memchr(url, '\0', len))
+		return -EINVAL;
+	if (!((len > 7 && strncasecmp(url, "http://", 7) == 0) ||
+	      (len > 8 && strncasecmp(url, "https://", 8) == 0)))
+		return -EINVAL;
+	if (mi->webseed_count >= MAX_WEBSEEDS)
+		return -ENOSPC;
+	if ((copy = strndup(url, len)) == NULL)
+		return -ENOMEM;
+	mi->webseeds[mi->webseed_count++] = copy;
+	return 0;
 }
 
 int
@@ -237,6 +263,17 @@ mbt_metainfo_parse(struct mbt_metainfo **out, const void *data, size_t len)
 		struct mbt_be_value *ann = mbt_be_find(be, "announce");
 		if (ann && ann->type == BE_STRING)
 			mi->trackers[mi->tracker_count++] = strndup((char *)ann->string.buf, ann->string.len);
+	}
+
+	/* BEP 19: a string or a list of strings. */
+	struct mbt_be_value *ul = mbt_be_find(be, "url-list");
+	if (ul && ul->type == BE_STRING) {
+		webseed_add(mi, (char *)ul->string.buf, ul->string.len);
+	} else if (ul && ul->type == BE_LIST) {
+		struct mbt_be_value *url;
+		TAILQ_FOREACH(url, &ul->listhead, next)
+			if (url->type == BE_STRING)
+				webseed_add(mi, (char *)url->string.buf, url->string.len);
 	}
 
 	/* Comment */
@@ -405,6 +442,21 @@ mbt_metainfo_set_content(struct mbt_metainfo *mi, const char *path, uint32_t pie
 	return 0;
 }
 
+int mbt_metainfo_add_webseed(struct mbt_metainfo *mi, const char *url)
+{
+	if (!mi || !url)
+		return -EINVAL;
+	return webseed_add(mi, url, strlen(url));
+}
+
+int mbt_metainfo_webseed_count(struct mbt_metainfo *mi) { return mi->webseed_count; }
+
+const char *
+mbt_metainfo_webseed(struct mbt_metainfo *mi, int idx)
+{
+	return idx >= 0 && idx < mi->webseed_count ? mi->webseeds[idx] : NULL;
+}
+
 int mbt_metainfo_add_tracker(struct mbt_metainfo *mi, const char *url)
 {
 	if (mi->tracker_count >= MAX_TRACKERS) return -ENOSPC;
@@ -531,6 +583,19 @@ mbt_metainfo_encode(struct mbt_metainfo *mi, unsigned char **out, size_t *len)
 	}
 
 	if (mbt_be_dict_append(root, "info", info) < 0) return -ENOMEM;
+	if (mi->webseed_count > 0) {
+		_cleanup_be_ struct mbt_be_value *ul = NULL;
+
+		if (mbt_be_list_new(&ul) < 0) return -ENOMEM;
+		for (int i = 0; i < mi->webseed_count; i++) {
+			_cleanup_be_ struct mbt_be_value *url = NULL;
+
+			if (mbt_be_string_new(&url, mi->webseeds[i], strlen(mi->webseeds[i])) < 0)
+				return -ENOMEM;
+			mbt_be_list_append(ul, url);
+		}
+		if (mbt_be_dict_append(root, "url-list", ul) < 0) return -ENOMEM;
+	}
 
 	/* DHT bootstrap nodes */
 	if (mi->node_count > 0) {

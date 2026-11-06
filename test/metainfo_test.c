@@ -4,11 +4,13 @@
  */
 #include <assert.h>
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdint.h>
 
+#include "mbt/infohash.h"
 #include "mbt/metainfo.h"
 
 static void
@@ -72,6 +74,63 @@ test_trackers(void)
 }
 
 static void
+test_webseeds(void)
+{
+	static const char list[] = "8:url-listl9:ftp://x/ai5e10:http://x/b12:HTTPS://y/c/ee";
+	static const char one[] = "8:url-list10:http://x/ae";
+	struct mbt_metainfo *mi, *in;
+	char path[] = "/tmp/mbt_ws_XXXXXX";
+	unsigned char *enc, *base;
+	size_t enc_len, base_len;
+	char buf[4096];
+	int fd = mkstemp(path);
+
+	assert(fd >= 0);
+	assert(write(fd, "hello", 5) == 5);
+	close(fd);
+	assert(mbt_metainfo_new(&mi) == 0);
+	assert(mbt_metainfo_set_content(mi, path, 16384) == 0);
+	assert(mbt_metainfo_encode(mi, &base, &base_len) == 0);
+	assert(base_len + sizeof(list) < sizeof(buf));
+
+	assert(mbt_metainfo_add_webseed(mi, "ftp://x/a") == -EINVAL);
+	assert(mbt_metainfo_add_webseed(mi, "http://") == -EINVAL);
+	assert(mbt_metainfo_add_webseed(mi, "http://x/a") == 0);
+	assert(mbt_metainfo_add_webseed(mi, "https://y/") == 0);
+	for (int i = 0; i < 14; i++)
+		assert(mbt_metainfo_add_webseed(mi, "http://z/") == 0);
+	assert(mbt_metainfo_add_webseed(mi, "http://z/") == -ENOSPC);
+	assert(mbt_metainfo_webseed(mi, 16) == NULL);
+
+	/* Encode writes the URLs. They are not part of the infohash. */
+	assert(mbt_metainfo_encode(mi, &enc, &enc_len) == 0);
+	assert(mbt_metainfo_parse(&in, enc, enc_len) == 0);
+	assert(mbt_metainfo_webseed_count(in) == 16);
+	assert(strcmp(mbt_metainfo_webseed(in, 1), "https://y/") == 0);
+	assert(mbt_infohash_cmp(mbt_metainfo_infohash(in), mbt_metainfo_infohash(mi)) == 0);
+	mbt_metainfo_free(in);
+	free(enc);
+
+	memcpy(buf, base, base_len - 1);
+	memcpy(buf + base_len - 1, one, sizeof(one) - 1);
+	assert(mbt_metainfo_parse(&in, buf, base_len - 1 + sizeof(one) - 1) == 0);
+	assert(mbt_metainfo_webseed_count(in) == 1);
+	assert(strcmp(mbt_metainfo_webseed(in, 0), "http://x/a") == 0);
+	mbt_metainfo_free(in);
+
+	memcpy(buf + base_len - 1, list, sizeof(list) - 1);
+	assert(mbt_metainfo_parse(&in, buf, base_len - 1 + sizeof(list) - 1) == 0);
+	assert(mbt_metainfo_webseed_count(in) == 2);
+	assert(strcmp(mbt_metainfo_webseed(in, 0), "http://x/b") == 0);
+	assert(strcmp(mbt_metainfo_webseed(in, 1), "HTTPS://y/c/") == 0);
+	mbt_metainfo_free(in);
+
+	free(base);
+	mbt_metainfo_free(mi);
+	unlink(path);
+}
+
+static void
 test_private(void)
 {
 	struct mbt_metainfo *mi;
@@ -131,6 +190,7 @@ int main(void)
 {
 	test_create_single_file();
 	test_trackers();
+	test_webseeds();
 	test_private();
 	test_auto_piece_length();
 	test_parse_real_torrent();

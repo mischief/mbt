@@ -47,6 +47,8 @@ cmd_show(const char *path)
 
 	for (int i = 0; i < mbt_metainfo_tracker_count(mi); i++)
 		printf("Tracker:    %s\n", mbt_metainfo_tracker(mi, i));
+	for (int i = 0; i < mbt_metainfo_webseed_count(mi); i++)
+		printf("Web seed:   %s\n", mbt_metainfo_webseed(mi, i));
 
 	if (mbt_metainfo_comment(mi))
 		printf("Comment:    %s\n", mbt_metainfo_comment(mi));
@@ -91,16 +93,23 @@ cmd_create(int argc, char **argv)
 	const char *output = NULL;
 	const char *tracker = NULL;
 	int piece_kib = 256;
+	const char *webseeds[16];
+	int nwebseeds = 0;
 	int ch;
 
 	optind = 1;
-	while ((ch = getopt(argc, argv, "o:t:p:")) != -1) {
+	while ((ch = getopt(argc, argv, "o:t:p:w:")) != -1) {
 		switch (ch) {
 		case 'o': output = optarg; break;
 		case 't': tracker = optarg; break;
 		case 'p': piece_kib = mbt_arg_int(optarg, 1, 1 << 20); break;
+		case 'w':
+			if (nwebseeds == 16)
+				errx(1, "too many web seeds");
+			webseeds[nwebseeds++] = optarg;
+			break;
 		default:
-			fprintf(stderr, "create: [-o out.torrent] [-t tracker] [-p piece_kib] <path>\n");
+			fprintf(stderr, "create: [-o out.torrent] [-t tracker] [-p piece_kib] [-w webseed] <path>\n");
 			return 1;
 		}
 	}
@@ -115,6 +124,11 @@ cmd_create(int argc, char **argv)
 
 	if (tracker)
 		mbt_metainfo_add_tracker(mi, tracker);
+	for (int i = 0; i < nwebseeds; i++) {
+		rv = mbt_metainfo_add_webseed(mi, webseeds[i]);
+		if (rv < 0)
+			errx(1, "web seed %s: %s", webseeds[i], strerror(-rv));
+	}
 
 	unsigned char *encoded;
 	size_t enc_len;
@@ -143,7 +157,7 @@ static void
 usage(void)
 {
 	fprintf(stderr, "usage: mbt-torrent <command> [args]\n");
-	fprintf(stderr, "  create [-o out.torrent] [-t tracker] [-p piece_kib] <file|dir>\n");
+	fprintf(stderr, "  create [-o out.torrent] [-t tracker] [-p piece_kib] [-w webseed] <file|dir>\n");
 	fprintf(stderr, "  show <file.torrent>\n");
 	fprintf(stderr, "  magnet <file.torrent>\n");
 	exit(1);

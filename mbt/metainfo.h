@@ -29,6 +29,9 @@ MBT_API int mbt_metainfo_set_content(struct mbt_metainfo *mi, const char *path, 
 /* Add a tracker URL */
 MBT_API int mbt_metainfo_add_tracker(struct mbt_metainfo *mi, const char *url);
 
+/* Add a BEP 19 web seed. Returns -EINVAL if it is not http or https. */
+MBT_API int mbt_metainfo_add_webseed(struct mbt_metainfo *mi, const char *url);
+
 /* Set comment */
 MBT_API void mbt_metainfo_set_comment(struct mbt_metainfo *mi, const char *comment);
 
@@ -47,6 +50,8 @@ MBT_API const char *mbt_metainfo_file_path(struct mbt_metainfo *mi, int idx);
 MBT_API uint64_t mbt_metainfo_file_length(struct mbt_metainfo *mi, int idx);
 MBT_API int mbt_metainfo_tracker_count(struct mbt_metainfo *mi);
 MBT_API const char *mbt_metainfo_tracker(struct mbt_metainfo *mi, int idx);
+MBT_API int mbt_metainfo_webseed_count(struct mbt_metainfo *mi);
+MBT_API const char *mbt_metainfo_webseed(struct mbt_metainfo *mi, int idx);
 MBT_API int mbt_metainfo_is_private(struct mbt_metainfo *mi);
 MBT_API const char *mbt_metainfo_comment(struct mbt_metainfo *mi);
 
