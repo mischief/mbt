@@ -95,6 +95,8 @@ _Static_assert(UTP_MAX_RECV_PAYLOAD <= UINT16_MAX,
  * the connect failure (so a uTP-first dial could not fall back to TCP). With
  * the RTO backoff this is a few seconds before we give up. */
 #define UTP_SYN_MAX_RETRANSMITS 4
+/* A connected peer that acks nothing for this long is gone. */
+#define UTP_STALL_TIMEOUT_US (10 * 1000000ULL)
 /*
  * Initial congestion window. One packet (the old value) means the pipe cannot
  * fill enough to get ack feedback flowing under any delay/reorder, and
@@ -196,6 +198,8 @@ struct mbt_utp_sock {
 	uint16_t     last_loss_una; /* send_una at last loss response */
 	int          loss_acted;    /* responded to loss at last_loss_una */
 	uint8_t      syn_retransmits; /* SYN resends while SYN_SENT (connect timeout) */
+	uint64_t     stall_since;     /* last ack progress, or send after idle */
+	int          in_rto_event;    /* the rto callback is reporting a dead peer */
 
 	/* recv sequence */
 	uint16_t     ack_nr;        /* last in-order seq received */
@@ -688,6 +692,12 @@ utp_conn_free(struct mbt_conn *c)
 	if (s->destroy_timer)
 		return;
 
+	/* This call is inside the rto timer callback, so free later. */
+	if (s->in_rto_event) {
+		mbt_ev_timer_new(s->ctx->ev, &s->destroy_timer, 0, utp_destroy_cb, s);
+		return;
+	}
+
 	/* Remove from ctx hash table if still registered */
 	if (s->ctx)
 		utp_ctx_remove(s->ctx, s);
@@ -1046,8 +1056,10 @@ utp_flush(struct mbt_utp_sock *s)
 		utp_send_data(s, cur_seq, payload, chunk);
 	}
 	/* An ack rearms a running timer, but no ack can start one. */
-	if (s->send_una != s->seq_nr && !s->rto_timer)
+	if (s->send_una != s->seq_nr && !s->rto_timer) {
+		s->stall_since = utp_now_us_c(s);
 		utp_arm_rto(s);
+	}
 	return 0;
 }
 
@@ -1220,6 +1232,17 @@ utp_rto_cb(struct mbt_ev_timer *t, void *arg)
 		return;
 	}
 
+	if (s->state == UTP_CS_CONNECTED && s->send_una != s->seq_nr &&
+	    s->ctx->now_us - s->stall_since >= UTP_STALL_TIMEOUT_US) {
+		/* The owner keeps the conn until it calls free. */
+		s->state = UTP_CS_DESTROY;
+		s->in_rto_event = 1;
+		if (s->eventcb)
+			s->eventcb(&s->conn, -ETIMEDOUT, s->cb_arg);
+		s->in_rto_event = 0;
+		return;
+	}
+
 	if (s->state == UTP_CS_CONNECTED &&
 	    s->send_una != s->seq_nr) {
 		/* Halve window on loss (RTO). */
@@ -1263,6 +1286,8 @@ utp_process_ack(struct mbt_utp_sock *s, uint16_t peer_ack_nr,
 	s->dup_acks = 0;
 
 	uint64_t now = utp_now_us_c(s);
+
+	s->stall_since = now;
 
 	/* Mark cumulative acks */
 	for (uint16_t seq = s->send_una;

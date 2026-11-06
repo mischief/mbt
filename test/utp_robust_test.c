@@ -59,6 +59,7 @@ struct rx_fault {
 	/* tail loss: drop DATA with this seq the first drop_seq_times times. */
 	int drop_seq;
 	int drop_seq_times;
+	int drop_all;              /* drop every DATA packet */
 
 	/* deep reorder: hold up to `deep` DATA datagrams, then release reversed
 	 * via a 0ms timer. delivering reversed within each batch produces deep
@@ -103,6 +104,9 @@ rx_hook(struct mbt_utp_ctx *ctx, const void *buf, size_t len,
 	/* during re-injection, deliver verbatim -- don't re-hold/re-drop. */
 	if (f->reinjecting)
 		return 1;
+
+	if (f->drop_all && type == ST_DATA)
+		return 0;
 
 	if (f->drop_seq_times > 0 && type == ST_DATA && len >= 20 &&
 	    pkt_seq(buf) == (uint16_t)f->drop_seq) {
@@ -209,11 +213,13 @@ ow_client_writecb(struct mbt_conn *c, void *arg)
 	ow_client_pump(c, arg);
 }
 
+static int ow_client_err;
+
 static void
 ow_client_eventcb(struct mbt_conn *c, int err, void *arg)
 {
 	struct ow_client *st = arg;
-	if (err < 0) { mbt_ev_stop(g_ev); return; }
+	if (err < 0) { ow_client_err = err; mbt_ev_stop(g_ev); return; }
 	ow_client_pump(c, st);
 }
 
@@ -262,8 +268,16 @@ run_oneway(const char *name, struct rx_fault *fault)
 	mbt_ev_timer_free(to);
 	if (fault->flush_timer) mbt_ev_timer_free(fault->flush_timer);
 
-	assert(ow_received == ow_total);
-	assert(memcmp(ow_recv_buf, send_data, (size_t)ow_total) == 0);
+	if (fault->drop_all) {
+		assert(ow_client_err == -ETIMEDOUT);
+		assert(ow_received == 0);
+		/* The owner frees the conn later, as the peer layer does. */
+		for (int i = 0; i < 5; i++)
+			mbt_ev_step(g_ev, 10);
+	} else {
+		assert(ow_received == ow_total);
+		assert(memcmp(ow_recv_buf, send_data, (size_t)ow_total) == 0);
+	}
 
 	mbt_conn_free(client_conn);
 	if (ow_server_conn) mbt_conn_free(ow_server_conn);
@@ -296,6 +310,19 @@ test_tail_loss(void)
 	run_oneway("tail_loss", &f);
 }
 
+/* A peer that acks nothing must end the connection. */
+static void
+test_dead_peer(void)
+{
+	struct rx_fault f = {0};
+
+	f.drop_all = 1;
+	ow_total = 300;
+	ow_client_err = 0;
+	run_oneway("dead_peer", &f);
+	ow_total = OW_TOTAL;
+}
+
 static void
 test_first_packet_lost(void)
 {
@@ -319,6 +346,7 @@ main(void)
 	test_deep_reorder();
 	test_tail_loss();
 	test_first_packet_lost();
+	test_dead_peer();
 	printf("all utp robustness tests passed\n");
 	return 0;
 }
