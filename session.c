@@ -219,6 +219,7 @@ struct mbt_session {
 	/* Torrents */
 	struct session_torrent_list torrents;
 	TAILQ_HEAD(dht_queue_head, session_torrent) dht_queue[DHT_Q_COUNT];
+	LIST_HEAD(, dht_lookup_ctx) dht_lookups; /* in flight */
 	struct mbt_ev_timer *dht_pump;
 
 	/* Pending outgoing connections */
@@ -313,6 +314,7 @@ reschedule:
 static void session_dht_request(struct mbt_session *s, struct session_torrent *st, int want);
 static void session_dht_schedule(struct mbt_session *s);
 static void session_dht_unqueue(struct mbt_session *s, struct session_torrent *st);
+static void session_dht_close(struct mbt_session *s);
 
 static void
 session_maintain_cb(struct mbt_ev_timer *timer, void *v)
@@ -1151,6 +1153,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->dht_no_bootstrap = cfg->dht_no_bootstrap;
 
 	STAILQ_INIT(&s->torrents);
+	LIST_INIT(&s->dht_lookups);
 	for (int i = 0; i < DHT_Q_COUNT; i++)
 		TAILQ_INIT(&s->dht_queue[i]);
 	STAILQ_INIT(&s->pending);
@@ -1219,7 +1222,7 @@ mbt_session_free(struct mbt_session *s)
 	if (s->lsd)
 		mbt_lsd_freep(&s->lsd);
 	if (s->dht)
-		mbt_dht_free(s->dht);
+		session_dht_close(s);
 	if (s->pcp_retry_timer)
 		mbt_ev_timer_free(s->pcp_retry_timer);
 	if (s->pcp)
@@ -1436,6 +1439,7 @@ struct dht_lookup_ctx {
 	struct mbt_session *session;
 	struct mbt_infohash *ih;
 	int announce;
+	LIST_ENTRY(dht_lookup_ctx) entry;
 };
 
 static void
@@ -1464,9 +1468,25 @@ dht_done_cb(void *arg)
 				st->last_dht_announce = time(NULL);
 		}
 	}
+	LIST_REMOVE(ctx, entry);
 	mbt_infohash_unref(ctx->ih);
 	free(ctx);
 	session_dht_schedule(s);
+}
+
+/* A freed node runs no done callback for its lookups. */
+static void
+session_dht_close(struct mbt_session *s)
+{
+	struct dht_lookup_ctx *ctx;
+
+	mbt_dht_free(s->dht);
+	s->dht = NULL;
+	while ((ctx = LIST_FIRST(&s->dht_lookups)) != NULL) {
+		LIST_REMOVE(ctx, entry);
+		mbt_infohash_unref(ctx->ih);
+		free(ctx);
+	}
 }
 
 static int
@@ -1480,7 +1500,9 @@ session_dht_start(struct mbt_session *s, struct mbt_infohash *ih, int announce)
 	ctx->session = s;
 	ctx->ih = mbt_infohash_ref(ih);
 	ctx->announce = announce;
+	LIST_INSERT_HEAD(&s->dht_lookups, ctx, entry);
 	if ((rv = mbt_dht_get_peers(s->dht, ih, dht_peers_cb, dht_done_cb, ctx)) < 0) {
+		LIST_REMOVE(ctx, entry);
 		mbt_infohash_unref(ctx->ih);
 		free(ctx);
 	}
@@ -1637,7 +1659,8 @@ mbt_session_disable_dht(struct mbt_session *s)
 {
 	struct session_torrent *st;
 
-	if (s->dht) { mbt_dht_free(s->dht); s->dht = NULL; }
+	if (s->dht)
+		session_dht_close(s);
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		session_dht_unqueue(s, st);
 		st->announce_lookup = 0;
