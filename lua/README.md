@@ -38,6 +38,10 @@ removed torrent.
 - `mbt.session(opts)` makes a session, or returns nil and an error. `opts`:
   - `dir`: the default data directory (default `"."`).
   - `storage`: the default storage, in place of `dir`.
+  - `webseed`: a table with `mode` (`default`, `off`, `fallback` or
+    `always`), `no_peer_delay_ms`, `low_rate_delay_ms` and `low_rate`.
+    The add calls take the same field in `opts`.
+  - `webseed_max_requests`: range requests in the session at once.
   - `port`: the listen port. 0 (the default) binds a free port; see
     `s:listen_port()`.
   - `tcp`, `utp`: default true.
@@ -55,6 +59,9 @@ removed torrent.
   - `on_complete`: `function(torrent)`. It runs in its own coroutine.
   - `on_error`: `function(torrent, message, errno)`, for a storage or
     metadata failure. It runs in its own coroutine.
+- `mbt.storage.fd(fd [, {readonly = true}])` makes a storage on an open
+  descriptor, for one single-file torrent. It uses no path calls. On
+  success it owns `fd`. `readonly` seeds and never requests pieces.
 - `mbt.storage.file(dir)` makes a file storage. Pass it to any number of
   sessions and torrents. `st:dir()` returns its directory. Two torrents on
   one storage that want one file path fail with `EEXIST`.
@@ -125,6 +132,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   periodic announce.
 - `t:add_fallback_trackers()` adds public trackers and announces. It does
   nothing for a private torrent.
+- `t:add_webseed(url)` adds a BEP 19 web seed, for a single-file torrent.
+  `t:webseed_bytes()` returns the bytes from web seeds.
 - `t:add_peer(addr, port[, utp])`.
 - `t:set_upload_rate(n)`, `t:set_download_rate(n)`.
 - `t:wait([timeout_ms])` waits inside a coroutine until the torrent completes.

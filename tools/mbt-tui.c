@@ -518,6 +518,9 @@ main(int argc, char *argv[])
 		.listen_port = 0,
 		.mbt_lsd_announce = 1,
 		.http = mbt_http_curl_fn,
+		.http_range = mbt_http_curl_range_fn,
+		.http_range_cancel = mbt_http_curl_range_cancel,
+		.http_range_arg = http,
 		.http_arg = http,
 		.http_free = mbt_http_curl_free,
 	};

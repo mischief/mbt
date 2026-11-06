@@ -1,0 +1,103 @@
+.Dd November 6, 2026
+.Dt MBT_WEBSEED 3
+.Os
+.Sh NAME
+.Nm mbt_torrent_add_webseed ,
+.Nm mbt_torrent_webseed_bytes ,
+.Nm mbt_http_curl_range_fn ,
+.Nm mbt_http_curl_range_cancel ,
+.Nm mbt_http_curl_set_ca ,
+.Nm mbt_http_curl_set_low_speed
+.Nd BEP 19 web seeds
+.Sh SYNOPSIS
+.In mbt/torrent.h
+.Ft int
+.Fn mbt_torrent_add_webseed "struct mbt_torrent *t" "const char *url"
+.Ft uint64_t
+.Fn mbt_torrent_webseed_bytes "struct mbt_torrent *t"
+.In mbt/http_curl.h
+.Ft int
+.Fn mbt_http_curl_set_ca "struct mbt_http_curl *c" "const void *pem" "size_t len"
+.Ft void
+.Fn mbt_http_curl_set_low_speed "struct mbt_http_curl *c" "long bytes_per_sec" "long sec"
+.Sh DESCRIPTION
+A web seed is an HTTP or HTTPS server with the torrent's file.
+Only single-file torrents use web seeds.
+The session reads
+.Dq url-list
+from a .torrent file.
+.Fn mbt_torrent_add_webseed
+adds one more URL.
+A URL that ends in a slash gets the torrent name.
+A torrent holds at most 16 URLs, and it does not save them.
+.Pp
+A web seed needs the
+.Fa http_range
+and
+.Fa http_range_cancel
+hooks in
+.Vt struct mbt_session_config .
+Without them, the session ignores web seeds.
+.Fn mbt_http_curl_range_fn
+and
+.Fn mbt_http_curl_range_cancel
+are these hooks for libcurl.
+.Fn mbt_http_curl_set_ca
+sets the CA list from memory, for a process that cannot read CA files.
+.Pp
+A web seed requests one piece at a time.
+Each piece gets a hash check like a piece from a peer.
+.Fn mbt_torrent_webseed_bytes
+returns the bytes received from web seeds.
+.Sh POLICY
+.Vt struct mbt_webseed_policy
+sets when web seeds run.
+It is in the session configuration and in
+.Vt struct mbt_add_torrent_cfg .
+A torrent with mode
+.Dv MBT_WEBSEED_DEFAULT
+uses the session policy.
+A session with that mode uses
+.Dv MBT_WEBSEED_FALLBACK ,
+a 5 second
+.Fa no_peer_delay_ms ,
+a 10 second
+.Fa low_rate_delay_ms ,
+and a
+.Fa low_rate
+of 64 KiB per second.
+With any other mode, each field is used as given, and 0 is valid.
+.Bl -tag -width Ds
+.It Dv MBT_WEBSEED_OFF
+Web seeds do not run.
+.It Dv MBT_WEBSEED_FALLBACK
+Web seeds take pieces after
+.Fa no_peer_delay_ms
+with no connected peer, or after
+.Fa low_rate_delay_ms
+below
+.Fa low_rate
+from peers.
+They also start if all trackers answered with no peers and DHT is off.
+They stop taking pieces when peers are fast again.
+.It Dv MBT_WEBSEED_ALWAYS
+Web seeds always take pieces.
+.El
+.Pp
+.Fa webseed_max_requests
+limits the range requests in a session.
+The default is 16.
+.Sh FAILURES
+A hash mismatch, or HTTP status 404 or 410, drops the URL for the session.
+Other failures wait from 5 seconds up to 5 minutes, and honor Retry-After.
+A dropped URL does not fail the torrent.
+.Sh RETURN VALUES
+.Fn mbt_torrent_add_webseed
+returns 0, or
+.Er EINVAL
+as a negative value if the URL is not http or https, or
+.Er ENOSPC
+as a negative value if the torrent has 16 URLs.
+.Sh SEE ALSO
+.Xr mbt_session 3 ,
+.Xr mbt_storage 3

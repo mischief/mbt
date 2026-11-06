@@ -216,6 +216,8 @@ test('tcp_throughput', tcp_throughput_test, timeout: 900, suite: 'slow')
 if libcurl_dep.found()
   http_curl_test = executable('http_curl_test', 'http_curl_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
   test('http_curl', http_curl_test, timeout: 60)
+  webseed_test = executable('webseed_test', 'webseed_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+  test('webseed', webseed_test, timeout: 120)
 endif
 tracker_cancel_test = executable('tracker_cancel_test', 'tracker_cancel_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_cancel', tracker_cancel_test, timeout: 60)

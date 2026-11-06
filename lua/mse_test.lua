@@ -50,6 +50,12 @@ local function check()
 	assert(not transfer("require", "disable", 1000))
 	assert(not transfer("disable", "require", 1000))
 	assert(not pcall(mbt.session, {encryption = "rot13"}))
+	assert(mbt.storage.fd(-1) == nil)
+	local ws = assert(mbt.session({webseed = {mode = "off"}, webseed_max_requests = 2}))
+	local wt = assert(ws:add_torrent_buf(torrent, {dir = tmp .. "/ws", webseed = {mode = "always", no_peer_delay_ms = 0}}))
+	assert(wt:add_webseed("http://127.0.0.1:1/x"))
+	assert(wt:add_webseed("gopher://x") == nil)
+	assert(wt:webseed_bytes() == 0)
 end
 
 local ok, err = pcall(check)

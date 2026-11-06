@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include "mbt/compat.h"
+#include <strings.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -179,6 +180,8 @@ struct mbt_torrent {
 	int endgame;
 	int verifying; /* 1 while initial SHA1 verify is running */
 	int no_download; /* read-only storage: request no pieces */
+	struct mbt_webseed_set *webseeds;
+	struct mbt_webseed_policy webseed_policy;
 	int error;     /* first fatal -errno; 0 = none */
 	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
 	int max_pieces_per_peer;
@@ -208,6 +211,8 @@ static const uint8_t *piece_hash(struct mbt_torrent *t, uint32_t i) {
 }
 
 static void torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp);
+
+enum { PIECE_STORED = 0, PIECE_BAD_HASH = 1 };
 static void torrent_peer_writecb(struct mbt_conn *c, void *arg);
 static void torrent_drive_all_peers(struct mbt_torrent *t);
 static void torrent_ratelimit_retry(struct mbt_ev_timer *timer, void *arg);
@@ -234,6 +239,7 @@ torrent_fail(struct mbt_torrent *t, int err)
 		return;
 	t->error = err;
 	mbt_log_warn(MBT_LOG_TORRENT, "torrent failed: %s", strerror(-err));
+	webseed_set_stop(t->webseeds);
 	if (t->move)
 		move_finish(t, err);
 	if (t->cb.on_error)
@@ -400,6 +406,7 @@ verify_complete(struct mbt_torrent *t)
 	if (t->cb.on_verify_complete)
 		t->cb.on_verify_complete(t, t->cb_arg);
 
+	webseed_set_kick(t->webseeds);
 	if (t->no_download && t->have_count < t->piece_count)
 		mbt_log_warn(MBT_LOG_TORRENT, "read-only storage: %u of %u pieces failed verify",
 		             t->piece_count - t->have_count, t->piece_count);
@@ -1059,6 +1066,75 @@ on_bitfield(struct mbt_peer *p, struct mbt_bitmap *bits, void *arg)
 		torrent_drive_peer(t, tp);
 }
 
+/*
+ * Hash buf and store it as a piece. Returns PIECE_STORED, PIECE_BAD_HASH with
+ * the state unchanged, or a negative errno after the torrent failed.
+ */
+static int
+piece_store(struct mbt_torrent *t, uint32_t piece, const void *buf, size_t len,
+            uint8_t digest[20])
+{
+	struct piece_info *pi;
+	SHA1_CTX ctx;
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, buf, len);
+	SHA1Final(digest, &ctx);
+	if (memcmp(digest, piece_hash(t, piece), 20) != 0)
+		return PIECE_BAD_HASH;
+
+	pi = piece_info_find(t, piece);
+	/* A piece counts only once it is written. */
+	if (t->storage_h && t->storage->ops->write_piece) {
+		int wrv = t->storage->ops->write_piece(t->storage_h, piece, buf, len);
+
+		if (wrv < 0) {
+			if (pi)
+				piece_info_free_one(t, pi);
+			torrent_fail(t, wrv);
+			return wrv;
+		}
+	}
+	/* The move has passed this piece, so it must see the write. */
+	if (t->move && piece < t->move->cursor) {
+		int mrv = t->move->dst->ops->write_piece(t->move->h, piece, buf, len);
+
+		if (mrv < 0)
+			move_finish(t, mrv);
+	}
+	mbt_bitmap_set(t->have, piece);
+	t->have_count++;
+	if (pi)
+		piece_info_free_one(t, pi);
+	bucket_piece_complete(t, piece);
+	return PIECE_STORED;
+}
+
+/* Tell peers and the caller about a stored piece. Returns 1 if the torrent is complete. */
+static int
+piece_announce(struct mbt_torrent *t, uint32_t piece)
+{
+	struct torrent_peer *hp;
+
+	TAILQ_FOREACH(hp, &t->peers, entry)
+		mbt_peer_send_have(hp->peer, piece);
+	if (t->cb.on_piece_complete)
+		t->cb.on_piece_complete(t, piece, t->cb_arg);
+	if (t->have_count != t->piece_count)
+		return 0;
+
+	/* Tell all peers we're no longer interested */
+	TAILQ_FOREACH(hp, &t->peers, entry) {
+		if (hp->peer && hp->failures < 10)
+			mbt_peer_send_interested(hp->peer, 0);
+	}
+	webseed_set_stop(t->webseeds);
+	bucket_free(t);
+	if (t->cb.on_complete)
+		t->cb.on_complete(t, t->cb_arg);
+	return 1;
+}
+
 static void
 on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
          const void *data, size_t len, void *arg)
@@ -1066,7 +1142,6 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	struct mbt_torrent *t = arg;
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
-	struct torrent_peer *hp;
 
 	/* Download tokens consumed at request time (drive_peer) */
 
@@ -1176,15 +1251,12 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 	/* Piece complete? */
 	if (pi->received >= plen) {
-		/* SHA1 verify */
-		SHA1_CTX ctx;
 		uint8_t digest[20];
+		int store = piece_store(t, piece, pi->data, plen, digest);
 
-		SHA1Init(&ctx);
-		SHA1Update(&ctx, pi->data, plen);
-		SHA1Final(digest, &ctx);
-
-		if (memcmp(digest, piece_hash(t, piece), 20) != 0) {
+		if (store < 0)
+			return;
+		if (store == PIECE_BAD_HASH) {
 			/* Hash mismatch — reset piece, blame peer */
 			char got[41], want[41];
 			mbt_hex_encode(digest, 20, got, sizeof(got));
@@ -1212,56 +1284,15 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 			}
 			return;
 		} else {
-			/* Verified — store. A piece counts only once it is written. */
-			if (t->storage_h && t->storage->ops->write_piece) {
-				int wrv = t->storage->ops->write_piece(t->storage_h, piece,
-				                                       pi->data, plen);
-				if (wrv < 0) {
-					piece_info_free_one(t, pi);
-					torrent_fail(t, wrv);
-					return;
-				}
-			}
-			/* The move has passed this piece, so it must see the write. */
-			if (t->move && piece < t->move->cursor) {
-				int mrv = t->move->dst->ops->write_piece(t->move->h, piece,
-				                                         pi->data, plen);
-				if (mrv < 0)
-					move_finish(t, mrv);
-			}
-
-			mbt_bitmap_set(t->have, piece);
-			t->have_count++;
-			if (tp && tp->failures > 0) tp->failures--;
+			if (tp->failures > 0) tp->failures--;
 			tp->hash_failures = 0;
-
-			piece_info_free_one(t, pi);
-			bucket_piece_complete(t, piece);
 
 			mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from %s:%hu outstanding=%d reqq_window=%d",
 			             piece, mbt_peer_addr(p), mbt_peer_conn_port(p),
 			             tp->outstanding, tp->reqq_window);
 
-			/* Broadcast HAVE to all connected peers */
-			TAILQ_FOREACH(hp, &t->peers, entry)
-				mbt_peer_send_have(hp->peer, piece);
-
-			if (t->cb.on_piece_complete)
-				t->cb.on_piece_complete(t, piece, t->cb_arg);
-
-			/* Check completion */
-			if (t->have_count == t->piece_count) {
-				/* Tell all peers we're no longer interested */
-				struct torrent_peer *np;
-				TAILQ_FOREACH(np, &t->peers, entry) {
-					if (np->peer && np->failures < 10)
-						mbt_peer_send_interested(np->peer, 0);
-				}
-				bucket_free(t);
-				if (t->cb.on_complete)
-					t->cb.on_complete(t, t->cb_arg);
+			if (piece_announce(t, piece))
 				return;
-			}
 
 			/* Drive peers to pick up new pieces */
 			if (t->download_limit || mbt_session_get_download_limit(t->session)) {
@@ -1286,6 +1317,126 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 	 * bandwidth-delay links, starving the sender (observed as REQ~0 on the
 	 * seeder and throttled throughput). */
 	torrent_drive_peer(t, tp);
+}
+
+/* --- Web seeds --- */
+
+struct mbt_session *
+torrent_session(struct mbt_torrent *t)
+{
+	return t->session;
+}
+
+uint64_t
+torrent_total_length(struct mbt_torrent *t)
+{
+	return t->total_length;
+}
+
+int
+torrent_webseed_wanted(struct mbt_torrent *t)
+{
+	return t->piece_count > 0 && !t->verifying && !t->error && !t->no_download &&
+	       t->storage_h && t->file_count == 1 && t->have_count < t->piece_count;
+}
+
+int
+torrent_webseed_throttled(struct mbt_torrent *t)
+{
+	return mbt_ratelimit_delay(t->download_limit, BLOCK_SIZE) > 0 ||
+	       mbt_ratelimit_delay(mbt_session_get_download_limit(t->session), BLOCK_SIZE) > 0;
+}
+
+void
+torrent_webseed_consume(struct mbt_torrent *t, size_t len)
+{
+	mbt_ratelimit_consume(t->download_limit, len);
+	mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), len);
+}
+
+/* Claim the lowest missing piece with no active state. It has no owner and
+ * counts as fully requested, so a peer takes it only in endgame. */
+int
+torrent_webseed_pick(struct mbt_torrent *t, size_t *len)
+{
+	for (uint32_t i = 0; i < t->piece_count; i++) {
+		struct piece_info *pi;
+
+		if (mbt_bitmap_isset(t->have, i) > 0 || piece_info_find(t, i))
+			continue;
+		if ((pi = piece_info_alloc(t, i)) == NULL)
+			return -1;
+		*len = piece_length_for(t, i);
+		pi->requested = *len;
+		bucket_piece_complete(t, i);
+		return (int)i;
+	}
+	return -1;
+}
+
+void
+torrent_webseed_release(struct mbt_torrent *t, uint32_t piece)
+{
+	struct piece_info *pi = piece_info_find(t, piece);
+
+	/* A peer in endgame can hold it now. Then the peer finishes it. */
+	if (pi && !pi->owner && !pi->data)
+		piece_info_free_one(t, pi);
+}
+
+/* A released piece is pending again, so drive peers to it. */
+void
+torrent_webseed_drive(struct mbt_torrent *t)
+{
+	struct torrent_peer *tp;
+
+	TAILQ_FOREACH(tp, &t->peers, entry)
+		if (tp->peer && tp->failures < 10 && !mbt_peer_choked(tp->peer))
+			torrent_drive_peer(t, tp);
+}
+
+int
+torrent_webseed_commit(struct mbt_torrent *t, uint32_t piece, const void *buf, size_t len)
+{
+	uint8_t digest[20];
+	int rv;
+
+	if (mbt_bitmap_isset(t->have, piece) > 0)
+		return TORRENT_COMMIT_OK;
+	rv = piece_store(t, piece, buf, len, digest);
+	if (rv < 0)
+		return rv;
+	if (rv == PIECE_BAD_HASH)
+		return TORRENT_COMMIT_BAD_HASH;
+	mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from web seed", piece);
+	return piece_announce(t, piece) ? TORRENT_COMMIT_DONE : TORRENT_COMMIT_OK;
+}
+
+void
+torrent_webseed_sources_empty(struct mbt_torrent *t)
+{
+	webseed_set_sources_empty(t->webseeds);
+}
+
+int
+mbt_torrent_add_webseed(struct mbt_torrent *t, const char *url)
+{
+	ASSERT_RETURN(t, -EINVAL);
+	ASSERT_RETURN(url, -EINVAL);
+	int rv;
+
+	if (strncasecmp(url, "http://", 7) != 0 && strncasecmp(url, "https://", 8) != 0)
+		return -EINVAL;
+	if (!t->webseeds &&
+	    (rv = webseed_set_new(&t->webseeds, t, t->ev, &t->webseed_policy)) < 0)
+		return rv;
+	return webseed_set_add(t->webseeds, url);
+}
+
+uint64_t
+mbt_torrent_webseed_bytes(struct mbt_torrent *t)
+{
+	return webseed_set_bytes(t->webseeds);
 }
 
 static void
@@ -2053,6 +2204,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->picker = cfg->picker ? cfg->picker : mbt_picker_rarest;
 	t->picker_ctx = cfg->picker_ctx;
 	t->timers = cfg->timers;
+	t->webseed_policy = cfg->webseed;
 
 	mbt_peerdb_init(&t->peerdb);
 	TAILQ_INIT(&t->peers);
@@ -2077,6 +2229,8 @@ mbt_torrent_free(struct mbt_torrent *t)
 
 	if (t->move)
 		move_finish(t, -ECANCELED);
+	webseed_set_free(t->webseeds);
+	t->webseeds = NULL;
 
 	/* Free peers */
 	while (!TAILQ_EMPTY(&t->peers)) {

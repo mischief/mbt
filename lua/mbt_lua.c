@@ -621,6 +621,48 @@ l_storage_file(lua_State *L)
 	return 1;
 }
 
+static bool opt_bool(lua_State *L, int idx, const char *name, bool def);
+static lua_Integer opt_int(lua_State *L, int idx, const char *name, lua_Integer def);
+
+/* Read opts.webseed = {mode =, no_peer_delay_ms =, low_rate_delay_ms =, low_rate =}. */
+static void
+opt_webseed(lua_State *L, int idx, struct mbt_webseed_policy *p)
+{
+	static const char *const modes[] = {"default", "off", "fallback", "always", NULL};
+
+	lua_getfield(L, idx, "webseed");
+	if (!lua_isnil(L, -1)) {
+		int t = lua_gettop(L);
+
+		luaL_checktype(L, t, LUA_TTABLE);
+		lua_getfield(L, t, "mode");
+		p->mode = (enum mbt_webseed_mode)luaL_checkoption(L, -1, "default", modes);
+		lua_pop(L, 1);
+		p->no_peer_delay_ms = (uint32_t)opt_int(L, t, "no_peer_delay_ms", 5000);
+		p->low_rate_delay_ms = (uint32_t)opt_int(L, t, "low_rate_delay_ms", 10000);
+		p->low_rate = (uint64_t)opt_int(L, t, "low_rate", 64 * 1024);
+	}
+	lua_pop(L, 1);
+}
+
+/* mbt.storage.fd(fd [, {readonly = true}]): one single-file torrent. */
+static int
+l_storage_fd(lua_State *L)
+{
+	int fd = (int)luaL_checkinteger(L, 1);
+	int flags = 0;
+	struct lstorage *lst;
+
+	if (lua_istable(L, 2) && opt_bool(L, 2, "readonly", false))
+		flags |= MBT_STORAGE_FD_READONLY;
+	lst = lua_newuserdatauv(L, sizeof(*lst), 0);
+	memset(lst, 0, sizeof(*lst));
+	luaL_setmetatable(L, STORAGE_META);
+	if ((lst->st = mbt_storage_fd_new(fd, flags)) == NULL)
+		return fail(L, -EINVAL);
+	return 1;
+}
+
 static int
 l_storage_dir(lua_State *L)
 {
@@ -803,7 +845,9 @@ l_session(lua_State *L)
 	lua_getfield(L, 1, "dir");
 	if (lst != NULL && !lua_isnil(L, -1))
 		return luaL_error(L, "mbt.session: use dir or storage, not both");
-	dir = lst != NULL ? lst->dir : luaL_optstring(L, -1, ".");
+	dir = lst != NULL && lst->dir != NULL ? lst->dir : luaL_optstring(L, -1, ".");
+	opt_webseed(L, 1, &cfg.webseed);
+	cfg.webseed_max_requests = (int)opt_int(L, 1, "webseed_max_requests", 0);
 	cfg.listen_port = (uint16_t)opt_int(L, 1, "port", 0);
 	cfg.disable_tcp = !opt_bool(L, 1, "tcp", true);
 	cfg.disable_utp = !opt_bool(L, 1, "utp", true);
@@ -857,6 +901,9 @@ l_session(lua_State *L)
 		}
 		cfg.http = mbt_http_curl_fn;
 		cfg.http_arg = http;
+		cfg.http_range = mbt_http_curl_range_fn;
+		cfg.http_range_cancel = mbt_http_curl_range_cancel;
+		cfg.http_range_arg = http;
 		cfg.http_free = mbt_http_curl_free;
 	}
 #endif
@@ -900,6 +947,8 @@ add_opts(lua_State *L, int idx, struct mbt_add_torrent_cfg *cfg,
 	const char *dir;
 
 	*own = NULL;
+	if (lua_istable(L, idx))
+		opt_webseed(L, idx, &cfg->webseed);
 	if (lua_isnoneornil(L, idx))
 		return 0;
 	luaL_checktype(L, idx, LUA_TTABLE);
@@ -1446,6 +1495,26 @@ l_add_tracker(lua_State *L)
 }
 
 /* t:add_peer(addr, port[, utp]) */
+/* t:add_webseed(url): a BEP 19 web seed. */
+static int
+l_add_webseed(lua_State *L)
+{
+	struct mbt_torrent *t = check_torrent(L, 1, NULL);
+	int rv = mbt_torrent_add_webseed(t, luaL_checkstring(L, 2));
+
+	if (rv < 0)
+		return fail(L, rv);
+	lua_pushboolean(L, 1);
+	return 1;
+}
+
+static int
+l_webseed_bytes(lua_State *L)
+{
+	lua_pushinteger(L, (lua_Integer)mbt_torrent_webseed_bytes(check_torrent(L, 1, NULL)));
+	return 1;
+}
+
 /* t:add_fallback_trackers(): public trackers, announced now. */
 static int
 l_add_fallback_trackers(lua_State *L)
@@ -2682,6 +2751,8 @@ static const luaL_Reg torrent_methods[] = {
     {"files", l_files},
     {"trackers", l_trackers},
     {"add_tracker", l_add_tracker},
+    {"add_webseed", l_add_webseed},
+    {"webseed_bytes", l_webseed_bytes},
     {"add_fallback_trackers", l_add_fallback_trackers},
     {"add_peer", l_add_peer},
     {"reannounce", l_reannounce},
@@ -2719,6 +2790,7 @@ static const luaL_Reg storage_methods[] = {
 
 static const luaL_Reg storage_fns[] = {
     {"file", l_storage_file},
+    {"fd", l_storage_fd},
     {NULL, NULL},
 };
 

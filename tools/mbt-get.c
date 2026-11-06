@@ -126,7 +126,7 @@ on_signal(int sig)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-dRqDPSLTU] [-e mode] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] [-W pkts] <file.torrent | magnet:?... | infohash>\n", prog);
+	fprintf(stderr, "usage: %s [-dRqDPSLTU] [-e mode] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] [-w url] [-W pkts] <file.torrent | magnet:?... | infohash>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
 	fprintf(stderr, "  -R            enable trace logging (all components, very verbose)\n");
 	fprintf(stderr, "  -q            suppress progress output\n");
@@ -142,6 +142,7 @@ usage(const char *prog)
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
 	fprintf(stderr, "  -r KB/s       download rate limit (default: unlimited)\n");
 	fprintf(stderr, "  -s strategy   piece picker: rarest (default), sequential or random\n");
+	fprintf(stderr, "  -w url        add a web seed; repeat for more\n");
 	fprintf(stderr, "  -W pkts       uTP window size in packets (default: 32)\n");
 	exit(1);
 }
@@ -165,9 +166,16 @@ main(int argc, char *argv[])
 	int listen_port = 0;
 	uint64_t dl_rate = 0;
 	mbt_picker_fn picker = mbt_picker_rarest;
+	const char *webseeds[16];
+	int nwebseeds = 0;
 
-	while ((ch = getopt(argc, argv, "dhqDPSLRTUe:l:o:p:r:s:W:")) != -1) {
+	while ((ch = getopt(argc, argv, "dhqDPSLRTUe:l:o:p:r:s:w:W:")) != -1) {
 		switch (ch) {
+		case 'w':
+			if (nwebseeds == 16)
+				errx(1, "too many web seeds");
+			webseeds[nwebseeds++] = optarg;
+			break;
 		case 'd':
 			debug = 1;
 			break;
@@ -269,6 +277,9 @@ main(int argc, char *argv[])
 		errx(1, "http: %s", strerror(-rv));
 	cfg.http = mbt_http_curl_fn;
 	cfg.http_arg = http;
+	cfg.http_range = mbt_http_curl_range_fn;
+	cfg.http_range_cancel = mbt_http_curl_range_cancel;
+	cfg.http_range_arg = http;
 	cfg.http_free = mbt_http_curl_free;
 	cfg.enable_pcp = use_pcp;
 	cfg.download_rate = dl_rate;
@@ -310,6 +321,11 @@ main(int argc, char *argv[])
 	struct mbt_torrent *t = mbt_session_torrent_first(session);
 	if (t)
 		mbt_session_add_tracker_fallbacks(session, t);
+	for (int i = 0; t && i < nwebseeds; i++) {
+		rv = mbt_torrent_add_webseed(t, webseeds[i]);
+		if (rv < 0)
+			errx(1, "web seed %s: %s", webseeds[i], strerror(-rv));
+	}
 
 	/* Set callbacks on the torrent */
 	if (t) {

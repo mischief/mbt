@@ -84,11 +84,14 @@ Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_lsd`, `fuzz_dht`, `fuzz_magnet`.
 | 23 | Compact Peer Lists | ✅ Complete |
 | 27 | Private Torrents | ✅ Complete |
 | 32 | DHT IPv6 | ✅ Complete |
-| 19 | HTTP Seeding | ❌ Not implemented |
+| 19 | HTTP Seeding | ✅ Single-file torrents |
 | 29 | µTP | ❌ Not implemented |
 | 55 | Holepunch | ❌ Not implemented |
 
 MSE/PE stream encryption has no BEP. mbt implements it: see `mbt_mse(3)`.
+
+Web seeds (BEP 19) work for single-file torrents: see `mbt_webseed(3)`.
+`mbt_storage_fd_new` stores one torrent on an open descriptor, for a sandbox.
 
 ## Quick Start
 

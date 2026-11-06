@@ -60,6 +60,7 @@ struct session_torrent {
 	struct mbt_infohash *ih;
 	char *trackers[16];
 	int tracker_count;
+	int tracker_answers;
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
 	time_t last_dht_lookup;
@@ -103,6 +104,11 @@ struct pending_utp_connect {
 
 STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 
+#define WEBSEED_NO_PEER_DELAY_MS 5000
+#define WEBSEED_LOW_RATE_DELAY_MS 10000
+#define WEBSEED_LOW_RATE (64 * 1024)
+#define WEBSEED_MAX_REQUESTS 16
+
 struct pending_utp_accept;
 LIST_HEAD(pending_accept_list, pending_utp_accept);
 struct pending_accept;
@@ -124,6 +130,12 @@ struct mbt_session {
 	int disable_tcp;
 	int disable_utp;
 	enum mbt_encryption encryption;
+	mbt_http_range_fn http_range;
+	mbt_http_range_cancel_fn http_range_cancel;
+	void *http_range_arg;
+	struct mbt_webseed_policy webseed;
+	int webseed_max;
+	int webseed_active;
 	struct mbt_timers timers;
 	int max_peers;
 	int max_pieces_per_peer;
@@ -1073,6 +1085,19 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->max_pipeline = cfg->max_pipeline;
 	s->utp_window_pkts = cfg->utp_window_pkts;
 	s->http = cfg->http;
+	if (cfg->http_range && cfg->http_range_cancel) {
+		s->http_range = cfg->http_range;
+		s->http_range_cancel = cfg->http_range_cancel;
+		s->http_range_arg = cfg->http_range_arg;
+	}
+	s->webseed = cfg->webseed;
+	if (s->webseed.mode == MBT_WEBSEED_DEFAULT) {
+		s->webseed.mode = MBT_WEBSEED_FALLBACK;
+		s->webseed.no_peer_delay_ms = WEBSEED_NO_PEER_DELAY_MS;
+		s->webseed.low_rate_delay_ms = WEBSEED_LOW_RATE_DELAY_MS;
+		s->webseed.low_rate = WEBSEED_LOW_RATE;
+	}
+	s->webseed_max = cfg->webseed_max_requests ? cfg->webseed_max_requests : WEBSEED_MAX_REQUESTS;
 	s->http_arg = cfg->http_arg;
 	s->http_free = cfg->http_free;
 	s->dht_cfg = cfg->dht;
@@ -1130,8 +1155,10 @@ mbt_session_free(struct mbt_session *s)
 		return;
 
 	/* Pending announces report to s. */
-	if (s->http_free)
+	if (s->http_free) {
 		s->http_free(s->http_arg);
+		s->http_range = NULL;
+	}
 	mbt_tracker_group_free(s->tracker_group);
 
 	mbt_listener_close(&s->listener);
@@ -1492,10 +1519,66 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 
 static void session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v);
 
+/* No connected peer, and none to try. */
+static int
+session_peers_absent(struct mbt_torrent *t)
+{
+	struct mbt_peerdb *db = mbt_torrent_peerdb(t);
+
+	return mbt_torrent_peer_count(t) == 0 && mbt_peerdb_count(db, MBT_PEERDB_KNOWN) == 0 &&
+	       mbt_peerdb_count(db, MBT_PEERDB_CONNECTING) == 0;
+}
+
+int
+session_torrent_no_sources(struct mbt_session *s, struct mbt_torrent *t)
+{
+	struct session_torrent *st;
+
+	if (!s || s->dht)
+		return 0;
+	STAILQ_FOREACH(st, &s->torrents, next)
+		if (st->torrent == t)
+			return st->tracker_count == 0 && session_peers_absent(t);
+	return 0;
+}
+
+int
+session_webseed_hook(struct mbt_session *s, mbt_http_range_fn *fn,
+                     mbt_http_range_cancel_fn *cancel, void **arg)
+{
+	if (!s || !s->http_range)
+		return 0;
+	*fn = s->http_range;
+	*cancel = s->http_range_cancel;
+	*arg = s->http_range_arg;
+	return 1;
+}
+
+int
+session_webseed_acquire(struct mbt_session *s)
+{
+	if (s->webseed_active >= s->webseed_max)
+		return -EBUSY;
+	s->webseed_active++;
+	return 0;
+}
+
+void
+session_webseed_release(struct mbt_session *s)
+{
+	if (s && s->webseed_active > 0)
+		s->webseed_active--;
+}
+
 static void
 session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *arg)
 {
 	struct mbt_session *s = arg;
+	struct session_torrent *st = session_find(s, ih);
+
+	if (st && ++st->tracker_answers >= st->tracker_count && !s->dht &&
+	    session_peers_absent(st->torrent))
+		torrent_webseed_sources_empty(st->torrent);
 
 	if (err < 0) {
 		mbt_log_warn(MBT_LOG_SESSION, "tracker announce failed: %s", strerror(-err));
@@ -1503,7 +1586,6 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 	}
 
 	/* Schedule re-announce */
-	struct session_torrent *st = session_find(s, ih);
 	if (st)
 		st->emergency_reannounce = 0; /* fresh peers — allow one more emergency if needed */
 	if (st && interval > 0) {
@@ -1674,6 +1756,8 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
 		.picker = s->picker,
 		.picker_ctx = s->picker_ctx,
 		.timers = s->timers,
+		.webseed = (acfg && acfg->webseed.mode != MBT_WEBSEED_DEFAULT) ?
+		           acfg->webseed : s->webseed,
 	};
 
 	int rv = mbt_torrent_new(&st->torrent, &tcfg);
@@ -1767,6 +1851,8 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
 		(void)mbt_session_add_tracker(s, t, mbt_metainfo_tracker(mi, i));
 	if (sta->tracker_count > before)
 		session_do_announce(s, sta);
+	for (int i = 0; i < mbt_metainfo_webseed_count(mi); i++)
+		(void)mbt_torrent_add_webseed(t, mbt_metainfo_webseed(mi, i));
 
 	/* Bootstrap DHT from torrent's nodes list */
 	if (s->dht) {

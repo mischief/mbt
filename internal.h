@@ -3,7 +3,9 @@
 #ifndef MBT_INTERNAL_H
 #define MBT_INTERNAL_H
 
+#include <stddef.h>
 #include <stdint.h>
+#include "mbt/webseed.h"
 #include "mbt/utp.h"   /* mbt_utp_accept_cb, struct mbt_utp_ctx */
 #include "mbt/dht.h"   /* struct mbt_dht */
 
@@ -60,6 +62,43 @@ int mbt_session_save_torrent(struct mbt_session *s, struct mbt_torrent *t);
 int mbt_session_max_pieces_per_peer(struct mbt_session *s);
 int mbt_session_min_peers_before_download(struct mbt_session *s);
 int mbt_session_reqq(struct mbt_session *s);
+
+/* Web seeds: webseed.c, with session.c and torrent.c */
+struct mbt_webseed_set;
+struct mbt_webseed_policy;
+struct mbt_ev;
+
+enum {
+	TORRENT_COMMIT_OK = 0,   /* stored, or the torrent had the piece */
+	TORRENT_COMMIT_BAD_HASH, /* nothing changed */
+	TORRENT_COMMIT_DONE,     /* the torrent is complete; t may be gone */
+};
+
+int webseed_set_new(struct mbt_webseed_set **out, struct mbt_torrent *t, struct mbt_ev *ev,
+                    const struct mbt_webseed_policy *policy);
+int webseed_set_add(struct mbt_webseed_set *set, const char *url);
+void webseed_set_stop(struct mbt_webseed_set *set);
+void webseed_set_free(struct mbt_webseed_set *set);
+void webseed_set_sources_empty(struct mbt_webseed_set *set);
+void webseed_set_kick(struct mbt_webseed_set *set);
+uint64_t webseed_set_bytes(const struct mbt_webseed_set *set);
+
+struct mbt_session *torrent_session(struct mbt_torrent *t);
+uint64_t torrent_total_length(struct mbt_torrent *t);
+int torrent_webseed_wanted(struct mbt_torrent *t);
+int torrent_webseed_throttled(struct mbt_torrent *t);
+void torrent_webseed_consume(struct mbt_torrent *t, size_t len);
+int torrent_webseed_pick(struct mbt_torrent *t, size_t *len);
+void torrent_webseed_release(struct mbt_torrent *t, uint32_t piece);
+void torrent_webseed_drive(struct mbt_torrent *t);
+int torrent_webseed_commit(struct mbt_torrent *t, uint32_t piece, const void *buf, size_t len);
+void torrent_webseed_sources_empty(struct mbt_torrent *t);
+
+int session_webseed_hook(struct mbt_session *s, mbt_http_range_fn *fn,
+                         mbt_http_range_cancel_fn *cancel, void **arg);
+int session_webseed_acquire(struct mbt_session *s);
+void session_webseed_release(struct mbt_session *s);
+int session_torrent_no_sources(struct mbt_session *s, struct mbt_torrent *t);
 int mbt_session_max_pipeline(struct mbt_session *s);
 int mbt_picker_rarest_bucket(struct mbt_torrent *t, void *peer, void *ctx);
 /* BEP 55 (session.c): uTP-only connect to the endpoint a relay gave us. */

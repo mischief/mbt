@@ -153,6 +153,7 @@ bt_src = [
   'sdbuf.c',
   'conn.c',
   'utp.c',
+  'webseed.c',
   'ledbat.c',
   'udp_mux.c',
 ] + ev_src + resolve_src
@@ -206,6 +207,7 @@ install_headers(
   'mbt/tracker.h',
   'mbt/tracker_server.h',
   'mbt/utp.h',
+  'mbt/webseed.h',
   subdir: 'mbt',
 )
 

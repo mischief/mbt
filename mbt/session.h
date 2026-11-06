@@ -12,6 +12,7 @@
 #include "storage.h"
 #include "picker.h"
 #include "tracker.h"
+#include "webseed.h"
 
 struct mbt_session;
 struct mbt_ev;
@@ -26,6 +27,7 @@ struct mbt_add_torrent_cfg {
 	struct mbt_storage *storage; /* torrent takes a reference; NULL = use default_storage */
 	int no_storage;             /* add with no storage; see mbt_torrent_set_storage */
 	const char *data_dir;       /* passed to mbt_torrent_data_dir(); NULL = unknown */
+	struct mbt_webseed_policy webseed; /* mode DEFAULT = session policy */
 };
 
 /* MSE/PE policy for peer connections. */
@@ -77,6 +79,13 @@ struct mbt_session_config {
 	uint32_t utp_window_pkts;
 
 	enum mbt_encryption encryption;
+
+	/* Web seeds need both hooks. http_free must fail pending ranges. */
+	mbt_http_range_fn http_range;
+	mbt_http_range_cancel_fn http_range_cancel;
+	void *http_range_arg;
+	struct mbt_webseed_policy webseed; /* see mbt_webseed(3) */
+	int webseed_max_requests;          /* in the session at once (0 = default 16) */
 };
 
 /* Session lifecycle */

@@ -19,6 +19,7 @@ struct mbt_peerdb;
 #include "picker.h"
 #include "peer_source.h"
 #include "timers.h"
+#include "webseed.h"
 
 /* Piece states */
 enum mbt_piece_state {
@@ -44,6 +45,7 @@ struct mbt_torrent_config {
 	mbt_picker_fn picker;
 	void *picker_ctx;
 	struct mbt_timers timers;
+	struct mbt_webseed_policy webseed;
 };
 
 /* Torrent events reported to session */
@@ -122,6 +124,13 @@ MBT_API uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_have_count(struct mbt_torrent *t);
 MBT_API uint64_t mbt_torrent_bytes_downloaded(struct mbt_torrent *t);
+
+/*
+ * Add a BEP 19 web seed for a single-file torrent. It runs when the session
+ * has a range hook. Repeating a URL does nothing. See mbt_webseed(3).
+ */
+MBT_API int mbt_torrent_add_webseed(struct mbt_torrent *t, const char *url);
+MBT_API uint64_t mbt_torrent_webseed_bytes(struct mbt_torrent *t); /* bytes from web seeds */
 MBT_API int mbt_torrent_peer_count(struct mbt_torrent *t);
 MBT_API struct mbt_peer *mbt_torrent_peer_at(struct mbt_torrent *t, int idx);
 MBT_API int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);
