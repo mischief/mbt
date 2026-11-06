@@ -312,6 +312,9 @@ make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 	/* Random: a sender that cannot see the query cannot guess the reply. */
 	uint32_t t = arc4random();
 
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+	t = 0;
+#endif
 	(void)d;
 	memcpy(txn, &t, TXN_LEN);
 }
@@ -379,6 +382,9 @@ dht_verify_token(struct mbt_dht *d, const struct sockaddr_storage *sa,
                  const uint8_t *token, size_t token_len)
 {
 	if (token_len != TOKEN_LEN) return 0;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+	return 1;
+#endif
 	uint8_t expected[TOKEN_LEN];
 	make_token_with_secret(d->token_secret, sa, expected);
 	if (memcmp(expected, token, TOKEN_LEN) == 0) return 1;
@@ -604,6 +610,9 @@ static int
 dht_send(struct mbt_dht *d, const struct sockaddr_storage *addr,
          const void *data, size_t len)
 {
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+	return 0; /* fuzz input names real addresses */
+#endif
 	socklen_t salen = (addr->ss_family == AF_INET6) ?
 		sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
 	return mbt_udp_mux_sendto(d->mux, data, len,
@@ -1550,6 +1559,12 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 
 out:
 	mbt_be_unref(msg);
+}
+
+void
+mbt_dht_input(struct mbt_dht *d, const void *buf, size_t len, const struct sockaddr_storage *from)
+{
+	dht_handle(d, buf, (ssize_t)len, from);
 }
 
 static int

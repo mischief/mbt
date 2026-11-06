@@ -18,6 +18,10 @@ int mbt_utp_ctx_new_mux(struct mbt_utp_ctx **out, struct mbt_ev *ev,
 struct mbt_dht_config;
 int mbt_dht_new_mux(struct mbt_dht **out, const struct mbt_dht_config *cfg,
                     struct mbt_udp_mux *mux);
+/* Handle one received datagram, without a socket. */
+struct sockaddr_storage;
+void mbt_dht_input(struct mbt_dht *d, const void *buf, size_t len,
+                   const struct sockaddr_storage *from);
 
 
 /* BT message IDs (BEP 3) */
