@@ -1,0 +1,74 @@
+.\" SPDX-License-Identifier: ISC
+.Dd November 5, 2026
+.Dt MBT_MSE 3
+.Os
+.Sh NAME
+.Nm mbt_mse_client ,
+.Nm mbt_mse_server ,
+.Nm mbt_mse_selected ,
+.Nm mbt_mse_incomplete
+.Nd Message Stream Encryption over a connection
+.Sh SYNOPSIS
+.In mbt/mse.h
+.Ft int
+.Fn mbt_mse_client "struct mbt_ev *ev" "struct mbt_conn *inner" "const uint8_t infohash[20]" "unsigned provide" "struct mbt_conn **out"
+.Ft int
+.Fn mbt_mse_server "struct mbt_ev *ev" "struct mbt_conn *inner" "const void *seed" "size_t seedlen" "mbt_mse_skey_lookup lookup" "void *arg" "unsigned provide" "struct mbt_conn **out"
+.Ft unsigned
+.Fn mbt_mse_selected "struct mbt_conn *c"
+.Ft int
+.Fn mbt_mse_incomplete "struct mbt_conn *c"
+.Sh DESCRIPTION
+MSE, also called Protocol Encryption, hides the BitTorrent handshake from
+traffic shaping.
+It uses a 768-bit Diffie-Hellman exchange and RC4.
+It does not give real confidentiality.
+.Pp
+These functions wrap an
+.Xr mbt_conn 3 .
+The result is also a connection, so the peer layer needs no change.
+.Fa provide
+is a mask of
+.Dv MBT_MSE_RC4
+and
+.Dv MBT_MSE_PLAINTEXT .
+The second method hides only the handshake.
+.Pp
+.Fn mbt_mse_client
+starts the handshake on an outgoing connection.
+Data that the caller writes before the handshake ends is sent as the initial
+payload.
+.Pp
+.Fn mbt_mse_server
+starts the handshake on an accepted connection.
+.Fa seed
+holds bytes already read from
+.Fa inner .
+.Fa lookup
+receives SHA1("req2" + infohash) and writes the infohash of the matching
+torrent.
+.Pp
+The read callback does not fire until the handshake ends.
+A failed handshake calls the event callback with a negative errno.
+The handshake fails with
+.Er ETIMEDOUT
+after 20 seconds.
+.Pp
+.Fn mbt_mse_selected
+returns the selected method, or 0 if the handshake is not done or
+.Fa c
+is not an MSE connection.
+.Fn mbt_mse_incomplete
+returns 1 for an MSE connection whose handshake did not finish.
+.Sh RETURN VALUES
+.Fn mbt_mse_client
+and
+.Fn mbt_mse_server
+return 0 and take ownership of
+.Fa inner ,
+or return a negative errno and leave
+.Fa inner
+with the caller.
+.Sh SEE ALSO
+.Xr mbt_conn 3 ,
+.Xr mbt_session 3

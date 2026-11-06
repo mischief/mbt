@@ -223,3 +223,8 @@ dht_txn_test = executable('dht_txn_test', 'dht_txn_test.c', link_with: [libmbt],
 test('dht_txn', dht_txn_test, timeout: 30)
 api_args_test = executable('api_args_test', 'api_args_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('api_args', api_args_test)
+
+mse_test = executable('mse_test', 'mse_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('mse', mse_test)
+mse_kat_test = executable('mse_kat_test', 'mse_kat_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('mse_kat', mse_kat_test)

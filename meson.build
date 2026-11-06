@@ -128,6 +128,7 @@ bt_src = [
   'lsd.c',
   'magnet.c',
   'metainfo.c',
+  'mse.c',
   'pack.c',
   'peer.c',
   'peerdb.c',
