@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run AFL++ with ASan and UBSan on one harness: bencode (default), metainfo, torrent, dht, lsd or magnet.
+# Run AFL++ with ASan and UBSan on one harness: bencode (default), metainfo, torrent, dht, lsd, magnet or mse.
 set -e
 
 cd "$(dirname "$0")"
@@ -9,11 +9,11 @@ case "$name" in
 bencode)
 	corpus=fuzz/corpus
 	;;
-metainfo|torrent|dht|lsd|magnet)
+metainfo|torrent|dht|lsd|magnet|mse)
 	corpus=fuzz/corpus_$name
 	;;
 *)
-	echo "usage: $0 [bencode|metainfo|torrent|dht|lsd|magnet]" >&2
+	echo "usage: $0 [bencode|metainfo|torrent|dht|lsd|magnet|mse]" >&2
 	exit 1
 	;;
 esac
