@@ -46,6 +46,7 @@ struct mbt_torrent_config {
 	void *picker_ctx;
 	struct mbt_timers timers;
 	struct mbt_webseed_policy webseed;
+	int no_upload;                     /* send no pieces to peers */
 };
 
 /* Torrent events reported to session */
@@ -123,6 +124,9 @@ MBT_API int mbt_torrent_error(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_have_count(struct mbt_torrent *t);
+/* Send no pieces to peers. The torrent stays in the swarm and can download. */
+MBT_API void mbt_torrent_set_no_upload(struct mbt_torrent *t, int on);
+
 /* Totals for this run, from peers. They include peers that have left. */
 MBT_API uint64_t mbt_torrent_bytes_downloaded(struct mbt_torrent *t);
 MBT_API uint64_t mbt_torrent_bytes_uploaded(struct mbt_torrent *t);

@@ -180,6 +180,7 @@ struct mbt_torrent {
 	int endgame;
 	int verifying; /* 1 while initial SHA1 verify is running */
 	int no_download; /* read-only storage: request no pieces */
+	int no_upload;   /* send no pieces */
 	uint64_t down_gone;      /* bytes from peers that left */
 	uint64_t up_gone;        /* bytes to peers that left */
 	uint64_t hash_failures;
@@ -801,7 +802,7 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 	struct torrent_peer *tp;
 	struct torrent_peer *ranked[128];
 	int n = 0;
-	for (tp = TAILQ_FIRST(&t->peers); tp && n < 128; tp = TAILQ_NEXT(tp, entry))
+	for (tp = TAILQ_FIRST(&t->peers); tp && n < 128 && !t->no_upload; tp = TAILQ_NEXT(tp, entry))
 		if (tp->peer && tp->peer_interested)
 			ranked[n++] = tp;
 
@@ -961,8 +962,10 @@ on_active(struct mbt_peer *p, void *arg)
 
 	/* Start unchoked — the choke timer will regulate later */
 	struct torrent_peer *tp2 = find_torrent_peer(t, p);
-	if (tp2) tp2->am_choking = 0;
-	mbt_peer_send_choke(p, 0);
+	if (!t->no_upload) {
+		if (tp2) tp2->am_choking = 0;
+		mbt_peer_send_choke(p, 0);
+	}
 
 	/* Express interest only if we need pieces (skip if no metadata yet) */
 	if (t->piece_count > 0)
@@ -1449,6 +1452,28 @@ torrent_webseed_sources_empty(struct mbt_torrent *t)
 	webseed_set_sources_empty(t->webseeds);
 }
 
+void
+mbt_torrent_set_no_upload(struct mbt_torrent *t, int on)
+{
+	struct torrent_peer *tp;
+
+	t->no_upload = on != 0;
+	if (!t->no_upload)
+		return;
+	TAILQ_FOREACH(tp, &t->peers, entry) {
+		if (tp->peer && !tp->am_choking) {
+			mbt_peer_send_choke(tp->peer, 1);
+			tp->am_choking = 1;
+		}
+		while (!TAILQ_EMPTY(&tp->pending_sends)) {
+			struct pending_req *pr = TAILQ_FIRST(&tp->pending_sends);
+
+			TAILQ_REMOVE(&tp->pending_sends, pr, entry);
+			free(pr);
+		}
+	}
+}
+
 int
 mbt_torrent_add_webseed(struct mbt_torrent *t, const char *url)
 {
@@ -1646,7 +1671,7 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	              mbt_peer_addr(p), mbt_peer_conn_port(p), piece, offset, length);
 
 	/* Only serve if we have the piece */
-	if (mbt_bitmap_isset(t->have, piece) <= 0)
+	if (t->no_upload || mbt_bitmap_isset(t->have, piece) <= 0)
 		return;
 
 	if (!t->storage_h || !t->storage->ops->read_piece)
@@ -2238,6 +2263,7 @@ mbt_torrent_new(struct mbt_torrent **out, struct mbt_torrent_config *cfg)
 	t->picker_ctx = cfg->picker_ctx;
 	t->timers = cfg->timers;
 	t->webseed_policy = cfg->webseed;
+	t->no_upload = cfg->no_upload;
 
 	mbt_peerdb_init(&t->peerdb);
 	TAILQ_INIT(&t->peers);

@@ -1859,6 +1859,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
 		.timers = s->timers,
 		.webseed = (acfg && acfg->webseed.mode != MBT_WEBSEED_DEFAULT) ?
 		           acfg->webseed : s->webseed,
+		.no_upload = acfg && acfg->no_upload,
 	};
 
 	int rv = mbt_torrent_new(&st->torrent, &tcfg);

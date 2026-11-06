@@ -143,6 +143,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   periodic announce.
 - `t:add_fallback_trackers()` adds public trackers and announces. It does
   nothing for a private torrent.
+- `t:set_no_upload(on)` stops sending pieces to peers. The add calls take
+  `no_upload = true`. Metadata requests still get an answer.
 - `t:add_webseed(url)` adds a BEP 19 web seed, for a single-file torrent.
   `t:webseed_bytes()` returns the bytes from web seeds.
 - `t:add_peer(addr, port[, utp])`.

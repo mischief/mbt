@@ -1001,8 +1001,10 @@ add_opts(lua_State *L, int idx, struct mbt_add_torrent_cfg *cfg,
 	const char *dir;
 
 	*own = NULL;
-	if (lua_istable(L, idx))
+	if (lua_istable(L, idx)) {
 		opt_webseed(L, idx, &cfg->webseed);
+		cfg->no_upload = opt_bool(L, idx, "no_upload", false);
+	}
 	if (lua_isnoneornil(L, idx))
 		return 0;
 	luaL_checktype(L, idx, LUA_TTABLE);
@@ -1580,6 +1582,14 @@ l_add_tracker(lua_State *L)
 }
 
 /* t:add_peer(addr, port[, utp]) */
+/* t:set_no_upload(on): send no pieces to peers. */
+static int
+l_set_no_upload(lua_State *L)
+{
+	mbt_torrent_set_no_upload(check_torrent(L, 1, NULL), lua_toboolean(L, 2));
+	return 0;
+}
+
 /* t:add_webseed(url): a BEP 19 web seed. */
 static int
 l_add_webseed(lua_State *L)
@@ -2841,6 +2851,7 @@ static const luaL_Reg torrent_methods[] = {
     {"trackers", l_trackers},
     {"add_tracker", l_add_tracker},
     {"add_webseed", l_add_webseed},
+    {"set_no_upload", l_set_no_upload},
     {"webseed_bytes", l_webseed_bytes},
     {"add_fallback_trackers", l_add_fallback_trackers},
     {"add_peer", l_add_peer},

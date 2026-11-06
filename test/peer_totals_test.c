@@ -33,6 +33,41 @@ new_session(struct mbt_storage_memory *m)
 	return s;
 }
 
+/* A torrent with no_upload sends nothing until the setting is cleared. */
+static void
+test_no_upload(const unsigned char *enc, size_t enc_len)
+{
+	struct mbt_storage_memory *sm = mbt_storage_memory_new();
+	struct mbt_storage_memory *lm = mbt_storage_memory_new();
+	struct mbt_session *seed = new_session(sm), *leech = new_session(lm);
+	struct mbt_add_torrent_cfg acfg = {.no_upload = 1};
+	struct mbt_torrent *st, *lt;
+
+	assert(mbt_session_add_torrent_buf(seed, enc, enc_len, &acfg, &st) == 0);
+	assert(mbt_storage_memory_put_file(sm, 0, data, TOTAL_LEN) == 0);
+	/* A torrent with no_upload still downloads. */
+	assert(mbt_session_add_torrent_buf(leech, enc, enc_len, &acfg, &lt) == 0);
+	test_wait_verified(ev, st);
+	test_wait_verified(ev, lt);
+	assert(mbt_session_add_peer(leech, mbt_torrent_infohash(lt), "127.0.0.1",
+	                            mbt_session_listen_port(seed), MBT_SOURCE_MANUAL, 0) == 0);
+	for (int i = 0; i < 300; i++)
+		mbt_ev_step(ev, 10);
+	assert(mbt_torrent_peer_count(lt) == 1);
+	assert(mbt_torrent_have_count(lt) == 0);
+	assert(mbt_torrent_bytes_uploaded(st) == 0);
+
+	mbt_torrent_set_no_upload(st, 0);
+	for (int i = 0; i < WAIT_STEPS && !mbt_torrent_complete(lt); i++)
+		mbt_ev_step(ev, 10);
+	assert(mbt_torrent_complete(lt));
+	assert(mbt_torrent_bytes_uploaded(lt) == 0);
+	mbt_session_free(leech);
+	mbt_session_free(seed);
+	mbt_storage_memory_destroy(sm);
+	mbt_storage_memory_destroy(lm);
+}
+
 int
 main(void)
 {
@@ -103,6 +138,7 @@ main(void)
 	mbt_session_free(leech);
 	mbt_storage_memory_destroy(sm);
 	mbt_storage_memory_destroy(lm);
+	test_no_upload(enc, enc_len);
 	mbt_ev_destroy(ev);
 	free(enc);
 	puts("peer_totals: ok");

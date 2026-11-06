@@ -28,6 +28,7 @@ struct mbt_add_torrent_cfg {
 	int no_storage;             /* add with no storage; see mbt_torrent_set_storage */
 	const char *data_dir;       /* passed to mbt_torrent_data_dir(); NULL = unknown */
 	struct mbt_webseed_policy webseed; /* mode DEFAULT = session policy */
+	int no_upload;              /* send no pieces; see mbt_torrent_set_no_upload */
 };
 
 /* MSE/PE policy for peer connections. */
