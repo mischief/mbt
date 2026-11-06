@@ -49,6 +49,7 @@ int  mbt_udp_mux_sendto(struct mbt_udp_mux *m, const void *buf, size_t len,
 
 /* Actual bound port. */
 uint16_t mbt_udp_mux_port(struct mbt_udp_mux *m);
+int mbt_udp_mux_has_ipv4(const struct mbt_udp_mux *m);
 
 /* Free the mux and close its sockets. Consumers must already be torn down. */
 void mbt_udp_mux_free(struct mbt_udp_mux *m);

@@ -242,6 +242,47 @@ test_file_limits(struct mbt_session *s)
 	assert(mbt_session_add_torrent_file(s, path, NULL, NULL) == -EFBIG);
 }
 
+/*
+ * With no IPv4 UDP socket, a uTP dial to an IPv4 peer cannot start. The dial
+ * must use TCP, or a torrent with one peer waits forever.
+ */
+static void
+test_dial_without_udp4(struct mbt_ev *ev, const unsigned char *enc, size_t enc_len)
+{
+	struct sockaddr_in sa = {.sin_family = AF_INET};
+	socklen_t alen = sizeof(sa);
+	int block = socket(AF_INET, SOCK_DGRAM, 0);
+	struct mbt_storage_memory *sm = mbt_storage_memory_new();
+	struct mbt_storage_memory *lm = mbt_storage_memory_new();
+	struct mbt_session_config cfg = {.ev = ev, .disable_utp = 1,
+	    .default_storage = mbt_storage_memory_storage(sm)};
+	struct mbt_session *seed, *leech;
+	struct mbt_torrent *t;
+
+	assert(block >= 0 && sm && lm);
+	sa.sin_addr.s_addr = htonl(INADDR_ANY);
+	assert(bind(block, (struct sockaddr *)&sa, sizeof(sa)) == 0);
+	assert(getsockname(block, (struct sockaddr *)&sa, &alen) == 0);
+	assert(mbt_session_new(&seed, &cfg) == 0);
+	assert(mbt_session_add_torrent_buf(seed, enc, enc_len, NULL, NULL) == 0);
+
+	cfg.disable_utp = 0;
+	cfg.listen_port = ntohs(sa.sin_port);
+	cfg.default_storage = mbt_storage_memory_storage(lm);
+	assert(mbt_session_new(&leech, &cfg) == 0);
+	assert(mbt_session_add_torrent_buf(leech, enc, enc_len, NULL, &t) == 0);
+	assert(mbt_session_add_peer(leech, mbt_torrent_infohash(t), "127.0.0.1",
+	                            mbt_session_listen_port(seed), MBT_SOURCE_MANUAL, 0) == 0);
+	for (int i = 0; i < 500 && mbt_torrent_peer_count(t) == 0; i++)
+		mbt_ev_step(ev, 10);
+	assert(mbt_torrent_peer_count(t) == 1);
+	mbt_session_free(leech);
+	mbt_session_free(seed);
+	mbt_storage_memory_destroy(lm);
+	mbt_storage_memory_destroy(sm);
+	close(block);
+}
+
 int
 main(void)
 {
@@ -266,6 +307,7 @@ main(void)
 	test_remove_while_dialing(s, ev, enc, enc_len);
 	test_file_limits(s);
 	test_fallback_private(s);
+	test_dial_without_udp4(ev, enc, enc_len);
 	free(enc);
 
 	mbt_session_free(s);

@@ -105,6 +105,7 @@ struct pending_utp_connect {
 
 STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 
+#define LISTEN_TRIES 8
 #define WEBSEED_NO_PEER_DELAY_MS 5000
 #define WEBSEED_LOW_RATE_DELAY_MS 10000
 #define WEBSEED_LOW_RATE (64 * 1024)
@@ -994,13 +995,26 @@ session_get_mux(struct mbt_session *s)
 static int
 session_listen(struct mbt_session *s)
 {
-	if (!s->disable_tcp) {
+	/* A free TCP port can be in use for UDP. With no fixed port, try another. */
+	int any_port = s->listen_port == 0;
+
+	for (int i = 0; !s->disable_tcp; i++) {
 		int rv = mbt_listen_tcp(&s->listener, s->ev, s->listen_port,
 		                        listen_accept_cb, s);
 		if (rv < 0) return rv;
 		s->listen_port = s->listener.port;
-		mbt_log_info(MBT_LOG_SESSION, "TCP listening on port %hu", s->listen_port);
+		if (s->disable_utp || !any_port || i == LISTEN_TRIES - 1)
+			break;
+		if (session_get_mux(s) && mbt_udp_mux_has_ipv4(s->udp_mux))
+			break;
+		if (s->udp_mux)
+			mbt_udp_mux_free(s->udp_mux);
+		s->udp_mux = NULL;
+		mbt_listener_close(&s->listener);
+		s->listen_port = 0;
 	}
+	if (!s->disable_tcp)
+		mbt_log_info(MBT_LOG_SESSION, "TCP listening on port %hu", s->listen_port);
 
 	if (!s->disable_utp) {
 		struct mbt_udp_mux *mux = session_get_mux(s);
@@ -2454,12 +2468,15 @@ mbt_session_add_peer(struct mbt_session *s, struct mbt_infohash *ih,
 		int rv2 = mbt_utp_connect(s->utp_ctx, &puc->conn,
 		                          (struct sockaddr *)&dst, dstlen,
 		                          pending_utp_connected, pending_utp_connect_event, puc);
-		if (rv2 < 0) {
-			free(puc);
-			return rv2;
+		if (rv2 == 0) {
+			STAILQ_INSERT_TAIL(&s->pending_utp, puc, next);
+			return 0;
 		}
-		STAILQ_INSERT_TAIL(&s->pending_utp, puc, next);
-		return 0;
+		mbt_log_warn(MBT_LOG_SESSION, "uTP dial to %s:%hu failed: %s", addr, port,
+		             strerror(-rv2));
+		free(puc);
+		if (s->disable_tcp)
+			return rv2;
 	}
 
 	if (s->disable_tcp)

@@ -153,6 +153,12 @@ mbt_udp_mux_sendto(struct mbt_udp_mux *m, const void *buf, size_t len,
 	return n < 0 ? -errno : 0;
 }
 
+int
+mbt_udp_mux_has_ipv4(const struct mbt_udp_mux *m)
+{
+	return m->listener.fd4 >= 0;
+}
+
 uint16_t
 mbt_udp_mux_port(struct mbt_udp_mux *m)
 {
