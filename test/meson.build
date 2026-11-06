@@ -139,9 +139,7 @@ pcp_test = executable('pcp_test', 'pcp_test.c', link_with: [libmbt], include_dir
 test('pcp', pcp_test, timeout: 10, suite: 'slow')
 
 rarest_test = executable('rarest_test', 'rarest_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
-# rarest is statistical and sensitive to allocator perturbation (MALLOC_PERTURB_);
-# it can spuriously fail. tag it 'flaky' so CI can run it with --no-suite flaky.
-test('rarest', rarest_test, timeout: 20, suite: ['default', 'flaky'])
+test('rarest', rarest_test, timeout: 20)
 
 snub_test = executable('snub_test', 'snub_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('snub', snub_test, timeout: 20)

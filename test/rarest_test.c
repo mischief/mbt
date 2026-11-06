@@ -5,13 +5,10 @@
  * Setup: 8 pieces. Seeder A has all 8. Seeder B has only pieces 0-3.
  * Pieces 4-7 are "rarer" (only A has them, availability=1).
  * Pieces 0-3 are "common" (both A and B have them, availability=2).
- * Leecher uses rarest picker → should get pieces 4-7 first.
  *
- * The leecher uses add_torrent_buf so piece_count is known from the start.
- * Peers are added after verify completes so their bitfields are processed
- * immediately with the correct piece_count (no deferred empty-bitmap issue).
- * min_peers_before_download=2 holds off requests until both bitfields are
- * counted, giving the bucket queue accurate avail before any pick runs.
+ * The picker is random until the torrent has a piece, so the leecher starts
+ * with piece 0. A min_peers above the peer count stops all requests, and the
+ * test calls the picker itself, so nothing here depends on timing.
  */
 #include <assert.h>
 #include <stdio.h>
@@ -27,6 +24,8 @@
 #include "mbt/picker.h"
 #include "mbt/be.h"
 #include "mbt/hex.h"
+#include "mbt/bitmap.h"
+#include "mbt/peer.h"
 #include "test_util.h"
 
 struct mbt_ev_timer;
@@ -37,18 +36,7 @@ struct mbt_torrent;
 #define TOTAL_LEN (PIECE_LEN * NUM_PIECES)
 
 static struct mbt_ev *ev;
-static int complete;
-static int pieces_order[NUM_PIECES];
-static int pieces_idx;
-
-static void on_piece(struct mbt_torrent *t, uint32_t piece, void *arg)
-{ (void)t; (void)arg; if (pieces_idx < NUM_PIECES) pieces_order[pieces_idx++] = piece; }
-
-static void on_complete(struct mbt_torrent *t, void *arg)
-{ (void)t; (void)arg; complete = 1; mbt_ev_stop(ev); }
-
-static void timeout_cb(struct mbt_ev_timer *timer, void *arg)
-{ (void)timer; (void)arg; mbt_ev_stop(ev); }
+#define WAIT_STEPS 1000          /* 10 seconds at 10 ms */
 
 int main(void)
 {
@@ -99,50 +87,47 @@ int main(void)
 	mbt_session_add_torrent_buf(sB, encoded, enc_len, NULL, NULL);
 	test_wait_verified(ev, mbt_session_torrent_first(sB));
 
-	/* Leecher: add_torrent_buf so piece_count is known from the start.
-	 * min_peers=2 holds off requests until both bitfields are counted. */
+	/* Leecher: it has piece 0, and it never reaches min_peers. */
 	struct mbt_storage_memory *memL = mbt_storage_memory_new();
 	struct mbt_session_config cfgL = {
 		.ev = ev, .default_storage = mbt_storage_memory_storage(memL), .listen_port = 0,
 		.picker = mbt_picker_rarest,
 		.max_pieces_per_peer = 1,
-		.min_peers_before_download = 2,
+		.min_peers_before_download = 3,
 	};
 	struct mbt_session *sL;
 	mbt_session_new(&sL, &cfgL);
 	mbt_session_add_torrent_buf(sL, encoded, enc_len, NULL, NULL);
 
 	struct mbt_torrent *tL = mbt_session_torrent_first(sL);
+	mbt_storage_memory_put_file(memL, 0, data, PIECE_LEN);
 	test_wait_verified(ev, tL);
-
-	struct mbt_torrent_callbacks cb = { .on_piece_complete = on_piece, .on_complete = on_complete };
-	mbt_torrent_set_callbacks(tL, &cb, NULL);
+	assert(mbt_torrent_have_count(tL) == 1);
 
 	/* Add both peers now — piece_count is known, bitfields processed immediately */
 	struct mbt_infohash *ih = mbt_torrent_infohash(tL);
 	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sA), MBT_SOURCE_PEX, 0);
 	mbt_session_add_peer(sL, ih, "127.0.0.1", mbt_session_listen_port(sB), MBT_SOURCE_PEX, 0);
 
-	struct mbt_ev_timer *to;
-	mbt_ev_timer_new(ev, &to, 15 * 1000000ULL, timeout_cb, NULL);
-	mbt_ev_run(ev);
+	for (int i = 0; i < WAIT_STEPS && mbt_torrent_piece_avail(tL, 1) < 2; i++)
+		mbt_ev_step(ev, 10);
+	assert(mbt_torrent_peer_count(tL) == 2);
+	for (int i = 1; i < NUM_PIECES; i++)
+		assert(mbt_torrent_piece_avail(tL, (uint32_t)i) == (i < 4 ? 2 : 1));
 
-	assert(complete == 1);
-	fprintf(stderr, "  pieces arrived: ");
-	for (int i = 0; i < pieces_idx; i++) fprintf(stderr, "%d ", pieces_order[i]);
-	fprintf(stderr, "\n");
+	for (int i = 0; i < 2; i++) {
+		struct mbt_peer *p = mbt_torrent_peer_at(tL, i);
+		int full = mbt_bitmap_count(mbt_peer_bitfield(p)) == NUM_PIECES;
+		int piece = mbt_picker_rarest(tL, p, NULL);
 
-	assert(pieces_idx == NUM_PIECES);
-	int rare_in_first4 = 0;
-	for (int i = 0; i < 4; i++)
-		if (pieces_order[i] >= 4) rare_in_first4++;
-	fprintf(stderr, "  rare pieces (4-7) in first 4: %d\n", rare_in_first4);
-	assert(rare_in_first4 >= 1);
+		/* A offers rare pieces, so it gets one. B has only common ones. */
+		assert(full ? piece >= 4 : piece >= 1 && piece < 4);
+	}
+	assert(mbt_torrent_have_count(tL) == 1);
 
 	fprintf(stderr, "rarest_test: PASS\n");
 
 	free(encoded);
-	mbt_ev_timer_free(to);
 	mbt_session_free(sA);
 	mbt_session_free(sB);
 	mbt_session_free(sL);
