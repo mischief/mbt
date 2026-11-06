@@ -61,6 +61,7 @@ struct lwaiter;
 struct llookup;
 struct ldone;
 struct lsleep;
+struct lfdwait;
 
 /*
  * One per Lua state that loads the module, kept in its registry: the event
@@ -79,6 +80,7 @@ struct cctx {
 	TAILQ_HEAD(, llookup) lookups;  /* finished DHT lookups */
 	TAILQ_HEAD(, ldone) done;
 	TAILQ_HEAD(, lsleep) sleeps;
+	TAILQ_HEAD(, lfdwait) fdwaits;
 };
 
 static struct cctx *
@@ -622,6 +624,7 @@ l_storage_file(lua_State *L)
 }
 
 static bool opt_bool(lua_State *L, int idx, const char *name, bool def);
+static void fdwaits_free(struct cctx *c);
 static lua_Integer opt_int(lua_State *L, int idx, const char *name, lua_Integer def);
 
 /* Read opts.webseed = {mode =, no_peer_delay_ms =, low_rate_delay_ms =, low_rate =}. */
@@ -2712,6 +2715,109 @@ l_sleep(lua_State *L)
 	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
 }
 
+struct lfdwait {
+	TAILQ_ENTRY(lfdwait) entries;
+	struct wait w;
+	struct mbt_ev_io *io;
+	struct mbt_ev_timer *timer;  /* a timeout, or NULL */
+};
+
+static void
+fdwait_release(struct cctx *c, struct lfdwait *f)
+{
+	TAILQ_REMOVE(&c->fdwaits, f, entries);
+	mbt_ev_io_free(f->io);
+	if (f->timer != NULL)
+		mbt_ev_timer_free(f->timer);
+}
+
+static void
+fdwait_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *arg)
+{
+	struct lfdwait *f = arg;
+	lua_State *co = f->w.co;
+	struct wait w = f->w;
+
+	(void)io; (void)fd;
+	fdwait_release(w.c, f);
+	free(f);
+	if ((events & MBT_EV_READ) && (events & MBT_EV_WRITE))
+		lua_pushliteral(co, "rw");
+	else if (events & MBT_EV_WRITE)
+		lua_pushliteral(co, "w");
+	else
+		lua_pushliteral(co, "r");
+	wait_end(&w, 1);
+}
+
+static void
+fdwait_timer_cb(struct mbt_ev_timer *timer, void *arg)
+{
+	struct lfdwait *f = arg;
+	lua_State *co = f->w.co;
+	struct wait w = f->w;
+
+	(void)timer;
+	fdwait_release(w.c, f);
+	free(f);
+	lua_pushnil(co);
+	lua_pushliteral(co, "timeout");
+	lua_pushinteger(co, ETIMEDOUT);
+	wait_end(&w, 3);
+}
+
+/*
+ * mbt.wait_fd(fd, mode [, ms]): wait inside a coroutine until fd is ready.
+ * mode is "r", "w" or "rw". Returns the ready mode, or nil, "timeout" and an
+ * errno. Close fd only after the wait ends.
+ */
+static int
+l_wait_fd(lua_State *L)
+{
+	static const char *const modes[] = {"r", "w", "rw", NULL};
+	static const uint32_t events[] = {MBT_EV_READ, MBT_EV_WRITE, MBT_EV_READ | MBT_EV_WRITE};
+	struct cctx *c = ctx_of(L);
+	int fd = (int)luaL_checkinteger(L, 1);
+	int mode = luaL_checkoption(L, 2, NULL, modes);
+	lua_Integer ms = luaL_optinteger(L, 3, -1);
+	struct lfdwait *f;
+	int rv;
+
+	luaL_argcheck(L, fd >= 0, 1, "must not be negative");
+	if ((f = calloc(1, sizeof(*f))) == NULL)
+		return luaL_error(L, "mbt.wait_fd: out of memory");
+	if (wait_begin(c, L, &f->w) < 0) {
+		free(f);
+		return luaL_error(L, "mbt.wait_fd: call it inside mbt.run");
+	}
+	rv = mbt_ev_io_new(c->ev, &f->io, fd, events[mode], fdwait_io_cb, f);
+	if (rv == 0 && ms >= 0) {
+		rv = mbt_ev_timer_new(c->ev, &f->timer, (uint64_t)ms * 1000, fdwait_timer_cb, f);
+		if (rv < 0) {
+			f->timer = NULL;
+			mbt_ev_io_free(f->io);
+		}
+	}
+	if (rv < 0) {
+		luaL_unref(c->L, LUA_REGISTRYINDEX, f->w.ref);
+		free(f);
+		return fail(L, rv);
+	}
+	TAILQ_INSERT_TAIL(&c->fdwaits, f, entries);
+	return lua_yieldk(L, 0, lua_gettop(L), wait_k);
+}
+
+static void
+fdwaits_free(struct cctx *c)
+{
+	struct lfdwait *f;
+
+	while ((f = TAILQ_FIRST(&c->fdwaits)) != NULL) {
+		fdwait_release(c, f);
+		free(f);
+	}
+}
+
 /* mbt.spawn(fn, ...) runs fn in a new coroutine; errors are printed. */
 static int
 l_spawn(lua_State *L)
@@ -2792,6 +2898,23 @@ l_run(lua_State *L)
 		return lua_error(L);
 	}
 	return 0;
+}
+
+/* mbt.loop_fd(): run ready work, then return a pollable fd and a timeout in ms. */
+static int
+l_loop_fd(lua_State *L)
+{
+	struct cctx *c = check_loop_caller(L, "mbt.loop_fd");
+	int ms = -1, fd;
+
+	c->in_loop++;
+	fd = mbt_ev_watch(c->ev, &ms);
+	c->in_loop--;
+	if (fd < 0)
+		return fail(L, fd);
+	lua_pushinteger(L, fd);
+	lua_pushinteger(L, ms);
+	return 2;
 }
 
 /* mbt.step([ms]): run one loop iteration, waiting at most ms. */
@@ -2905,6 +3028,8 @@ static const luaL_Reg module_fns[] = {
     {"run", l_run},
     {"spawn", l_spawn},
     {"sleep", l_sleep},
+    {"wait_fd", l_wait_fd},
+    {"loop_fd", l_loop_fd},
     {"step", l_step},
     {"metainfo", l_metainfo},
     {"create", l_create},
@@ -2934,6 +3059,7 @@ ctx_gc(lua_State *L)
 		mbt_ev_timer_free(s->timer);
 		free(s);
 	}
+	fdwaits_free(c);
 	while ((w = TAILQ_FIRST(&c->ready)) != NULL) {
 		TAILQ_REMOVE(&c->ready, w, entries);
 		mbt_infohash_unref(w->ih);
@@ -2969,6 +3095,7 @@ luaopen_mbt(lua_State *L)
 		TAILQ_INIT(&c->lookups);
 		TAILQ_INIT(&c->done);
 		TAILQ_INIT(&c->sleeps);
+		TAILQ_INIT(&c->fdwaits);
 		if ((rv = mbt_ev_new_default(&c->ev)) < 0)
 			return luaL_error(L, "mbt: cannot make an event loop: %s",
 			    strerror(-rv));

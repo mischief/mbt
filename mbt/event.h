@@ -4,6 +4,7 @@
 
 #include "export.h"
 
+#include <errno.h>
 #include <stdint.h>
 
 struct mbt_ev;
@@ -33,6 +34,7 @@ struct mbt_ev_ops {
 	void (*step)(struct mbt_ev *ev, int timeout_ms); /* one iteration */
 	void (*stop)(struct mbt_ev *ev);
 	void (*destroy)(struct mbt_ev *ev);
+	int (*watch)(struct mbt_ev *ev, int *timeout_ms); /* optional */
 };
 
 struct mbt_ev {
@@ -129,6 +131,18 @@ static inline void
 mbt_ev_step(struct mbt_ev *ev, int timeout_ms)
 {
 	ev->ops->step(ev, timeout_ms);
+}
+
+/*
+ * For a program with its own poll loop: run work that is ready, then return one
+ * descriptor that becomes readable when the loop has work. *timeout_ms is the
+ * longest poll wait, or -1 for no limit. Call it before each poll, and
+ * mbt_ev_step(ev, 0) after. Returns -ENOTSUP if the backend has no such fd.
+ */
+static inline int
+mbt_ev_watch(struct mbt_ev *ev, int *timeout_ms)
+{
+	return ev->ops->watch ? ev->ops->watch(ev, timeout_ms) : -ENOTSUP;
 }
 
 static inline void

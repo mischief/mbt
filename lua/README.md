@@ -77,6 +77,16 @@ removed torrent.
 - `mbt.spawn(fn, ...)` starts `fn` in its own coroutine. Its errors are
   printed.
 - `mbt.sleep(ms)` waits inside a coroutine.
+- `mbt.wait_fd(fd, mode [, ms])` waits inside a coroutine until `fd` is ready,
+  so a program can serve its own descriptors without polling. `mode` is
+  `"r"`, `"w"` or `"rw"`. It returns the ready mode, or `nil`, `"timeout"`
+  and an errno. A descriptor has one wait at a time, and it must stay open
+  until the wait ends. It needs a pollable descriptor: a regular file fails.
+- `mbt.loop_fd()` is for a program with its own poll loop. It runs ready work,
+  then returns a descriptor and a timeout in ms, `-1` for no limit. Call it
+  before each poll. When the descriptor is readable or the timeout ends, call
+  `mbt.step(0)`. Call it from the main chunk. It works on the sd-event backend;
+  the others return `nil`, a message and `ENOTSUP`.
 - `mbt.now_ms()` is a monotonic clock in milliseconds, for intervals.
 - `mbt.step([ms])` runs one loop iteration and waits at most `ms` (default
   0). Use it in place of `mbt.run` to drive the loop from your own loop.

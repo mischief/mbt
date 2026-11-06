@@ -88,6 +88,8 @@ sd_io_mod(struct mbt_ev_io *handle, uint32_t events)
 	return sd_event_source_set_io_events(io->src, to_epoll(events));
 }
 
+#define SD_WATCH_RUNS 16
+
 static void
 sd_io_free(struct mbt_ev_io *handle)
 {
@@ -196,6 +198,21 @@ sd_destroy(struct mbt_ev *ev)
 	free(s);
 }
 
+/* Each run with no wait arms the timers that the last dispatch added. */
+static int
+sd_watch(struct mbt_ev *ev, int *timeout_ms)
+{
+	struct ev_sd *s = (struct ev_sd *)ev;
+	int rv = 1;
+
+	for (int i = 0; i < SD_WATCH_RUNS && rv > 0; i++)
+		rv = sd_event_run(s->loop, 0);
+	if (rv < 0)
+		return rv;
+	*timeout_ms = rv > 0 ? 0 : -1;
+	return sd_event_get_fd(s->loop);
+}
+
 static const struct mbt_ev_ops sd_ops = {
 	.io_new    = sd_io_new,
 	.io_mod    = sd_io_mod,
@@ -205,6 +222,7 @@ static const struct mbt_ev_ops sd_ops = {
 	.timer_free = sd_timer_free,
 	.run       = sd_run,
 	.step      = sd_step,
+	.watch     = sd_watch,
 	.stop      = sd_stop,
 	.destroy   = sd_destroy,
 };
