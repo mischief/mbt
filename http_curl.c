@@ -23,6 +23,7 @@
 #define HTTP_MAX_RESPONSE (8 * 1024 * 1024)
 #define HTTP_ERROR_STATUS 400
 #define HTTP_USER_AGENT "libmbt"
+#define HTTP_MAX_HOST_CONNS 16L
 #define HTTP_CONNECT_TIMEOUT_SEC 15L
 #define HTTP_LOW_SPEED 1024L
 #define HTTP_LOW_SPEED_SEC 30L
@@ -336,6 +337,7 @@ mbt_http_curl_new(struct mbt_http_curl **out, struct mbt_ev *ev)
 	curl_multi_setopt(c->multi, CURLMOPT_SOCKETDATA, c);
 	curl_multi_setopt(c->multi, CURLMOPT_TIMERFUNCTION, timer_cb);
 	curl_multi_setopt(c->multi, CURLMOPT_TIMERDATA, c);
+	curl_multi_setopt(c->multi, CURLMOPT_MAX_HOST_CONNECTIONS, HTTP_MAX_HOST_CONNS);
 	*out = c;
 	return 0;
 }

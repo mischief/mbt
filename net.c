@@ -61,7 +61,7 @@ bind_listen_tcp(int family, uint16_t port)
 	if (bind(fd, (struct sockaddr *)&sa, salen) < 0) {
 		int e = errno; close(fd); return -e;
 	}
-	if (listen(fd, 128) < 0) {
+	if (listen(fd, SOMAXCONN) < 0) {
 		int e = errno; close(fd); return -e;
 	}
 	return fd;

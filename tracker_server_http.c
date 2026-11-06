@@ -38,6 +38,7 @@ struct mbt_tracker_http {
 	uint16_t port;
 	TAILQ_HEAD(, http_conn) conns;
 	int nconns;
+	int paused;          /* at the cap: the kernel holds new connections */
 	struct mbt_ev_timer *gc_timer;
 };
 
@@ -252,10 +253,25 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 }
 
 static void
+listen_set(struct mbt_tracker_http *th, uint32_t events)
+{
+	if (th->listener.io4)
+		mbt_ev_io_mod(th->listener.io4, events);
+	if (th->listener.io6)
+		mbt_ev_io_mod(th->listener.io6, events);
+}
+
+static void
 conn_free(struct http_conn *c)
 {
-	TAILQ_REMOVE(&c->th->conns, c, entries);
-	c->th->nconns--;
+	struct mbt_tracker_http *th = c->th;
+
+	TAILQ_REMOVE(&th->conns, c, entries);
+	th->nconns--;
+	if (th->paused) {
+		th->paused = 0;
+		listen_set(th, MBT_EV_READ);
+	}
 	mbt_ev_timer_free(c->timer);
 	mbt_ev_io_free(c->io);
 	close(c->fd);
@@ -303,7 +319,7 @@ http_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	int cfd = accept4(fd, (struct sockaddr *)&from, &fromlen, SOCK_CLOEXEC | SOCK_NONBLOCK);
 	if (cfd < 0) return;
 
-	struct http_conn *c = th->nconns < HTTP_MAX_CONNS ? calloc(1, sizeof(*c)) : NULL;
+	struct http_conn *c = calloc(1, sizeof(*c));
 	if (!c) {
 		close(cfd);
 		return;
@@ -323,7 +339,11 @@ http_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		return;
 	}
 	TAILQ_INSERT_TAIL(&th->conns, c, entries);
-	th->nconns++;
+	/* A client can connect long before it writes. Do not close those. */
+	if (++th->nconns >= HTTP_MAX_CONNS) {
+		th->paused = 1;
+		listen_set(th, 0);
+	}
 }
 
 /* --- Public API --- */
@@ -370,6 +390,7 @@ mbt_tracker_http_free(struct mbt_tracker_http *th)
 	if (th->gc_timer)
 		mbt_ev_timer_free(th->gc_timer);
 	mbt_listener_close(&th->listener);
+	th->paused = 0;
 	while (!TAILQ_EMPTY(&th->conns))
 		conn_free(TAILQ_FIRST(&th->conns));
 	if (th->store && th->owns_store) mbt_tracker_store_free(th->store);

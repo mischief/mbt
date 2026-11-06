@@ -94,6 +94,8 @@ tracker_server_test = executable('tracker_server_test', 'tracker_server_test.c',
 test('tracker_server', tracker_server_test, timeout: 15)
 tracker_stop_test = executable('tracker_stop_test', 'tracker_stop_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_stop', tracker_stop_test, timeout: 30)
+tracker_burst_test = executable('tracker_burst_test', 'tracker_burst_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tracker_burst', tracker_burst_test, timeout: 30)
 tracker_scrape_test = executable('tracker_scrape_test', 'tracker_scrape_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_scrape', tracker_scrape_test, timeout: 30)
 
