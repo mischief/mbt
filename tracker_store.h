@@ -30,5 +30,6 @@ int mbt_tracker_store_validate_connection_id(struct mbt_tracker_store *s,
 int mbt_tracker_store_torrent_seeders(struct ts_torrent *t);
 int mbt_tracker_store_torrent_leechers(struct ts_torrent *t);
 int mbt_tracker_store_torrent_peer_count(struct ts_torrent *t);
+uint32_t mbt_tracker_store_torrent_downloaded(struct ts_torrent *t);
 
 #endif

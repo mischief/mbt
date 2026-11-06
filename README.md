@@ -96,6 +96,7 @@ Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_torrent`, `fuzz_lsd`, `fuzz_dht`
 | 32 | DHT IPv6 | ✅ Complete |
 | 44 | DHT Items | ✅ Store and query; no signing |
 | 47 | Padding Files | ✅ Storage |
+| 48 | Tracker Scrape | ✅ Server |
 | 51 | DHT Infohash Indexing | ✅ Server side |
 | 55 | Holepunch | ✅ Complete |
 

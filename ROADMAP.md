@@ -32,6 +32,7 @@
 - [x] UDP tracker client (BEP 15) — async, built-in
 - [x] UDP tracker server (BEP 15) — HMAC connection_id, shared store
 - [x] HTTP tracker server (BEP 3) — minimal, shared store
+- [x] Tracker server scrape (BEP 15, BEP 48)
 - [x] Auto-announce from announce-list (BEP 12), re-announce timer
 - [x] PEX receive (BEP 11)
 - [x] DHT (BEP 5) — full Kademlia: routing, lookup, announce, storage, stable ID

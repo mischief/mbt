@@ -164,7 +164,7 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			uint8_t *ih = buf + 16 + i * 20;
 			struct ts_torrent *t = mbt_tracker_store_find(ts->store, ih);
 			uint32_t s = htonl(t ? mbt_tracker_store_torrent_seeders(t) : 0);
-			uint32_t c = htonl(t ? mbt_tracker_store_torrent_peer_count(t) : 0);
+			uint32_t c = htonl(t ? mbt_tracker_store_torrent_downloaded(t) : 0);
 			uint32_t l = htonl(t ? mbt_tracker_store_torrent_leechers(t) : 0);
 			memcpy(resp + resp_len, &s, 4);
 			memcpy(resp + resp_len + 4, &c, 4);

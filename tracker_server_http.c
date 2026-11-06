@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: ISC
 /*
- * tracker_server_http.c — BEP 3 HTTP tracker server
+ * tracker_server_http.c — BEP 3 and BEP 48 HTTP tracker server
  *
- * Minimal HTTP/1.0 server handling GET /announce requests.
+ * Minimal HTTP/1.0 server handling GET /announce and GET /scrape requests.
  */
 #include <sys/queue.h>
 #include <sys/socket.h>
@@ -19,6 +19,7 @@
 #include "mbt/tracker_server.h"
 #include "mbt/be.h"
 #include "mbt/event.h"
+#include "mbt/hex.h"
 #include "mbt/log.h"
 #include "net.h"
 #include "parse.h"
@@ -52,27 +53,125 @@ struct http_conn {
 	char buf[4096];
 };
 
-/* URL-decode info_hash (20 raw bytes from percent-encoded query) */
+/* URL-decode info_hash: exactly 20 raw bytes from a percent-encoded query. */
 static int
 urldecode_infohash(const char *s, uint8_t *out)
 {
 	int n = 0;
+
 	while (*s && n < 20) {
-		if (*s == '%' && s[1] && s[2]) {
-			char hex[3] = { s[1], s[2], 0 };
-			out[n++] = (uint8_t)strtoul(hex, NULL, 16);
+		if (*s == '%') {
+			if (!s[1] || !s[2] || mbt_hex_decode(out + n, 1, s + 1) < 0)
+				return -1;
+			n++;
 			s += 3;
 		} else {
 			out[n++] = (uint8_t)*s++;
 		}
 	}
-	return (n == 20) ? 0 : -1;
+	return (n == 20 && *s == '\0') ? 0 : -1;
+}
+
+static void
+send_bencoded(int cfd, struct mbt_be_value *v)
+{
+	unsigned char *enc;
+	size_t enc_len;
+	char hdr[128];
+	int hdr_len;
+
+	if (mbt_be_value_encode(v, &enc, &enc_len) < 0)
+		return;
+	hdr_len = snprintf(hdr, sizeof(hdr),
+		"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n", enc_len);
+	send(cfd, hdr, hdr_len, MSG_NOSIGNAL);
+	send(cfd, enc, enc_len, MSG_NOSIGNAL);
+	free(enc);
+}
+
+static void
+send_failure(int cfd, const char *reason)
+{
+	_cleanup_be_ struct mbt_be_value *resp = NULL;
+
+	if (mbt_be_dict_new(&resp) < 0 ||
+	    mbt_be_dict_append_string(resp, "failure reason", reason, strlen(reason)) < 0)
+		return;
+	send_bencoded(cfd, resp);
+}
+
+/* Add one swarm to files. A repeated infohash keeps one entry, and a swarm
+ * with no peers reports zeros. */
+static int
+scrape_add(struct mbt_tracker_store *store, struct mbt_be_value *files, const uint8_t *ih)
+{
+	_cleanup_be_ struct mbt_be_value *entry = NULL;
+	struct mbt_be_value *v;
+	struct ts_torrent *t;
+	int rv;
+
+	TAILQ_FOREACH(v, &files->listhead, next)
+		if (memcmp(v->key, ih, 20) == 0)
+			return 0;
+	t = mbt_tracker_store_find(store, ih);
+	if ((rv = mbt_be_dict_new(&entry)) < 0 ||
+	    (rv = mbt_be_dict_append_number(entry, "complete",
+	                                    t ? mbt_tracker_store_torrent_seeders(t) : 0)) < 0 ||
+	    (rv = mbt_be_dict_append_number(entry, "downloaded",
+	                                    t ? mbt_tracker_store_torrent_downloaded(t) : 0)) < 0 ||
+	    (rv = mbt_be_dict_append_number(entry, "incomplete",
+	                                    t ? mbt_tracker_store_torrent_leechers(t) : 0)) < 0)
+		return rv;
+	return mbt_be_dict_append_key(files, ih, 20, entry);
+}
+
+/* BEP 48. A scrape reads the store and changes nothing. */
+static void
+handle_scrape(struct mbt_tracker_http *th, int cfd, char *qs)
+{
+	_cleanup_be_ struct mbt_be_value *resp = NULL, *files = NULL;
+	char *param, *saveptr;
+	int count = 0;
+
+	if (mbt_be_dict_new(&resp) < 0 || mbt_be_dict_new(&files) < 0)
+		return;
+	for (param = strtok_r(qs, "&", &saveptr); param; param = strtok_r(NULL, "&", &saveptr)) {
+		uint8_t ih[20];
+
+		if (strncmp(param, "info_hash=", 10) != 0)
+			continue;
+		if (urldecode_infohash(param + 10, ih) < 0) {
+			send_failure(cfd, "invalid info_hash");
+			return;
+		}
+		if (scrape_add(th->store, files, ih) < 0)
+			return;
+		count++;
+	}
+	if (count == 0) {
+		send_failure(cfd, "missing info_hash");
+		return;
+	}
+	if (mbt_be_dict_append(resp, "files", files) < 0)
+		return;
+	send_bencoded(cfd, resp);
 }
 
 /* buf holds a NUL-terminated request line. The caller closes cfd. */
 static void
 handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *from, char *buf)
 {
+	if (strncmp(buf, "GET /scrape", 11) == 0 && (buf[11] == '?' || buf[11] == ' ')) {
+		char *query = buf + 12, *stop = strchr(query, ' ');
+
+		if (buf[11] == ' ')
+			*query = '\0';
+		else if (stop)
+			*stop = '\0';
+		handle_scrape(th, cfd, query);
+		return;
+	}
+
 	/* Parse: GET /announce?... HTTP/1.x */
 	if (strncmp(buf, "GET /announce?", 14) != 0) {
 		const char *err = "HTTP/1.0 404 Not Found\r\nContent-Length: 0\r\n\r\n";
@@ -149,16 +248,7 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 		mbt_be_dict_append_string(resp, "peers", peers_compact, count * 6);
 	}
 
-	unsigned char *enc; size_t enc_len;
-	if (mbt_be_value_encode(resp, &enc, &enc_len) < 0) return;
-
-	/* Send HTTP response */
-	char hdr[128];
-	int hdr_len = snprintf(hdr, sizeof(hdr),
-		"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n", enc_len);
-	send(cfd, hdr, hdr_len, MSG_NOSIGNAL);
-	send(cfd, enc, enc_len, MSG_NOSIGNAL);
-	free(enc);
+	send_bencoded(cfd, resp);
 }
 
 static void

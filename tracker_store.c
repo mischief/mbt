@@ -37,6 +37,7 @@ struct ts_torrent {
 	int peer_count;
 	int seeders;
 	int leechers;
+	uint32_t downloaded; /* leechers seen to finish */
 };
 
 struct mbt_tracker_store {
@@ -242,6 +243,7 @@ mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
 				t->peers[i].is_seeder = 1;
 				t->seeders++;
 				t->leechers--;
+				t->downloaded++;
 			}
 			return;
 		}
@@ -315,6 +317,7 @@ mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *excl
 int mbt_tracker_store_torrent_seeders(struct ts_torrent *t) { return t->seeders; }
 int mbt_tracker_store_torrent_leechers(struct ts_torrent *t) { return t->leechers; }
 int mbt_tracker_store_torrent_peer_count(struct ts_torrent *t) { return t->peer_count; }
+uint32_t mbt_tracker_store_torrent_downloaded(struct ts_torrent *t) { return t->downloaded; }
 
 void
 mbt_tracker_store_gc(struct mbt_tracker_store *s)

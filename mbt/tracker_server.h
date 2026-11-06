@@ -35,7 +35,7 @@ MBT_API uint16_t mbt_tracker_server_port(struct mbt_tracker_server *ts);
 MBT_API int mbt_tracker_server_num_torrents(struct mbt_tracker_server *ts);
 MBT_API int mbt_tracker_server_num_peers(struct mbt_tracker_server *ts);
 
-/* --- HTTP tracker server (BEP 3) --- */
+/* --- HTTP tracker server (BEP 3, BEP 48 scrape) --- */
 struct mbt_tracker_http;
 
 /* store=NULL creates an internal store; non-NULL shares (caller owns lifetime) */

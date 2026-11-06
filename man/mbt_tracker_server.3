@@ -125,6 +125,13 @@ Returns the number of torrents known by this HTTP server instance.
 Returns the number of peers known by this HTTP server instance.
 .El
 .Pp
+The HTTP server also handles BEP 48 scrape requests at
+.Pa /scrape .
+The UDP server handles BEP 15 scrape.
+The downloaded count starts when a swarm appears in the store.
+It counts peers that announce as a leecher and then as a seeder, and it goes
+away with the swarm.
+.Pp
 Each server runs
 .Fn mbt_tracker_store_gc
 on a timer.
