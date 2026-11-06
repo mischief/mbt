@@ -28,6 +28,7 @@
 #include "mbt/event.h"
 #include "mbt/log.h"
 #include "internal.h"
+#include "backoff.h"
 #include "banned.h"
 
 struct mbt_ev_io;
@@ -37,6 +38,11 @@ struct mbt_ev_timer;
 #define PCP_VERSION 2
 #define PCP_OPCODE_MAP 1
 #define PCP_RESULT_SUCCESS 0
+
+/* RFC 6887 retransmit timers */
+#define PCP_IRT_USEC (3 * 1000000ULL)
+#define PCP_MRT_USEC (1024 * 1000000ULL)
+#define PCP_MAX_RETRANSMITS 10
 
 struct mbt_pcp {
 	struct mbt_ev *ev;
@@ -59,9 +65,8 @@ struct mbt_pcp {
 	uint32_t assigned_lifetime;
 
 	/* Retransmit state */
-	uint64_t rt_usec; /* current retransmit timeout */
+	struct mbt_backoff retransmit;
 	int awaiting_response;
-	int retries;
 
 	mbt_pcp_cb cb;
 	void *cb_arg;
@@ -178,7 +183,7 @@ pcp_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	}
 
 	p->awaiting_response = 0;
-	p->retries = 0;
+	mbt_backoff_reset(&p->retransmit);
 
 	mbt_log_info(MBT_LOG_SESSION, "PCP: mapped %s:%hu (lifetime %us)",
 	             p->external_addr, p->external_port, lifetime);
@@ -200,26 +205,19 @@ pcp_timer_cb(struct mbt_ev_timer *timer, void *v)
 	send_map_request(p);
 
 	if (p->awaiting_response) {
-		/* Retransmit: exponential backoff */
-		p->retries++;
-		if (p->retries > 10) {
-			mbt_log_warn(MBT_LOG_SESSION, "PCP: no response after %d retries, giving up", p->retries);
+		if (p->retransmit.attempts > PCP_MAX_RETRANSMITS) {
+			mbt_log_warn(MBT_LOG_SESSION, "PCP: no response after %u retries, giving up",
+			             p->retransmit.attempts);
 			p->awaiting_response = 0;
 			return; /* stop retransmitting, timer won't re-arm */
 		}
-		p->rt_usec = p->rt_usec * 2;
-		if (p->rt_usec > 1024 * 1000000ULL)
-			p->rt_usec = 1024 * 1000000ULL;
 	} else {
 		/* First send or renewal */
-		p->rt_usec = 3 * 1000000ULL; /* IRT = 3s */
+		mbt_backoff_reset(&p->retransmit);
 		p->awaiting_response = 1;
 	}
 
-	/* Add jitter ±10% */
-	uint64_t jitter = p->rt_usec / 10;
-	uint64_t next = p->rt_usec + arc4random_uniform(jitter * 2) - jitter;
-	mbt_ev_timer_mod(timer, next);
+	mbt_ev_timer_mod(timer, mbt_backoff_next(&p->retransmit));
 }
 
 /* --- Public API --- */
@@ -230,6 +228,7 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 	struct mbt_pcp *p = calloc(1, sizeof(*p));
 	if (!p) return -ENOMEM;
 	p->ev = ev;
+	mbt_backoff_init(&p->retransmit, PCP_IRT_USEC, PCP_MRT_USEC, 200, 10);
 
 	/* Determine gateway address */
 	if (gateway && inet_pton(AF_INET6, gateway, &((struct sockaddr_in6 *)&p->gateway)->sin6_addr) > 0) {
@@ -345,7 +344,7 @@ mbt_pcp_map(struct mbt_pcp *p, uint8_t protocol, uint16_t internal_port,
 	p->cb = cb;
 	p->cb_arg = arg;
 	p->awaiting_response = 0;
-	p->retries = 0;
+	mbt_backoff_reset(&p->retransmit);
 
 	/* Start immediately */
 	if (!p->timer)

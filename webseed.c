@@ -18,13 +18,14 @@
 #include "mbt/torrent.h"
 #include "mbt/webseed.h"
 #include "internal.h"
+#include "backoff.h"
 #include "banned.h"
 
 #define MAX_WEBSEEDS 16
 #define TICK_USEC 250000
 #define RATE_WINDOW_MS 1000
-#define BACKOFF_MIN_MS 5000
-#define BACKOFF_MAX_MS 300000
+#define BACKOFF_MIN_USEC (5 * 1000000ULL)
+#define BACKOFF_MAX_USEC (300 * 1000000ULL)
 #define HTTP_PARTIAL 206
 #define URL_MAX 4096
 #define RUN_MIN (4 * 1024 * 1024ULL)
@@ -48,7 +49,7 @@ struct mbt_webseed {
 	char *url;                  /* URL of the file */
 	int dropped;
 	uint64_t not_before;        /* monotonic ms */
-	uint32_t backoff_ms;
+	struct mbt_backoff backoff;
 	int piece;                  /* claimed and in progress, or -1 */
 	uint32_t next;              /* next piece of the run */
 	uint32_t run_end;           /* first piece after the run */
@@ -130,10 +131,7 @@ webseed_back_off(struct mbt_webseed *w, unsigned retry_after)
 {
 	uint64_t wait;
 
-	w->backoff_ms = w->backoff_ms ? w->backoff_ms * 2 : BACKOFF_MIN_MS;
-	if (w->backoff_ms > BACKOFF_MAX_MS)
-		w->backoff_ms = BACKOFF_MAX_MS;
-	wait = w->backoff_ms;
+	wait = mbt_backoff_next(&w->backoff) / 1000;
 	if ((uint64_t)retry_after * 1000 > wait)
 		wait = (uint64_t)retry_after * 1000;
 	w->not_before = now_ms() + wait;
@@ -367,7 +365,7 @@ webseed_commit_ready(struct mbt_webseed *w)
 			torrent_webseed_drive(w->t);
 			return 0;
 		}
-		w->backoff_ms = 0;
+		mbt_backoff_reset(&w->backoff);
 		if (!w->buf)
 			w->buf = r->buf;
 		else
@@ -474,6 +472,7 @@ webseed_set_add(struct mbt_webseed_set *set, const char *url)
 		return -ENOSPC;
 	if ((w = calloc(1, sizeof(*w))) == NULL)
 		return -ENOMEM;
+	mbt_backoff_init(&w->backoff, BACKOFF_MIN_USEC, BACKOFF_MAX_USEC, 200, 25);
 	if ((w->base = strdup(url)) == NULL) {
 		free(w);
 		return -ENOMEM;
