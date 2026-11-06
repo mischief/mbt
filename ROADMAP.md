@@ -235,13 +235,13 @@
       plaintext handshake). uTP transport itself is unaffected.
 
 ### Holepunch (BEP 55)
-- [ ] `holepunch.c` / `mbt/holepunch.h`
-- [ ] Advertise `ut_holepunch` in BEP 10 extension handshake
-- [ ] Handle `rendezvous` message: forward `connect` to both peers
-- [ ] Handle `connect` message: initiate simultaneous uTP SYN to target
-- [ ] Handle `error` message: log and discard
-- [ ] Error codes: NoSuchPeer, NotConnected, NoSupport, NoSelf
-- [ ] Depends on uTP being implemented first
+- [x] `holepunch.c` / `mbt/holepunch.h`
+- [x] Advertise `ut_holepunch` in BEP 10 extension handshake
+- [x] Handle `rendezvous` message: forward `connect` to both peers
+- [x] Handle `connect` message: initiate simultaneous uTP SYN to target
+- [x] Handle `error` message: log and discard
+- [x] Error codes: NoSuchPeer, NotConnected, NoSupport, NoSelf
+- [x] Depends on uTP being implemented first
 
 ### DHT items (BEP 44)
 - [x] Store items, serve get and put with tokens, signature check through a hook
