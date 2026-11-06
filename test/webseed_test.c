@@ -24,6 +24,7 @@
 
 #define PIECE_LEN 16384
 #define NUM_PIECES 4
+#define BURST_PIECES 12         /* above the web seed ready queue */
 #define TOTAL_LEN (PIECE_LEN * NUM_PIECES - 100)
 #define SMALL_LEN 6000
 #define WAIT_STEPS 800           /* 8 seconds at 10 ms */
@@ -34,6 +35,7 @@
 
 static char tmpdir[] = "/tmp/mbt_ws_XXXXXX";
 static uint8_t data[TOTAL_LEN];
+static uint8_t burst[PIECE_LEN * BURST_PIECES];
 static unsigned char *enc, *small_enc;
 static size_t enc_len, small_len;
 static struct mbt_ev *ev;
@@ -170,7 +172,7 @@ start_server(void)
 /* --- Helpers --- */
 
 static void
-encode_file(const char *name, size_t len, unsigned char **out, size_t *out_len)
+encode_buf(const char *name, const void *buf, size_t len, unsigned char **out, size_t *out_len)
 {
 	struct mbt_metainfo *mi;
 	char path[300];
@@ -179,12 +181,18 @@ encode_file(const char *name, size_t len, unsigned char **out, size_t *out_len)
 	snprintf(path, sizeof(path), "%s/%s", tmpdir, name);
 	fp = fopen(path, "wb");
 	assert(fp);
-	assert(fwrite(data, 1, len, fp) == len);
+	assert(fwrite(buf, 1, len, fp) == len);
 	fclose(fp);
 	assert(mbt_metainfo_new(&mi) == 0);
 	assert(mbt_metainfo_set_content(mi, path, PIECE_LEN) == 0);
 	assert(mbt_metainfo_encode(mi, out, out_len) == 0);
 	mbt_metainfo_free(mi);
+}
+
+static void
+encode_file(const char *name, size_t len, unsigned char **out, size_t *out_len)
+{
+	encode_buf(name, data, len, out, out_len);
 }
 
 static void
@@ -560,6 +568,62 @@ test_lazy_claim(void)
 	mbt_storage_memory_destroy(m);
 }
 
+/* A run ends when the ready queue is full, with no piece fetched twice. */
+static void
+test_ready_full(void)
+{
+	struct mbt_storage_memory *m = mbt_storage_memory_new();
+	struct mbt_session *s = fake_session(0, m, &now_policy);
+	struct mbt_torrent *t;
+	unsigned char *benc;
+	size_t blen;
+
+	for (size_t i = 0; i < sizeof(burst); i++)
+		burst[i] = (uint8_t)(i * 17 + i / 509);
+	encode_buf("burst", burst, sizeof(burst), &benc, &blen);
+	fake_reset();
+	assert(mbt_session_add_torrent_buf(s, benc, blen, NULL, &t) == 0);
+	assert(mbt_torrent_add_webseed(t, "http://a/x") == 0);
+	test_wait_verified(ev, t);
+	steps(10);
+	assert(fake_active == 1);
+
+	/* All data in one callback, so no commit timer can run. */
+	assert(fakes[0].active && fakes[0].offset == 0);
+	assert(fakes[0].data(burst, sizeof(burst), fakes[0].arg) != 0);
+	assert(mbt_torrent_webseed_bytes(t) % PIECE_LEN == 0);
+	uint64_t first_run = mbt_torrent_webseed_bytes(t);
+
+	fakes[0].active = 0;
+	fake_active--;
+	fakes[0].done(-ECANCELED, 0, fakes[0].arg);
+
+	for (int i = 0; i < 50 && !mbt_torrent_complete(t); i++) {
+		steps(5);
+		for (int j = 0; j < FAKE_MAX; j++) {
+			struct fake *f = &fakes[j];
+			int rv;
+
+			if (!f->active)
+				continue;
+			assert(f->offset == first_run);
+			rv = f->data(burst + f->offset, f->length, f->arg);
+			first_run += f->length;
+			f->active = 0;
+			fake_active--;
+			f->done(rv ? -ECANCELED : 206, 0, f->arg);
+			if (rv)
+				first_run = mbt_torrent_webseed_bytes(t);
+		}
+	}
+	assert(mbt_torrent_complete(t));
+	assert(memcmp(mbt_storage_memory_data(m), burst, sizeof(burst)) == 0);
+	assert(mbt_torrent_webseed_bytes(t) == sizeof(burst));
+	free(benc);
+	mbt_session_free(s);
+	mbt_storage_memory_destroy(m);
+}
+
 int
 main(void)
 {
@@ -588,6 +652,7 @@ main(void)
 	test_no_hook();
 	test_peer_wins();
 	test_lazy_claim();
+	test_ready_full();
 
 	mbt_ev_destroy(ev);
 	kill(server, SIGTERM);

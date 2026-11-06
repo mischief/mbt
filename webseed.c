@@ -199,7 +199,7 @@ webseed_data(const void *data, size_t len, void *arg)
 	while (len > 0) {
 		size_t n;
 
-		if (w->piece < 0 && webseed_next_piece(w) < 0) {
+		if (w->piece < 0 && (w->ready_count >= READY_MAX || webseed_next_piece(w) < 0)) {
 			w->stopped = 1;
 			return 1;
 		}
