@@ -137,7 +137,8 @@ mbt_ev_step(struct mbt_ev *ev, int timeout_ms)
  * For a program with its own poll loop: run work that is ready, then return one
  * descriptor that becomes readable when the loop has work. *timeout_ms is the
  * longest poll wait, or -1 for no limit. Call it before each poll, and
- * mbt_ev_step(ev, 0) after. Returns -ENOTSUP if the backend has no such fd.
+ * mbt_ev_step(ev, 0) after. Returns -ENOTSUP if the backend has no such fd:
+ * libevent keeps its sockets to itself. The poll backend needs kqueue.
  */
 static inline int
 mbt_ev_watch(struct mbt_ev *ev, int *timeout_ms)

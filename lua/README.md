@@ -85,8 +85,9 @@ removed torrent.
 - `mbt.loop_fd()` is for a program with its own poll loop. It runs ready work,
   then returns a descriptor and a timeout in ms, `-1` for no limit. Call it
   before each poll. When the descriptor is readable or the timeout ends, call
-  `mbt.step(0)`. Call it from the main chunk. It works on the sd-event backend;
-  the others return `nil`, a message and `ENOTSUP`.
+  `mbt.step(0)`. Call it from the main chunk. It works on the sd-event backend,
+  and on the poll backend where the system has kqueue. Others return `nil`, a
+  message and `ENOTSUP`. OpenBSD needs `-Devent_backend=poll` for it.
 - `mbt.now_ms()` is a monotonic clock in milliseconds, for intervals.
 - `mbt.step([ms])` runs one loop iteration and waits at most `ms` (default
   0). Use it in place of `mbt.run` to drive the loop from your own loop.

@@ -3,6 +3,15 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <poll.h>
+#if defined(__has_include)
+#if __has_include(<sys/event.h>)
+#include <sys/types.h>
+#include <sys/event.h>
+#include <sys/time.h>
+#include <unistd.h>
+#define HAVE_KQUEUE 1
+#endif
+#endif
 #include <time.h>
 #include <stdint.h>
 #include <sys/queue.h>
@@ -43,6 +52,9 @@ struct poll_ev {
 	SLIST_HEAD(, poll_timer) pending_timers;
 	int dispatching;
 	int running;
+	int watch_fd;             /* kqueue for mbt_ev_watch, or -1 */
+	struct pollfd *watched;   /* what it holds */
+	int watch_n;
 };
 
 static uint64_t
@@ -225,8 +237,71 @@ poll_destroy(struct mbt_ev *ev)
 	struct poll_timer *t, *t_tmp;
 	SLIST_FOREACH_SAFE(t, &pev->timers, entry, t_tmp)
 		free(t);
+#ifdef HAVE_KQUEUE
+	if (pev->watch_fd >= 0)
+		close(pev->watch_fd);
+	free(pev->watched);
+#endif
 	free(pev);
 }
+
+#ifdef HAVE_KQUEUE
+/* Make the watch kqueue hold what the poll set holds now. */
+static int
+watch_sync(struct poll_ev *pev)
+{
+	struct pollfd *fds = NULL;
+	struct kevent *ch = NULL;
+	int max = mbt_ev_io_count(&pev->base), n, nch = 0, rv = 0;
+
+	if (pev->watch_fd < 0 && (pev->watch_fd = kqueue()) < 0) {
+		pev->watch_fd = -1;
+		return -errno;
+	}
+	if (max > 0 && ((fds = calloc((size_t)max, sizeof(*fds))) == NULL ||
+	                (ch = calloc((size_t)max * 2, sizeof(*ch))) == NULL)) {
+		free(fds);
+		return -ENOMEM;
+	}
+	n = mbt_ev_pollfd(&pev->base, fds, max);
+
+	/* A closed fd has left the kqueue, so each delete can fail. */
+	for (int i = 0; i < pev->watch_n; i++) {
+		struct kevent d;
+
+		EV_SET(&d, pev->watched[i].fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+		(void)kevent(pev->watch_fd, &d, 1, NULL, 0, NULL);
+		EV_SET(&d, pev->watched[i].fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+		(void)kevent(pev->watch_fd, &d, 1, NULL, 0, NULL);
+	}
+	for (int i = 0; i < n; i++) {
+		if (fds[i].events & POLLIN)
+			EV_SET(&ch[nch++], fds[i].fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+		if (fds[i].events & POLLOUT)
+			EV_SET(&ch[nch++], fds[i].fd, EVFILT_WRITE, EV_ADD, 0, 0, NULL);
+	}
+	if (nch > 0 && kevent(pev->watch_fd, ch, nch, NULL, 0, NULL) < 0)
+		rv = -errno;
+	free(ch);
+	free(pev->watched);
+	pev->watched = fds;
+	pev->watch_n = n;
+	return rv;
+}
+
+static int
+poll_watch(struct mbt_ev *ev, int *timeout_ms)
+{
+	struct poll_ev *pev = (struct poll_ev *)ev;
+	int rv;
+
+	poll_step(ev, 0);
+	if ((rv = watch_sync(pev)) < 0)
+		return rv;
+	*timeout_ms = mbt_ev_timeout_ms(ev);
+	return pev->watch_fd;
+}
+#endif
 
 static const struct mbt_ev_ops poll_ops = {
 	.io_new     = poll_io_new,
@@ -239,6 +314,9 @@ static const struct mbt_ev_ops poll_ops = {
 	.step       = poll_step,
 	.stop       = poll_stop,
 	.destroy    = poll_destroy,
+#ifdef HAVE_KQUEUE
+	.watch      = poll_watch,
+#endif
 };
 
 int
@@ -247,6 +325,7 @@ mbt_ev_new_pollable(struct mbt_ev **out)
 	struct poll_ev *pev = calloc(1, sizeof(*pev));
 	if (!pev) return -ENOMEM;
 	pev->base.ops = &poll_ops;
+	pev->watch_fd = -1;
 	SLIST_INIT(&pev->ios);
 	SLIST_INIT(&pev->timers);
 	SLIST_INIT(&pev->pending_ios);

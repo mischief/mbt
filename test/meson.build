@@ -60,6 +60,8 @@ storage_file_test = executable('storage_file_test', 'storage_file_test.c', link_
 test('storage_file', storage_file_test)
 peer_totals_test = executable('peer_totals_test', 'peer_totals_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('peer_totals', peer_totals_test, timeout: 60)
+loop_watch_test = executable('loop_watch_test', 'loop_watch_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('loop_watch', loop_watch_test, timeout: 30)
 choke_request_test = executable('choke_request_test', 'choke_request_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('choke_request', choke_request_test, timeout: 30)
 storage_fd_test = executable('storage_fd_test', 'storage_fd_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
