@@ -130,7 +130,7 @@
 - [x] 100% man page coverage (check-docs.sh with mandoc lint)
 
 ### Medium-term (swarm quality)
-- [ ] Tracker store: expire stale peers (no re-announce within 2× interval)
+- [ ] Tracker store: call `mbt_tracker_store_gc` from a timer; nothing runs it yet
 - [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
 
 ### Storage compatibility
@@ -147,7 +147,8 @@
 - [ ] Tracker resource limits (max peers/torrent, max torrents, eviction)
 - [ ] Session peer accept/reject callback
 - [ ] Per-torrent feature toggles (DHT/PEX/LSD enable per torrent)
-- [ ] Metrics/audit hooks (bytes transferred, peer churn, hash failures)
+- [x] Totals: bytes up and down, hash failures, per torrent and session
+- [ ] Metrics/audit hooks (peer churn)
 
 ## Phase 7: Testing
 
@@ -171,7 +172,7 @@
 - [x] uTP tests over real loopback UDP (utp, utp_robust with rx-hook loss/reorder)
 - [x] Transport variants: swarm_utp_only / swarm_utp_mixed; e2e / e2e_utp / e2e_tcp
 - [x] Live interop tested against transmission (libutp) over uTP — handshake parsed
-- [ ] HTTP tracker client test (needs async client)
+- [x] HTTP tracker client test (`http_curl_test`)
 
 ## Phase 8: Tools
 
@@ -184,21 +185,22 @@
 - [x] `mbt-tui` — ncurses client (torrent list, peers, piece map, log panel)
 - [ ] `mbt-tui`: persistent state in $XDG_DATA_HOME/mbt/ (bencode)
 - [ ] `mbt-tui`: per-torrent download directory
-- [ ] `mbt-seed` — seed a file given a .torrent
 - [ ] `mbt-daemon` — long-running daemon + DBus/control interface
 
 ### Persistent state (mbt_state)
-- [ ] Optional/pluggable — not required for oneshot clients or embedded
-- [ ] `mbt_state_open(dir)` / `mbt_state_close()` — caller chooses path
-- [ ] Per-torrent: `<infohash>.torrent` (raw metadata) + `<infohash>.resume` (bencode: have bitmap, storage path, stats, added time)
+- [x] Optional/pluggable — not required for oneshot clients or embedded
+- [x] `mbt_state_open(dir)` / `mbt_state_close()` — caller chooses path
+- [x] Per-torrent: `<infohash>.torrent` (raw info dict) + `<infohash>.resume`
+- [x] `.resume`: trackers and web seeds
+- [ ] `.resume`: have bitmap and stats
 - [ ] Session-level: `session.state` (peer_id, dht node_id, ~10 DHT bootstrap nodes — NOT full routing table)
-- [ ] `mbt_state_save(st, torrent)` — after metadata received + after each piece verified
-- [ ] `mbt_state_restore(st, session)` — scan dir, re-add all torrents with saved metadata + bitfield
-- [ ] `mbt_state_remove(st, infohash)` — delete state files (forget torrent)
+- [x] Save through `mbt_state_ops`, after metadata and on completion
+- [x] Restore at session start, through `enumerate`
+- [x] Remove through `mbt_state_ops`
 - [ ] `mbt_state_move(st, infohash, new_path)` — relocate data + update state
-- [ ] Per-torrent storage path (currently global on session config)
+- [x] Per-torrent storage path (`mbt_add_torrent_cfg`)
 - [ ] Save/load peer hints for faster reconnection
-- [ ] File follows Transmission pattern: separate .torrent + .resume files per torrent
+- [x] Separate .torrent + .resume files per torrent
 - [ ] Tools pick the path: `$XDG_DATA_HOME/mbt/` on Linux, `/sd/.mbt/` on ESP32
 - [ ] Tunable save frequency (every piece, every N pieces, on shutdown only)
 
@@ -247,7 +249,8 @@
 ### DHT items (BEP 44)
 - [x] Store items, serve get and put with tokens, signature check through a hook
 - [x] Lua: local store, raw queries, bencode and sha1 helpers
-- [ ] Network client: get and put through a lookup
+- [ ] Network client: get and put through a lookup (BEP 44)
+- [ ] BEP 46 mutable torrents, BEP 49 helpers
 - [ ] ed25519 sign and verify
 - [ ] Republish stored items
 
@@ -256,6 +259,12 @@
 - [ ] Multi-file torrents
 - [x] Contiguous ranges in one request
 - [ ] Start at the biggest gap
+- [ ] A stalled server holds its piece until the low-speed limit, 30 seconds by default
+
+### Connection edge cases
+- [ ] Idle uTP peer with nothing unacked: found only at keepalive, about 130 seconds
+- [ ] Fixed listen port with IPv4 UDP busy: warn at startup
+- [ ] `mbt_ev_watch` on libevent: bufferevents hide the sockets
 
 ## Phase 10: Portability hardening
 
@@ -298,6 +307,6 @@
 
 ## Phase 13: Documentation
 
-- [ ] mbt.3 overview man page (architecture, lifetimes, threading model)
-- [ ] Man pages for all public headers (check-docs.sh tracks coverage)
+- [x] mbt.3 overview man page (architecture, lifetimes, threading model)
+- [ ] Man pages for all public headers (check-docs.sh tracks coverage): `mbt_utp.3` is missing
 - [ ] DESIGN.md kept current (test count, feature list)

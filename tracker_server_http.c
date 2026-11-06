@@ -251,7 +251,8 @@ mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev, uint16_t 
 	int rv = mbt_listen_tcp(&th->listener, ev, port, http_accept_cb, th);
 	if (rv < 0) { free(th); return rv; }
 
-	mbt_log_info(MBT_LOG_SESSION, "HTTP tracker listening on port %hu", port);
+	th->port = th->listener.port;
+	mbt_log_info(MBT_LOG_SESSION, "HTTP tracker listening on port %hu", th->port);
 	*out = th;
 	return 0;
 }
@@ -267,5 +268,6 @@ mbt_tracker_http_free(struct mbt_tracker_http *th)
 	free(th);
 }
 
+uint16_t mbt_tracker_http_port(struct mbt_tracker_http *th) { return th->port; }
 int mbt_tracker_http_num_torrents(struct mbt_tracker_http *th) { return mbt_tracker_store_num_torrents(th->store); }
 int mbt_tracker_http_num_peers(struct mbt_tracker_http *th) { return mbt_tracker_store_num_peers(th->store); }

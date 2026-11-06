@@ -53,6 +53,9 @@ removed torrent.
   - `dht`, `lsd`, `pcp`: default false.
   - `dht_bootstrap`: `false` for no default node, or a list of `"host:port"`
     strings to use in its place.
+  - `state`: a directory that saves the torrent list. A new session with the
+    same directory adds them again, with their trackers and web seeds.
+    Fallback trackers are not saved.
   - `dht_max_stored`: infohashes the session's DHT node stores (default 64).
   - `picker`: `"rarest"` (default), `"random"` or `"sequential"`.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
@@ -91,6 +94,9 @@ removed torrent.
   `mbt.step(0)`. Call it from the main chunk. It works on the sd-event backend,
   and on the poll backend where the system has kqueue. Others return `nil`, a
   message and `ENOTSUP`. OpenBSD needs `-Devent_backend=poll` for it.
+- `mbt.tracker{port = 0, http = false, http_port = 0}` runs a tracker on the
+  event loop, over UDP and, if asked, HTTP. `tr:port()`, `tr:http_port()`,
+  `tr:peers()`, `tr:torrents()`, `tr:close()`. `<close>` works too.
 - `mbt.now_ms()` is a monotonic clock in milliseconds, for intervals.
 - `mbt.step([ms])` runs one loop iteration and waits at most `ms` (default
   0). Use it in place of `mbt.run` to drive the loop from your own loop.
@@ -122,6 +128,7 @@ reference. A session that the collector frees stops its transfers.
   yet supplies its metadata. `.torrent` files are limited to 64 MiB.
 - `s:find(hex)` returns a torrent or nil. `s:torrents()` returns a list.
 - `s:listen_port()`, `s:dht_port()`.
+- `s:enable_dht()`, `s:disable_dht()`, `s:enable_lsd()`, `s:disable_lsd()`.
 - `s:dht_bootstrap(addr, port)`, `s:reannounce()`.
 - `s:stop_announce()` sends event=stopped for all torrents, and returns the
   replies to wait for. `s:stops_pending()` counts them. Wait a short time
@@ -164,6 +171,7 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 - `t:set_no_upload(on)` stops sending pieces to peers. The add calls take
   `no_upload = true`. Metadata requests still get an answer.
 - `t:add_webseed(url)` adds a BEP 19 web seed, for a single-file torrent.
+  `t:webseeds()` lists them.
   `t:webseed_bytes()` returns the bytes from web seeds.
 - `t:add_peer(addr, port[, utp])`.
 - `t:set_upload_rate(n)`, `t:set_download_rate(n)`.

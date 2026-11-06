@@ -42,6 +42,7 @@ struct mbt_tracker_http;
 MBT_API int mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev,
                          uint16_t port, struct mbt_tracker_store *store);
 MBT_API void mbt_tracker_http_free(struct mbt_tracker_http *th);
+MBT_API uint16_t mbt_tracker_http_port(struct mbt_tracker_http *th);
 MBT_API int mbt_tracker_http_num_torrents(struct mbt_tracker_http *th);
 MBT_API int mbt_tracker_http_num_peers(struct mbt_tracker_http *th);
 

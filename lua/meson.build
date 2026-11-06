@@ -41,6 +41,9 @@ if lua_bin.found() and get_option('tests')
   test('lua_wait_fd', lua_bin, depends: mbt_lua, args: files('wait_fd_test.lua'),
     env: {'LUA_CPATH': meson.current_build_dir() / '?.so;;'},
     timeout: 30)
+  test('lua_knobs', lua_bin, depends: mbt_lua, args: files('knobs_test.lua'),
+    env: {'LUA_CPATH': meson.current_build_dir() / '?.so;;'},
+    timeout: 60)
   test('lua_mse', lua_bin, depends: mbt_lua, args: files('mse_test.lua'),
     env: {'LUA_CPATH': meson.current_build_dir() / '?.so;;'},
     timeout: 60)

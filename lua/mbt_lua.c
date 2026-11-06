@@ -34,12 +34,15 @@
 #include "mbt/http_curl.h"
 #endif
 #include "mbt/mse.h"
+#include "mbt/state.h"
 #include "mbt/storage.h"
+#include "mbt/tracker_server.h"
 #include "mbt/torrent.h"
 
 #define SESSION_META "mbt.session"
 #define STORAGE_META "mbt.storage"
 #define DHT_META "mbt.dht"
+#define TRACKER_META "mbt.tracker"
 #define NODE_ID_LEN 20
 #define BE_LUA_MAX_DEPTH 32
 #define RUN_STEP_MS 100
@@ -880,6 +883,7 @@ l_session(lua_State *L)
 	struct lsession *ls;
 	const char *dir;
 	bool lsd, dht, no_storage = false;
+	struct mbt_state *state = NULL;
 	int rv;
 
 	if (lua_isnoneornil(L, 1)) {
@@ -978,6 +982,22 @@ l_session(lua_State *L)
 		cfg.http_free = mbt_http_curl_free;
 	}
 #endif
+	lua_getfield(L, 1, "state");
+	if (lua_isstring(L, -1)) {
+		if ((rv = mbt_state_open(&state, lua_tostring(L, -1))) < 0) {
+#ifdef HAVE_CURL
+			if (cfg.http_arg != NULL)
+				mbt_http_curl_free(cfg.http_arg);
+#endif
+			mbt_storage_unref(cfg.default_storage);
+			free(ls->dir);
+			ls->dir = NULL;
+			return fail(L, rv);
+		}
+		cfg.state_ops = mbt_state_file_ops();
+		cfg.state_ctx = state;
+	}
+	lua_pop(L, 1);
 	rv = mbt_session_new(&ls->s, &cfg);
 	mbt_storage_unref(cfg.default_storage);
 	if (rv < 0) {
@@ -1172,6 +1192,42 @@ l_session_dht_port(lua_State *L)
 {
 	lua_pushinteger(L, mbt_session_dht_port(check_session(L, 1)->s));
 	return 1;
+}
+
+static int
+l_session_enable_dht(lua_State *L)
+{
+	int rv = mbt_session_enable_dht(check_session(L, 1)->s);
+
+	if (rv < 0)
+		return fail(L, rv);
+	lua_pushboolean(L, 1);
+	return 1;
+}
+
+static int
+l_session_disable_dht(lua_State *L)
+{
+	mbt_session_disable_dht(check_session(L, 1)->s);
+	return 0;
+}
+
+static int
+l_session_enable_lsd(lua_State *L)
+{
+	int rv = mbt_session_enable_lsd(check_session(L, 1)->s);
+
+	if (rv < 0)
+		return fail(L, rv);
+	lua_pushboolean(L, 1);
+	return 1;
+}
+
+static int
+l_session_disable_lsd(lua_State *L)
+{
+	mbt_session_disable_lsd(check_session(L, 1)->s);
+	return 0;
 }
 
 static int
@@ -1605,6 +1661,21 @@ l_add_tracker(lua_State *L)
 }
 
 /* t:add_peer(addr, port[, utp]) */
+/* t:webseeds(): the web seed URLs. */
+static int
+l_webseeds(lua_State *L)
+{
+	struct mbt_torrent *t = check_torrent(L, 1, NULL);
+	int n = mbt_torrent_webseed_count(t);
+
+	lua_createtable(L, n, 0);
+	for (int i = 0; i < n; i++) {
+		lua_pushstring(L, mbt_torrent_webseed(t, i));
+		lua_rawseti(L, -2, i + 1);
+	}
+	return 1;
+}
+
 /* t:piece_avail(i): peers with piece i, from 0. */
 static int
 l_piece_avail(lua_State *L)
@@ -2876,6 +2947,124 @@ fdwaits_free(struct cctx *c)
 	}
 }
 
+/* ------------------------------------------------------------------ */
+/* Tracker server                                                      */
+/* ------------------------------------------------------------------ */
+
+struct ltracker {
+	struct mbt_tracker_store *store;
+	struct mbt_tracker_server *udp;
+	struct mbt_tracker_http *http;
+};
+
+static void
+tracker_close(struct ltracker *lt)
+{
+	if (lt->http != NULL)
+		mbt_tracker_http_free(lt->http);
+	if (lt->udp != NULL)
+		mbt_tracker_server_free(lt->udp);
+	if (lt->store != NULL)
+		mbt_tracker_store_free(lt->store);
+	lt->http = NULL;
+	lt->udp = NULL;
+	lt->store = NULL;
+}
+
+static struct ltracker *
+check_tracker(lua_State *L, int idx)
+{
+	struct ltracker *lt = luaL_checkudata(L, idx, TRACKER_META);
+
+	if (lt->store == NULL)
+		luaL_error(L, "mbt: tracker is closed");
+	return lt;
+}
+
+/* mbt.tracker{port = 0, http = false, http_port = 0}: UDP, and HTTP if asked. */
+static int
+l_tracker(lua_State *L)
+{
+	struct cctx *c = ctx_of(L);
+	uint16_t port = 0, http_port = 0;
+	bool http = false;
+	struct ltracker *lt;
+	int rv;
+
+	if (!lua_isnoneornil(L, 1)) {
+		luaL_checktype(L, 1, LUA_TTABLE);
+		port = (uint16_t)opt_int(L, 1, "port", 0);
+		http = opt_bool(L, 1, "http", false);
+		http_port = (uint16_t)opt_int(L, 1, "http_port", 0);
+	}
+	lt = lua_newuserdatauv(L, sizeof(*lt), 0);
+	memset(lt, 0, sizeof(*lt));
+	luaL_setmetatable(L, TRACKER_META);
+	if (mbt_tracker_store_new(&lt->store) < 0) {
+		lt->store = NULL;
+		return fail(L, -ENOMEM);
+	}
+	if ((rv = mbt_tracker_server_new(&lt->udp, c->ev, port, lt->store)) < 0) {
+		lt->udp = NULL;
+		tracker_close(lt);
+		return fail(L, rv);
+	}
+	if (http && (rv = mbt_tracker_http_new(&lt->http, c->ev, http_port, lt->store)) < 0) {
+		lt->http = NULL;
+		tracker_close(lt);
+		return fail(L, rv);
+	}
+	return 1;
+}
+
+static int
+l_tracker_port(lua_State *L)
+{
+	lua_pushinteger(L, mbt_tracker_server_port(check_tracker(L, 1)->udp));
+	return 1;
+}
+
+static int
+l_tracker_http_port(lua_State *L)
+{
+	struct ltracker *lt = check_tracker(L, 1);
+
+	if (lt->http == NULL)
+		return 0;
+	lua_pushinteger(L, mbt_tracker_http_port(lt->http));
+	return 1;
+}
+
+static int
+l_tracker_peers(lua_State *L)
+{
+	lua_pushinteger(L, mbt_tracker_store_num_peers(check_tracker(L, 1)->store));
+	return 1;
+}
+
+static int
+l_tracker_torrents(lua_State *L)
+{
+	lua_pushinteger(L, mbt_tracker_store_num_torrents(check_tracker(L, 1)->store));
+	return 1;
+}
+
+static int
+l_tracker_gc(lua_State *L)
+{
+	tracker_close(luaL_checkudata(L, 1, TRACKER_META));
+	return 0;
+}
+
+static const luaL_Reg tracker_methods[] = {
+    {"port", l_tracker_port},
+    {"http_port", l_tracker_http_port},
+    {"peers", l_tracker_peers},
+    {"torrents", l_tracker_torrents},
+    {"close", l_tracker_gc},
+    {NULL, NULL},
+};
+
 /* mbt.spawn(fn, ...) runs fn in a new coroutine; errors are printed. */
 static int
 l_spawn(lua_State *L)
@@ -3003,6 +3192,10 @@ static const luaL_Reg session_methods[] = {
     {"listen_port", l_session_listen_port},
     {"dht_port", l_session_dht_port},
     {"dht_bootstrap", l_session_dht_bootstrap},
+    {"enable_dht", l_session_enable_dht},
+    {"disable_dht", l_session_disable_dht},
+    {"enable_lsd", l_session_enable_lsd},
+    {"disable_lsd", l_session_disable_lsd},
     {"stop_announce", l_session_stop_announce},
     {"stops_pending", l_session_stops_pending},
     {"bytes_downloaded", l_session_bytes_downloaded},
@@ -3033,6 +3226,7 @@ static const luaL_Reg torrent_methods[] = {
     {"add_tracker", l_add_tracker},
     {"add_webseed", l_add_webseed},
     {"set_no_upload", l_set_no_upload},
+    {"webseeds", l_webseeds},
     {"piece_avail", l_piece_avail},
     {"metadata", l_metadata},
     {"webseed_bytes", l_webseed_bytes},
@@ -3089,6 +3283,7 @@ static const luaL_Reg module_fns[] = {
     {"spawn", l_spawn},
     {"sleep", l_sleep},
     {"wait_fd", l_wait_fd},
+    {"tracker", l_tracker},
     {"loop_fd", l_loop_fd},
     {"step", l_step},
     {"metainfo", l_metainfo},
@@ -3198,6 +3393,16 @@ luaopen_mbt(lua_State *L)
 		lua_setfield(L, -2, "__eq");
 		lua_pushcfunction(L, l_torrent_tostring);
 		lua_setfield(L, -2, "__tostring");
+	}
+	lua_pop(L, 1);
+	if (luaL_newmetatable(L, TRACKER_META)) {
+		lua_newtable(L);
+		luaL_setfuncs(L, tracker_methods, 0);
+		lua_setfield(L, -2, "__index");
+		lua_pushcfunction(L, l_tracker_gc);
+		lua_setfield(L, -2, "__gc");
+		lua_pushcfunction(L, l_tracker_gc);
+		lua_setfield(L, -2, "__close");
 	}
 	lua_pop(L, 1);
 	if (luaL_newmetatable(L, STORAGE_META)) {
