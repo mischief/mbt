@@ -66,6 +66,7 @@ struct session_torrent {
 	int announce_interval;
 	time_t last_dht_lookup;
 	time_t last_dht_announce;
+	time_t announce_lookup;  /* a lookup for the next announce started here */
 	int started_announced;   /* sent event=started on first announce */
 	int completed_announced; /* sent event=completed to tracker */
 	int emergency_reannounce; /* fired one early reannounce due to dry peerdb */
@@ -106,6 +107,7 @@ struct pending_utp_connect {
 STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 
 #define LISTEN_TRIES 8
+#define DHT_LOOKUP_WAIT_SEC 3
 #define WEBSEED_NO_PEER_DELAY_MS 5000
 #define WEBSEED_LOW_RATE_DELAY_MS 10000
 #define WEBSEED_LOW_RATE (64 * 1024)
@@ -350,9 +352,17 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 		if (s->dht && mbt_torrent_have_count(st->torrent) > 0 &&
 		    !mbt_torrent_is_private(st->torrent)) {
 			time_t now = time(NULL);
-			if (now - st->last_dht_announce >= s->timers.dht_refresh) {
-				st->last_dht_announce = now;
-				mbt_dht_announce(s->dht, st->ih, s->listen_port);
+
+			/* An announce needs fresh tokens, and a reply from at least one node. */
+			if (now - st->last_dht_announce < s->timers.dht_refresh) {
+				/* not due */
+			} else if (st->announce_lookup == 0) {
+				st->announce_lookup = now;
+				mbt_session_dht_get_peers(s, st->ih);
+			} else if (now - st->announce_lookup >= DHT_LOOKUP_WAIT_SEC) {
+				st->announce_lookup = 0;
+				if (mbt_dht_announce(s->dht, st->ih, s->listen_port) > 0)
+					st->last_dht_announce = now;
 			}
 		}
 	}
