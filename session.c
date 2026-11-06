@@ -105,6 +105,8 @@ STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 
 struct pending_utp_accept;
 LIST_HEAD(pending_accept_list, pending_utp_accept);
+struct pending_accept;
+LIST_HEAD(pending_tcp_accept_list, pending_accept);
 
 /* --- Session --- */
 
@@ -188,6 +190,7 @@ struct mbt_session {
 	struct pending_connect_list pending;
 	struct pending_utp_connect_list pending_utp;
 	struct pending_accept_list pending_accepts; /* conns waiting for a BT handshake */
+	struct pending_tcp_accept_list pending_tcp_accepts; /* sockets not yet identified */
 
 	/* Rate limiting */
 	struct mbt_ratelimit *upload_limit;
@@ -585,7 +588,30 @@ struct pending_accept {
 	struct sockaddr_storage addr;
 	unsigned char hs[HANDSHAKE_SIZE];
 	size_t hs_got;
+	struct mbt_ev_timer *timeout;
+	LIST_ENTRY(pending_accept) next;
 };
+
+static void
+pending_accept_free(struct pending_accept *pa, int close_fd)
+{
+	LIST_REMOVE(pa, next);
+	if (pa->timeout)
+		mbt_ev_timer_free(pa->timeout);
+	mbt_ev_io_free(pa->io);
+	if (close_fd)
+		close(pa->fd);
+	free(pa);
+}
+
+static void
+pending_accept_timeout(struct mbt_ev_timer *timer, void *v)
+{
+	struct pending_accept *pa = v;
+
+	(void)timer;
+	pending_accept_free(pa, 1);
+}
 
 static void
 pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
@@ -596,9 +622,7 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	ssize_t n = recv(pa->fd, pa->hs + pa->hs_got, HANDSHAKE_SIZE - pa->hs_got, 0);
 	if (n <= 0) {
-		close(pa->fd);
-		mbt_ev_io_free(pa->io);
-		free(pa);
+		pending_accept_free(pa, 1);
 		return;
 	}
 	pa->hs_got += n;
@@ -609,20 +633,20 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	if (plain ? s->encryption == MBT_ENCRYPTION_REQUIRE
 	          : s->encryption == MBT_ENCRYPTION_DISABLE) {
-		close(pa->fd);
-		mbt_ev_io_free(pa->io);
-		free(pa);
+		pending_accept_free(pa, 1);
 		return;
 	}
 	if (!plain) {
 		struct mbt_conn *mc;
+		int sock = pa->fd;
+		unsigned char hs[HANDSHAKE_SIZE];
 
-		mbt_ev_io_free(pa->io);
-		if (mbt_conn_new(s->ev, &mc, pa->fd, NULL, NULL, NULL) < 0)
-			close(pa->fd);
+		memcpy(hs, pa->hs, sizeof(hs));
+		pending_accept_free(pa, 0);
+		if (mbt_conn_new(s->ev, &mc, sock, NULL, NULL, NULL) < 0)
+			close(sock);
 		else
-			pending_accept_mse(s, mc, pa->hs, pa->hs_got);
-		free(pa);
+			pending_accept_mse(s, mc, hs, sizeof(hs));
 		return;
 	}
 
@@ -645,9 +669,7 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			mbt_sockaddr_split(&pa->addr, saddr, sizeof(saddr), &sport);
 			mbt_session_note_self_addr(s, saddr);
 		}
-		close(pa->fd);
-		mbt_ev_io_free(pa->io);
-		free(pa);
+		pending_accept_free(pa, 1);
 		return;
 	}
 
@@ -657,26 +679,20 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 			break;
 	}
 	if (!st) {
-		close(pa->fd);
-		mbt_ev_io_free(pa->io);
-		free(pa);
+		pending_accept_free(pa, 1);
 		return;
 	}
 
 	/* Duplicate peer_id: keep one of the two by the symmetric rule in
 	 * mbt_torrent_resolve_duplicate (BEP 55 simultaneous opens). */
 	if (!mbt_torrent_resolve_duplicate(st->torrent, NULL, their_id, 0)) {
-		close(pa->fd);
-		mbt_ev_io_free(pa->io);
-		free(pa);
+		pending_accept_free(pa, 1);
 		return;
 	}
 
 	/* Enforce peer limit */
 	if (mbt_torrent_peer_count(st->torrent) >= s->max_peers) {
-		close(pa->fd);
-		mbt_ev_io_free(pa->io);
-		free(pa);
+		pending_accept_free(pa, 1);
 		return;
 	}
 
@@ -685,16 +701,17 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	mbt_sockaddr_split(&pa->addr, paddr, sizeof(paddr), &pport);
 	mbt_log_info(MBT_LOG_SESSION, "incoming peer %s:%hu", paddr, pport);
 
-	mbt_ev_io_free(pa->io);
+	int cfd = pa->fd;
+
+	pending_accept_free(pa, 0);
 
 	struct mbt_conn *conn;
-	int rv = mbt_conn_new(s->ev, &conn, pa->fd, NULL, NULL, NULL);
-	if (rv < 0) { close(pa->fd); free(pa); return; }
+	int rv = mbt_conn_new(s->ev, &conn, cfd, NULL, NULL, NULL);
+	if (rv < 0) { close(cfd); return; }
 
 	rv = mbt_torrent_add_peer_incoming(st->torrent, conn, ext, their_id);
 	if (rv < 0)
 		mbt_conn_free(conn);
-	free(pa);
 }
 
 /* --- uTP incoming (async BT handshake over uTP conn) --- */
@@ -705,6 +722,7 @@ struct pending_utp_accept {
 	unsigned char       hs[HANDSHAKE_SIZE];
 	size_t              hs_got;
 	int                 mse;     /* conn is an MSE conn */
+	struct mbt_ev_timer *timeout;
 	LIST_ENTRY(pending_utp_accept) next;
 };
 
@@ -712,9 +730,24 @@ static void
 pending_utp_accept_free(struct pending_utp_accept *pa, int close_conn)
 {
 	LIST_REMOVE(pa, next);
+	if (pa->timeout)
+		mbt_ev_timer_free(pa->timeout);
 	if (close_conn)
 		mbt_conn_free(pa->conn);
 	free(pa);
+}
+
+static void
+pending_utp_timeout(struct mbt_ev_timer *timer, void *v)
+{
+	(void)timer;
+	pending_utp_accept_free(v, 1);
+}
+
+static uint64_t
+session_accept_usec(const struct mbt_session *s)
+{
+	return (uint64_t)s->timers.accept_timeout * 1000000ULL;
 }
 
 /* MSE: find the torrent with SHA1("req2" + infohash) == hash. */
@@ -855,6 +888,11 @@ utp_accept_cb(struct mbt_utp_ctx *ctx, struct mbt_conn *conn,
 	pa->session = s;
 	pa->conn = conn;
 	LIST_INSERT_HEAD(&s->pending_accepts, pa, next);
+	if (mbt_ev_timer_new(s->ev, &pa->timeout, session_accept_usec(s), pending_utp_timeout, pa) < 0) {
+		pa->timeout = NULL;
+		pending_utp_accept_free(pa, 1);
+		return;
+	}
 
 	mbt_conn_set_watermark(conn, 1);
 	mbt_conn_set_callbacks(conn, pending_utp_read, pending_utp_event, pa);
@@ -876,6 +914,11 @@ pending_accept_mse(struct mbt_session *s, struct mbt_conn *conn, const void *see
 	pa->conn = mc;
 	pa->mse = 1;
 	LIST_INSERT_HEAD(&s->pending_accepts, pa, next);
+	if (mbt_ev_timer_new(s->ev, &pa->timeout, session_accept_usec(s), pending_utp_timeout, pa) < 0) {
+		pa->timeout = NULL;
+		pending_utp_accept_free(pa, 1);
+		return;
+	}
 	mbt_conn_set_watermark(mc, 1);
 	mbt_conn_set_callbacks(mc, pending_utp_read, pending_utp_event, pa);
 }
@@ -903,6 +946,11 @@ listen_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	int rv = mbt_ev_io_new(s->ev, &pa->io, cfd, MBT_EV_READ, pending_accept_cb, pa);
 	if (rv < 0) { close(cfd); free(pa); return; }
+	LIST_INSERT_HEAD(&s->pending_tcp_accepts, pa, next);
+	if (mbt_ev_timer_new(s->ev, &pa->timeout, session_accept_usec(s), pending_accept_timeout, pa) < 0) {
+		pa->timeout = NULL;
+		pending_accept_free(pa, 1);
+	}
 }
 
 /*
@@ -1017,6 +1065,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (!s->timers.lsd_interval) s->timers.lsd_interval = 300;
 	if (!s->timers.tracker_interval) s->timers.tracker_interval = 1800;
 	if (!s->timers.connect_timeout) s->timers.connect_timeout = 10;
+	if (!s->timers.accept_timeout) s->timers.accept_timeout = 30;
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->max_pieces_per_peer = cfg->max_pieces_per_peer ? cfg->max_pieces_per_peer : 4;
 	s->min_peers_before_download = cfg->min_peers_before_download;
@@ -1032,6 +1081,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	STAILQ_INIT(&s->pending);
 	STAILQ_INIT(&s->pending_utp);
 	LIST_INIT(&s->pending_accepts);
+	LIST_INIT(&s->pending_tcp_accepts);
 
 	session_generate_peer_id(s->peer_id);
 	{
@@ -1118,6 +1168,9 @@ mbt_session_free(struct mbt_session *s)
 	while ((pua = LIST_FIRST(&s->pending_accepts)))
 		pending_utp_accept_free(pua, 1);
 
+	struct pending_accept *pta;
+	while ((pta = LIST_FIRST(&s->pending_tcp_accepts)))
+		pending_accept_free(pta, 1);
 
 	/* Free torrents before utp_ctx: peers hold uTP conns; peer_free calls
 	 * conn_free which transitions them to FIN_SENT (removing from ctx).

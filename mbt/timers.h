@@ -14,6 +14,7 @@ struct mbt_timers {
 	int lsd_interval;        /* default 300 (5 min) */
 	int tracker_interval;    /* default 1800 (30 min) */
 	int connect_timeout;     /* default 10 */
+	int accept_timeout;      /* default 30: accepted peer must send a BT handshake */
 };
 
 #endif

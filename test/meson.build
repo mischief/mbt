@@ -228,3 +228,5 @@ mse_test = executable('mse_test', 'mse_test.c', link_with: [libmbt], include_dir
 test('mse', mse_test)
 mse_kat_test = executable('mse_kat_test', 'mse_kat_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('mse_kat', mse_kat_test)
+accept_timeout_test = executable('accept_timeout_test', 'accept_timeout_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('accept_timeout', accept_timeout_test, timeout: 30)
