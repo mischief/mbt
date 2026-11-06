@@ -141,6 +141,10 @@ Stores an immutable item. The key is derived from the value's SHA-1 hash.
 Retrieves a mutable item using its public key and optional salt.
 .It Fn mbt_dht_put_mutable
 Stores a mutable item with key, signature, sequence number, and value.
+A lower sequence number fails with
+.Er EEXIST .
+So does an equal sequence number with a different value.
+An equal sequence number with the same value renews the item.
 .El
 .Sh SEE ALSO
 .Xr mbt 3

@@ -696,6 +696,37 @@ do
 		accept = true
 		assert(signer:put_mutable{k = k, sig = sig, seq = 4, v = "two"} == mtarget)
 		assert(signer:get(mtarget).v == "two")
+
+		-- BEP 44: same seq, cas, and get with a seq
+		local function mput(fields)
+			for key, val in pairs(fields) do
+				mut[key] = val
+			end
+			return assert(b:query("127.0.0.1", signer:port(), "put", mut))
+		end
+		assert(mput{seq = 4, v = "two"}.y == "r")
+		is_error(mput{seq = 4, v = "other"}, 302)
+		assert(signer:get(mtarget).v == "two")
+		is_error(mput{seq = 5, v = "three", cas = 3}, 301)
+		is_error(mput{seq = 3, v = "three", cas = 3}, 301)
+		is_error(mput{seq = 3, v = "three", cas = 4}, 302)
+		is_error(mput{seq = 5, v = "three", cas = "4"}, 203)
+		assert(signer:get(mtarget).v == "two" and signer:get(mtarget).seq == 4)
+		assert(mput{seq = 5, v = "three", cas = 4}.y == "r")
+		assert(signer:get(mtarget).v == "three" and signer:get(mtarget).seq == 5)
+		assert(mput{salt = "fresh", seq = 1, v = "new", cas = 9}.y == "r")
+		mut.salt, mut.cas = nil, nil
+
+		local function mget(have)
+			return assert(b:query("127.0.0.1", signer:port(), "get",
+			    {target = raw_target(mtarget), seq = have})).r
+		end
+		r = mget(5)
+		assert(r.seq == 5 and r.token and r.v == nil and r.k == nil and r.sig == nil)
+		assert(mget(6).v == nil)
+		r = mget(4)
+		assert(r.seq == 5 and r.v == "three" and r.k == k and r.sig == sig)
+		assert(mget("not a number").v == "three")
 		signer:close()
 
 		local lone = assert(mbt.dht())

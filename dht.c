@@ -66,6 +66,7 @@ struct mbt_ev_timer;
 #define DHT_ERR_TOO_BIG 205
 #define DHT_ERR_SIGNATURE 206
 #define DHT_ERR_SALT 207
+#define DHT_ERR_CAS 301
 #define DHT_ERR_SEQ 302
 #define LOOKUP_NODE_SLOW_MS 500             /* then a query stops holding a slot */
 #define LOOKUP_NODE_TIMEOUT_MS 2000         /* then a node counts as silent */
@@ -249,6 +250,11 @@ struct mbt_dht {
 	mbt_dht_verify_cb verify_cb;
 	void *verify_arg;
 };
+
+static int dht_store_mutable(struct mbt_dht *d, const uint8_t k[MBT_DHT_PUBKEY_LEN],
+                             const uint8_t sig[MBT_DHT_SIG_LEN], int64_t seq,
+                             const char *salt, size_t salt_len,
+                             const void *v, size_t vlen, const int64_t *cas);
 
 /* --- Helpers --- */
 
@@ -1004,6 +1010,9 @@ dht_send_put_error(struct mbt_dht *d, const struct sockaddr_storage *addr,
 	case -EEXIST:
 		dht_send_error(d, addr, t, DHT_ERR_SEQ, "sequence number too old");
 		break;
+	case -ESTALE:
+		dht_send_error(d, addr, t, DHT_ERR_CAS, "cas mismatch");
+		break;
 	case -EACCES:
 	case -ENOSYS:
 		dht_send_error(d, addr, t, DHT_ERR_SIGNATURE, "invalid signature");
@@ -1478,11 +1487,15 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				goto out;
 			}
 			struct dht_item *it = dht_item_find(d, tgt->string.buf);
+			struct mbt_be_value *have = mbt_be_find(a, "seq");
 			uint8_t tok[TOKEN_LEN];
+			/* A querier with this seq or newer needs only our seq. */
+			bool seq_only = it && it->mutable && have && have->type == BE_INTEGER &&
+			    it->seq <= have->integer;
 
 			dht_make_token(d, &from, tok);
 			reply_begin(&w, rbuf, sizeof(rbuf), d);
-			if (it && it->mutable) {
+			if (it && it->mutable && !seq_only) {
 				mbt_bew_key(&w, "k");
 				mbt_bew_str(&w, it->k, MBT_DHT_PUBKEY_LEN);
 			}
@@ -1490,12 +1503,14 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			if (it && it->mutable) {
 				mbt_bew_key(&w, "seq");
 				mbt_bew_int(&w, it->seq);
+			}
+			if (it && it->mutable && !seq_only) {
 				mbt_bew_key(&w, "sig");
 				mbt_bew_str(&w, it->sig, MBT_DHT_SIG_LEN);
 			}
 			mbt_bew_key(&w, "token");
 			mbt_bew_str(&w, tok, TOKEN_LEN);
-			if (it) {
+			if (it && !seq_only) {
 				/* it->v is bencoded, and goes on the wire as that value. */
 				mbt_bew_key(&w, "v");
 				mbt_bew_raw(&w, it->v, it->vlen);
@@ -1526,22 +1541,26 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 				struct mbt_be_value *sig_val = mbt_be_find(a, "sig");
 				struct mbt_be_value *seq_val = mbt_be_find(a, "seq");
 				struct mbt_be_value *salt_val = mbt_be_find(a, "salt");
+				struct mbt_be_value *cas_val = mbt_be_find(a, "cas");
 				if (k_val->type != BE_STRING || k_val->string.len != MBT_DHT_PUBKEY_LEN ||
 				    !sig_val || sig_val->type != BE_STRING ||
 				    sig_val->string.len != MBT_DHT_SIG_LEN ||
 				    !seq_val || seq_val->type != BE_INTEGER ||
-				    (salt_val && salt_val->type != BE_STRING)) {
+				    (salt_val && salt_val->type != BE_STRING) ||
+				    (cas_val && cas_val->type != BE_INTEGER)) {
 					dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad arguments");
 					goto out;
 				}
+				int64_t cas = cas_val ? cas_val->integer : 0;
 				const char *salt = NULL; size_t slen = 0;
 				if (salt_val) {
 					salt = (const char *)salt_val->string.buf;
 					slen = salt_val->string.len;
 				}
-				prv = mbt_dht_put_mutable(d, k_val->string.buf,
+				prv = dht_store_mutable(d, k_val->string.buf,
 				    sig_val->string.buf, seq_val->integer,
-				    salt, slen, v_enc, v_enc_len, NULL, NULL);
+				    salt, slen, v_enc, v_enc_len,
+				    cas_val ? &cas : NULL);
 			} else {
 				prv = mbt_dht_put_immutable(d, v_enc, v_enc_len, NULL, NULL);
 			}
@@ -2141,19 +2160,19 @@ mbt_dht_get_immutable(struct mbt_dht *d, const uint8_t target[20],
 	return -ENOENT;
 }
 
-int
-mbt_dht_put_mutable(struct mbt_dht *d,
-                    const uint8_t k[MBT_DHT_PUBKEY_LEN],
-                    const uint8_t sig[MBT_DHT_SIG_LEN],
-                    int64_t seq,
-                    const char *salt, size_t salt_len,
-                    const void *v, size_t vlen,
-                    mbt_dht_done_cb done_cb, void *arg)
+/*
+ * cas, if set, must match the stored seq. With no stored item it has no effect.
+ * Returns -ESTALE on a cas mismatch and -EEXIST on an old seq. The same seq
+ * with the same value only renews the item.
+ */
+static int
+dht_store_mutable(struct mbt_dht *d,
+                  const uint8_t k[MBT_DHT_PUBKEY_LEN],
+                  const uint8_t sig[MBT_DHT_SIG_LEN],
+                  int64_t seq,
+                  const char *salt, size_t salt_len,
+                  const void *v, size_t vlen, const int64_t *cas)
 {
-	ASSERT_RETURN(d, -EINVAL);
-	ASSERT_RETURN(k, -EINVAL);
-	ASSERT_RETURN(sig, -EINVAL);
-	ASSERT_RETURN(v, -EINVAL);
 	if (vlen > MBT_DHT_MAX_VALUE) return -EINVAL;
 	if (salt_len > 64) return -EMSGSIZE;
 
@@ -2183,7 +2202,14 @@ mbt_dht_put_mutable(struct mbt_dht *d,
 
 	struct dht_item *it = dht_item_find(d, target);
 	if (it) {
+		if (cas && *cas != it->seq) return -ESTALE;
 		if (seq < it->seq) return -EEXIST;
+		if (seq == it->seq) {
+			if (vlen != it->vlen || memcmp(v, it->v, vlen) != 0)
+				return -EEXIST;
+			it->stored_at = time(NULL);
+			return 0;
+		}
 		free(it->v);
 		it->v = NULL;
 	} else {
@@ -2204,8 +2230,24 @@ mbt_dht_put_mutable(struct mbt_dht *d,
 		memcpy(it->salt, salt, salt_len);
 	it->salt_len = salt_len;
 	it->stored_at = time(NULL);
-	(void)done_cb; (void)arg;
 	return 0;
+}
+
+int
+mbt_dht_put_mutable(struct mbt_dht *d,
+                    const uint8_t k[MBT_DHT_PUBKEY_LEN],
+                    const uint8_t sig[MBT_DHT_SIG_LEN],
+                    int64_t seq,
+                    const char *salt, size_t salt_len,
+                    const void *v, size_t vlen,
+                    mbt_dht_done_cb done_cb, void *arg)
+{
+	ASSERT_RETURN(d, -EINVAL);
+	ASSERT_RETURN(k, -EINVAL);
+	ASSERT_RETURN(sig, -EINVAL);
+	ASSERT_RETURN(v, -EINVAL);
+	(void)done_cb; (void)arg;
+	return dht_store_mutable(d, k, sig, seq, salt, salt_len, v, vlen, NULL);
 }
 
 int
