@@ -241,7 +241,7 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	/* Build bencoded response */
 	_cleanup_be_ struct mbt_be_value *resp = NULL;
 	if (mbt_be_dict_new(&resp) < 0) return;
-	mbt_be_dict_append_number(resp, "interval", 120);
+	mbt_be_dict_append_number(resp, "interval", mbt_tracker_store_interval(th->store));
 
 	if (compact) {
 		uint8_t peers_compact[300]; /* 50 * 6 */
@@ -353,7 +353,7 @@ http_gc_cb(struct mbt_ev_timer *timer, void *arg)
 {
 	struct mbt_tracker_http *th = arg;
 
-	mbt_tracker_store_gc(th->store);
+	mbt_tracker_store_gc_step(th->store);
 	mbt_ev_timer_mod(timer, mbt_tracker_store_gc_usec(th->store));
 }
 

@@ -95,7 +95,8 @@ removed torrent.
   `mbt.step(0)`. Call it from the main chunk. It works on the sd-event backend,
   and on the poll backend where the system has kqueue. Others return `nil`, a
   message and `ENOTSUP`. OpenBSD needs `-Devent_backend=poll` for it.
-- `mbt.tracker{port = 0, http = false, http_port = 0}` runs a tracker on the
+- `mbt.tracker{port = 0, http = false, http_port = 0, interval = 900, expire = 1800,
+  max_torrents = 4096}` runs a tracker on the
   event loop, over UDP and, if asked, HTTP. `tr:port()`, `tr:http_port()`,
   `tr:peers()`, `tr:torrents()`, `tr:close()`. `<close>` works too.
 - `mbt.now_ms()` is a monotonic clock in milliseconds, for intervals.

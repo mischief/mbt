@@ -129,7 +129,7 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		/* Build response */
 		uint32_t a = htonl(ACTION_ANNOUNCE);
 		uint32_t tid = htonl(transaction_id);
-		uint32_t interval = htonl(120);
+		uint32_t interval = htonl(mbt_tracker_store_interval(ts->store));
 		uint32_t leechers = htonl(mbt_tracker_store_torrent_leechers(t));
 		uint32_t seeders = htonl(mbt_tracker_store_torrent_seeders(t));
 		memcpy(resp, &a, 4);
@@ -184,7 +184,7 @@ tracker_gc_cb(struct mbt_ev_timer *timer, void *arg)
 {
 	struct mbt_tracker_server *ts = arg;
 
-	mbt_tracker_store_gc(ts->store);
+	mbt_tracker_store_gc_step(ts->store);
 	mbt_ev_timer_mod(timer, mbt_tracker_store_gc_usec(ts->store));
 }
 

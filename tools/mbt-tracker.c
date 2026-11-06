@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 /*
  * mbt-tracker: standalone UDP + HTTP tracker daemon
- * Usage: mbt-tracker [-u udp_port] [-h http_port]
+ * Usage: mbt-tracker [-u udp_port] [-H http_port] [-i interval] [-e expire] [-m max_torrents]
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,14 +27,20 @@ int main(int argc, char *argv[])
 	uint16_t udp_port = 6969;
 	uint16_t http_port = 6969;
 	int use_udp = 0, use_http = 0;
+	int interval = 0, expire = 0, max_torrents = 1 << 20;
+	struct mbt_tracker_store *store;
 
-	while ((ch = getopt(argc, argv, "hu:H:")) != -1) {
+	while ((ch = getopt(argc, argv, "hu:H:i:e:m:")) != -1) {
 		switch (ch) {
 		case 'u': udp_port = mbt_arg_int(optarg, 0, UINT16_MAX); use_udp = 1; break;
 		case 'H': http_port = mbt_arg_int(optarg, 0, UINT16_MAX); use_http = 1; break;
+		case 'i': interval = mbt_arg_int(optarg, 1, 86400); break;
+		case 'e': expire = mbt_arg_int(optarg, 1, 86400 * 7); break;
+		case 'm': max_torrents = mbt_arg_int(optarg, 1, 1 << 30); break;
 		case 'h':
 		default:
-			fprintf(stderr, "usage: mbt-tracker [-u udp_port] [-H http_port]\n");
+			fprintf(stderr, "usage: mbt-tracker [-u udp_port] [-H http_port] [-i interval] "
+			        "[-e expire] [-m max_torrents]\n");
 			return ch == 'h' ? 0 : 1;
 		}
 	}
@@ -50,17 +56,23 @@ int main(int argc, char *argv[])
 
 	mbt_ev_new_default(&ev);
 
+	if ((rv = mbt_tracker_store_new(&store)) < 0)
+		errx(1, "store: %s", strerror(-rv));
+	mbt_tracker_store_set_max_torrents(store, max_torrents);
+	mbt_tracker_store_set_interval(store, interval);
+	mbt_tracker_store_set_expire(store, expire);
+
 	struct mbt_tracker_server *udp = NULL;
 	struct mbt_tracker_http *http = NULL;
 
 	if (use_udp) {
-		rv = mbt_tracker_server_new(&udp, ev, udp_port, NULL);
+		rv = mbt_tracker_server_new(&udp, ev, udp_port, store);
 		if (rv < 0) errx(1, "UDP tracker: %s", strerror(-rv));
 		fprintf(stderr, "UDP tracker on port %hu\n", udp_port);
 	}
 
 	if (use_http) {
-		rv = mbt_tracker_http_new(&http, ev, http_port, NULL);
+		rv = mbt_tracker_http_new(&http, ev, http_port, store);
 		if (rv < 0) errx(1, "HTTP tracker: %s", strerror(-rv));
 		fprintf(stderr, "HTTP tracker on port %hu\n", http_port);
 	}
@@ -78,6 +90,7 @@ int main(int argc, char *argv[])
 		mbt_tracker_http_free(http);
 	}
 
+	mbt_tracker_store_free(store);
 	mbt_ev_destroy(ev);
 	return 0;
 }

@@ -1828,9 +1828,9 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 		/* Use configured interval if shorter than server's */
 		if (s->timers.tracker_interval > 0 && s->timers.tracker_interval < interval)
 			interval = s->timers.tracker_interval;
-		/* Clamp: min 5s, max 15min */
+		/* Clamp: min 5s, max 1h */
 		if (interval < 5) interval = 5;
-		if (interval > 900) interval = 900;
+		if (interval > 3600) interval = 3600;
 		st->announce_interval = interval;
 		/* Add jitter: 75%-125% of interval to prevent thundering herd */
 		uint64_t base = (uint64_t)interval * 1000000ULL;

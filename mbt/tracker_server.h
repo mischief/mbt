@@ -24,6 +24,12 @@ struct mbt_tracker_stats {
 };
 MBT_API void mbt_tracker_store_stats(struct mbt_tracker_store *s, struct mbt_tracker_stats *out);
 
+/* Seconds that a client waits between announces; default 900. Raises the expire
+ * age to twice this, if it is lower. */
+MBT_API void mbt_tracker_store_set_interval(struct mbt_tracker_store *s, int secs);
+/* Swarms held; default 4096. An announce for a new swarm above this gets no reply. */
+MBT_API void mbt_tracker_store_set_max_torrents(struct mbt_tracker_store *s, int max);
+
 /* --- UDP tracker server (BEP 15) --- */
 struct mbt_tracker_server;
 

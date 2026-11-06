@@ -2989,6 +2989,7 @@ l_tracker(lua_State *L)
 	struct cctx *c = ctx_of(L);
 	uint16_t port = 0, http_port = 0;
 	bool http = false;
+	int interval = 0, expire = 0, max_torrents = 0;
 	struct ltracker *lt;
 	int rv;
 
@@ -2997,6 +2998,9 @@ l_tracker(lua_State *L)
 		port = (uint16_t)opt_int(L, 1, "port", 0);
 		http = opt_bool(L, 1, "http", false);
 		http_port = (uint16_t)opt_int(L, 1, "http_port", 0);
+		interval = (int)opt_int(L, 1, "interval", 0);
+		expire = (int)opt_int(L, 1, "expire", 0);
+		max_torrents = (int)opt_int(L, 1, "max_torrents", 0);
 	}
 	lt = lua_newuserdatauv(L, sizeof(*lt), 0);
 	memset(lt, 0, sizeof(*lt));
@@ -3005,6 +3009,9 @@ l_tracker(lua_State *L)
 		lt->store = NULL;
 		return fail(L, -ENOMEM);
 	}
+	mbt_tracker_store_set_interval(lt->store, interval);
+	mbt_tracker_store_set_expire(lt->store, expire);
+	mbt_tracker_store_set_max_torrents(lt->store, max_torrents);
 	if ((rv = mbt_tracker_server_new(&lt->udp, c->ev, port, lt->store)) < 0) {
 		lt->udp = NULL;
 		tracker_close(lt);

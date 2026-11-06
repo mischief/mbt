@@ -16,7 +16,10 @@
 .Nm mbt_tracker_http_free ,
 .Nm mbt_tracker_http_num_torrents ,
 .Nm mbt_tracker_http_num_peers ,
-.Nm mbt_tracker_store_gc
+.Nm mbt_tracker_store_gc ,
+.Nm mbt_tracker_store_set_expire ,
+.Nm mbt_tracker_store_set_interval ,
+.Nm mbt_tracker_store_set_max_torrents
 .Nd Tracker server implementation and peer storage.
 .Sh SYNOPSIS
 .In mbt/tracker_server.h
@@ -50,6 +53,10 @@
 .Fn mbt_tracker_http_num_peers "struct mbt_tracker_http *th"
 .Ft void
 .Fn mbt_tracker_store_gc "struct mbt_tracker_store *s"
+.Ft void
+.Fn mbt_tracker_store_set_interval "struct mbt_tracker_store *s" "int secs"
+.Ft void
+.Fn mbt_tracker_store_set_max_torrents "struct mbt_tracker_store *s" "int max"
 .Sh DESCRIPTION
 The
 .Nm mbt_tracker_server
@@ -137,5 +144,12 @@ Each server runs
 on a timer.
 .Fn mbt_tracker_store_set_expire
 sets the age at which a silent peer goes, 30 minutes by default.
+.Pp
+.Fn mbt_tracker_store_set_interval
+sets the announce interval, 900 seconds by default, and raises the expire age to
+twice that value if it is lower.
+.Fn mbt_tracker_store_set_max_torrents
+sets the number of swarms, 4096 by default.
+An announce for a new swarm above that limit gets no reply.
 .Sh SEE ALSO
 .Xr mbt 3

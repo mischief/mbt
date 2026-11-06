@@ -13,6 +13,8 @@ struct ts_torrent;
 struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
 struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
 uint64_t mbt_tracker_store_gc_usec(const struct mbt_tracker_store *s);
+void mbt_tracker_store_gc_step(struct mbt_tracker_store *s);
+int mbt_tracker_store_interval(const struct mbt_tracker_store *s);
 void mbt_tracker_store_remove_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
                                    const struct sockaddr_storage *addr);
 void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
