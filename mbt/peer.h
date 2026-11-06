@@ -112,6 +112,7 @@ MBT_API int mbt_peer_new(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_co
                  struct mbt_peer_callbacks *cb, void *arg);
 
 /* Create peer from an already-accepted incoming connection (handshake already read) */
+/* With no BEP 10 flag in ext, the peer is active on return and on_active does not run. */
 MBT_API int mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn *conn,
                           struct mbt_infohash *ih, const uint8_t peer_id[20],
                           uint32_t piece_count, enum mbt_peer_source source, const uint8_t ext[8], const uint8_t their_id[20],
@@ -148,6 +149,8 @@ MBT_API struct mbt_bitmap *mbt_peer_bitfield(struct mbt_peer *p);
 MBT_API int mbt_peer_send_interested(struct mbt_peer *p, int interested);
 MBT_API int mbt_peer_send_choke(struct mbt_peer *p, int choke);
 MBT_API int mbt_peer_send_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length);
+/* BEP 6: refuse a request. Does nothing for a peer without the fast extension. */
+MBT_API int mbt_peer_send_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length);
 MBT_API int mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length);
 MBT_API int mbt_peer_send_have(struct mbt_peer *p, uint32_t piece);
 MBT_API int mbt_peer_send_port(struct mbt_peer *p, uint16_t port);

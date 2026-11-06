@@ -1670,8 +1670,14 @@ on_request(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length,
 	mbt_log_debug(MBT_LOG_TORRENT, "%s:%hu: on_request piece=%u off=%u len=%u",
 	              mbt_peer_addr(p), mbt_peer_conn_port(p), piece, offset, length);
 
+	/* BEP 3: a choked peer gets nothing. */
+	if (t->no_upload || !tp || tp->am_choking) {
+		mbt_peer_send_reject(p, piece, offset, length);
+		return;
+	}
+
 	/* Only serve if we have the piece */
-	if (t->no_upload || mbt_bitmap_isset(t->have, piece) <= 0)
+	if (mbt_bitmap_isset(t->have, piece) <= 0)
 		return;
 
 	if (!t->storage_h || !t->storage->ops->read_piece)
@@ -2912,6 +2918,10 @@ mbt_torrent_add_peer_incoming(struct mbt_torrent *t, struct mbt_conn *conn,
 	 * sit) via the bytes_from reorder on each block received. */
 	TAILQ_INSERT_TAIL(&t->peers, tp, entry);
 	t->peer_count++;
+
+	/* A peer with no BEP 10 is active already. */
+	if (!(mbt_peer_flags(peer) & MBT_PEER_FLAG_EXTENSION))
+		on_active(peer, t);
 
 	return 0;
 }

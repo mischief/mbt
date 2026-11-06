@@ -981,10 +981,9 @@ mbt_peer_new_incoming(struct mbt_peer **out, struct mbt_ev *ev, struct mbt_conn 
 		peer_send_extension_handshake(p);
 		mbt_conn_set_watermark(p->conn, 4);
 	} else {
+		/* The caller has no pointer to p yet. It sees this in mbt_peer_flags. */
 		p->state = MBT_PEER_ACTIVE;
 		mbt_conn_set_watermark(p->conn, 4);
-		if (p->cb.on_active)
-			p->cb.on_active(p, p->cb_arg);
 	}
 
 	rv = mbt_ev_timer_new(ev, &p->timer, 120 * 1000000ULL, peer_keepalive_cb, p);
@@ -1283,6 +1282,21 @@ mbt_peer_send_cancel(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32
 	struct mbt_packer pk;
 	mbt_pack_init(&pk, buf, sizeof(buf));
 	mbt_pack_u8(&pk, BT_CANCEL);
+	mbt_pack_u32(&pk, piece);
+	mbt_pack_u32(&pk, offset);
+	mbt_pack_u32(&pk, length);
+	return peer_write_packed(p, &pk);
+}
+
+int
+mbt_peer_send_reject(struct mbt_peer *p, uint32_t piece, uint32_t offset, uint32_t length)
+{
+	if (p->state != MBT_PEER_ACTIVE) return -ENOTCONN;
+	if (!(p->flags & MBT_PEER_FLAG_FAST)) return 0;
+	unsigned char buf[1 + 4 + 4 + 4];
+	struct mbt_packer pk;
+	mbt_pack_init(&pk, buf, sizeof(buf));
+	mbt_pack_u8(&pk, BT_REJECT);
 	mbt_pack_u32(&pk, piece);
 	mbt_pack_u32(&pk, offset);
 	mbt_pack_u32(&pk, length);
