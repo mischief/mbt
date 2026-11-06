@@ -134,6 +134,18 @@
 - [x] Tracker store: servers expire stale peers on a timer
 - [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
 
+### Tracker server scale (target: one million torrents)
+- [ ] Store: small peer arrays that grow on demand, not 200 inline slots per torrent
+- [ ] Store: hash table that grows, not 256 fixed buckets
+- [ ] Store: configurable torrent limit, not a fixed 4096
+- [ ] Store: incremental gc, a part of the table per tick
+- [ ] Store: running seeder and leecher totals for mbt_tracker_store_stats
+- [ ] Configurable announce interval, with jitter
+- [ ] HTTP server: more than 256 connections, and queue at the cap
+- [ ] Load test: one million torrents, announce rate through `mbt-tracker`
+- [ ] Persistence: optional `-Dsqlite`, batched writes of `downloaded`, separate from live swarms
+- [ ] Measure one session with thousands of torrents
+
 ### Storage compatibility
 - [ ] Clean unsafe metadata paths like other clients, not refuse the torrent
 - [ ] `path.utf-8` and `name.utf-8`: prefer them over `path` and `name`
