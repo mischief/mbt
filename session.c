@@ -886,7 +886,8 @@ pending_utp_read(struct mbt_conn *c, void *v)
 	char paddr[INET6_ADDRSTRLEN];
 	uint16_t pport;
 	mbt_conn_peer_addr(pa->conn, paddr, sizeof(paddr), &pport);
-	mbt_log_info(MBT_LOG_SESSION, "incoming uTP peer %s:%hu", paddr, pport);
+	mbt_log_info(MBT_LOG_SESSION, "incoming %s peer %s:%hu", mbt_conn_transport_name(pa->conn),
+	             paddr, pport);
 
 	struct mbt_conn *conn = pa->conn;
 	pending_utp_accept_free(pa, 0); /* conn ownership transferred to torrent */

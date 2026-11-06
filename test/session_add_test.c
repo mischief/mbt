@@ -17,6 +17,7 @@
 #include "mbt/session.h"
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
+#include "internal.h"
 #include "test_util.h"
 
 #define PIECE_LEN 16384
@@ -265,6 +266,9 @@ test_dial_without_udp4(struct mbt_ev *ev, const unsigned char *enc, size_t enc_l
 	assert(getsockname(block, (struct sockaddr *)&sa, &alen) == 0);
 	assert(mbt_session_new(&seed, &cfg) == 0);
 	assert(mbt_session_add_torrent_buf(seed, enc, enc_len, NULL, NULL) == 0);
+
+	/* disable_utp means no uTP context, so no uTP accept. */
+	assert(mbt_session_utp_ctx(seed) == NULL);
 
 	cfg.disable_utp = 0;
 	cfg.listen_port = ntohs(sa.sin_port);
