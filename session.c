@@ -69,6 +69,8 @@ struct session_torrent {
 	time_t last_dht_lookup;
 	time_t last_dht_announce;
 	time_t announce_lookup;  /* a lookup for the next announce started here */
+	int dht_want;            /* DHT_WANT_ bits; nonzero while on dht_queue */
+	TAILQ_ENTRY(session_torrent) dht_entry;
 	int started_announced;   /* sent event=started on first announce */
 	int started_acked;       /* a tracker answered event=started */
 	int announce_settled;    /* this round has a reply, or a retry timer */
@@ -112,7 +114,8 @@ struct pending_utp_connect {
 STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 
 #define LISTEN_TRIES 8
-#define DHT_LOOKUP_WAIT_SEC 3
+#define DHT_WANT_PEERS 1
+#define DHT_WANT_ANNOUNCE 2
 #define WEBSEED_NO_PEER_DELAY_MS 5000
 #define WEBSEED_LOW_RATE_DELAY_MS 10000
 #define WEBSEED_LOW_RATE (64 * 1024)
@@ -211,6 +214,8 @@ struct mbt_session {
 
 	/* Torrents */
 	struct session_torrent_list torrents;
+	TAILQ_HEAD(, session_torrent) dht_queue;
+	struct mbt_ev_timer *dht_pump;
 
 	/* Pending outgoing connections */
 	struct pending_connect_list pending;
@@ -301,12 +306,18 @@ reschedule:
 	mbt_ev_timer_mod(timer, (uint64_t)s->timers.lsd_interval * 1000000ULL);
 }
 
+static void session_dht_request(struct mbt_session *s, struct session_torrent *st, int want);
+static void session_dht_schedule(struct mbt_session *s);
+static void session_dht_unqueue(struct mbt_session *s, struct session_torrent *st);
+
 static void
 session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct mbt_session *s = v;
 	struct session_torrent *st;
 
+	/* Another user of the node can hold the lookup slots. */
+	session_dht_schedule(s);
 	STAILQ_FOREACH(st, &s->torrents, next) {
 		/* Refill peers from peerdb if below cap */
 		int need_peers = 0;
@@ -350,7 +361,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 			int interval = mbt_torrent_peer_count(st->torrent) < 5 ? 10 : s->timers.dht_refresh;
 			if (now - st->last_dht_lookup >= interval) {
 				st->last_dht_lookup = now;
-				mbt_session_dht_get_peers(s, st->ih);
+				session_dht_request(s, st, DHT_WANT_PEERS);
 			}
 		}
 
@@ -359,16 +370,11 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 		    !mbt_torrent_is_private(st->torrent)) {
 			time_t now = time(NULL);
 
-			/* An announce needs fresh tokens, and a reply from at least one node. */
-			if (now - st->last_dht_announce < s->timers.dht_refresh) {
-				/* not due */
-			} else if (st->announce_lookup == 0) {
+			/* An announce needs fresh tokens, so it follows a lookup. */
+			if (now - st->last_dht_announce >= s->timers.dht_refresh &&
+			    st->announce_lookup == 0) {
 				st->announce_lookup = now;
-				mbt_session_dht_get_peers(s, st->ih);
-			} else if (now - st->announce_lookup >= DHT_LOOKUP_WAIT_SEC) {
-				st->announce_lookup = 0;
-				if (mbt_dht_announce(s->dht, st->ih, s->listen_port) > 0)
-					st->last_dht_announce = now;
+				session_dht_request(s, st, DHT_WANT_ANNOUNCE);
 			}
 		}
 	}
@@ -1141,6 +1147,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->dht_no_bootstrap = cfg->dht_no_bootstrap;
 
 	STAILQ_INIT(&s->torrents);
+	TAILQ_INIT(&s->dht_queue);
 	STAILQ_INIT(&s->pending);
 	STAILQ_INIT(&s->pending_utp);
 	LIST_INIT(&s->pending_accepts);
@@ -1241,8 +1248,13 @@ mbt_session_free(struct mbt_session *s)
 	 * conn_free which transitions them to FIN_SENT (removing from ctx).
 	 * Then utp_ctx_free sweeps any remaining sockets cleanly. */
 	struct session_torrent *st;
+	if (s->dht_pump) {
+		mbt_ev_timer_free(s->dht_pump);
+		s->dht_pump = NULL;
+	}
 	while ((st = STAILQ_FIRST(&s->torrents))) {
 		STAILQ_REMOVE_HEAD(&s->torrents, next);
+		session_dht_unqueue(s, st);
 		mbt_torrent_free(st->torrent);
 		mbt_infohash_unref(st->ih);
 		if (st->reannounce_timer)
@@ -1418,6 +1430,7 @@ mbt_session_disable_lsd(struct mbt_session *s)
 struct dht_lookup_ctx {
 	struct mbt_session *session;
 	struct mbt_infohash *ih;
+	int announce;
 };
 
 static void
@@ -1434,8 +1447,91 @@ static void
 dht_done_cb(void *arg)
 {
 	struct dht_lookup_ctx *ctx = arg;
+	struct mbt_session *s = ctx->session;
+
+	/* The lookup slot keeps the tokens only until the next lookup. */
+	if (ctx->announce) {
+		struct session_torrent *st = session_find(s, ctx->ih);
+
+		if (st) {
+			st->announce_lookup = 0;
+			if (mbt_dht_announce(s->dht, st->ih, s->listen_port) > 0)
+				st->last_dht_announce = time(NULL);
+		}
+	}
 	mbt_infohash_unref(ctx->ih);
 	free(ctx);
+	session_dht_schedule(s);
+}
+
+static int
+session_dht_start(struct mbt_session *s, struct mbt_infohash *ih, int announce)
+{
+	struct dht_lookup_ctx *ctx = malloc(sizeof(*ctx));
+	int rv;
+
+	if (!ctx)
+		return -ENOMEM;
+	ctx->session = s;
+	ctx->ih = mbt_infohash_ref(ih);
+	ctx->announce = announce;
+	if ((rv = mbt_dht_get_peers(s->dht, ih, dht_peers_cb, dht_done_cb, ctx)) < 0) {
+		mbt_infohash_unref(ctx->ih);
+		free(ctx);
+	}
+	return rv;
+}
+
+/* Start queued lookups. The node has a few slots, and a session can hold many torrents. */
+static void
+session_dht_pump_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_session *s = v;
+	struct session_torrent *st;
+
+	(void)timer;
+	while (s->dht && (st = TAILQ_FIRST(&s->dht_queue)) != NULL) {
+		int announce = (st->dht_want & DHT_WANT_ANNOUNCE) != 0;
+		int rv = session_dht_start(s, st->ih, announce);
+
+		if (rv == -EBUSY)
+			return;
+		TAILQ_REMOVE(&s->dht_queue, st, dht_entry);
+		st->dht_want = 0;
+		if (rv < 0 && announce)
+			st->announce_lookup = 0;
+	}
+}
+
+/* A lookup finishes in its own callback, so the slot is free on the next pass. */
+static void
+session_dht_schedule(struct mbt_session *s)
+{
+	if (TAILQ_EMPTY(&s->dht_queue))
+		return;
+	if (s->dht_pump)
+		mbt_ev_timer_mod(s->dht_pump, 0);
+	else if (mbt_ev_timer_new(s->ev, &s->dht_pump, 0, session_dht_pump_cb, s) < 0)
+		s->dht_pump = NULL;
+}
+
+static void
+session_dht_request(struct mbt_session *s, struct session_torrent *st, int want)
+{
+	if (!s->dht)
+		return;
+	if (!st->dht_want)
+		TAILQ_INSERT_TAIL(&s->dht_queue, st, dht_entry);
+	st->dht_want |= want;
+	session_dht_schedule(s);
+}
+
+static void
+session_dht_unqueue(struct mbt_session *s, struct session_torrent *st)
+{
+	if (st->dht_want)
+		TAILQ_REMOVE(&s->dht_queue, st, dht_entry);
+	st->dht_want = 0;
 }
 
 uint64_t
@@ -1516,7 +1612,13 @@ mbt_session_enable_dht_local(struct mbt_session *s)
 void
 mbt_session_disable_dht(struct mbt_session *s)
 {
+	struct session_torrent *st;
+
 	if (s->dht) { mbt_dht_free(s->dht); s->dht = NULL; }
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		session_dht_unqueue(s, st);
+		st->announce_lookup = 0;
+	}
 }
 
 int
@@ -1551,14 +1653,13 @@ mbt_session_listen_port(struct mbt_session *s)
 void
 mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih)
 {
+	struct session_torrent *st;
+
 	if (!s->dht) return;
-
-	struct dht_lookup_ctx *ctx = malloc(sizeof(*ctx));
-	if (!ctx) return;
-	ctx->session = s;
-	ctx->ih = mbt_infohash_ref(ih);
-
-	mbt_dht_get_peers(s->dht, ih, dht_peers_cb, dht_done_cb, ctx);
+	if ((st = session_find(s, ih)) != NULL)
+		session_dht_request(s, st, DHT_WANT_PEERS);
+	else
+		(void)session_dht_start(s, ih, 0);
 }
 
 /* --- Tracker callbacks --- */
@@ -2186,6 +2287,7 @@ mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 
 	session_send_stopped(s, st);
 	STAILQ_REMOVE(&s->torrents, st, session_torrent, next);
+	session_dht_unqueue(s, st);
 	session_cancel_connects(s, st->torrent);
 	s->down_gone += mbt_torrent_bytes_downloaded(st->torrent);
 	s->up_gone += mbt_torrent_bytes_uploaded(st->torrent);
