@@ -52,7 +52,7 @@ test_io(void)
 	assert(rv == 0);
 
 	/* Write from the other end */
-	write(sv[1], "hello", 5);
+	assert(write(sv[1], "hello", 5) == 5);
 	close(sv[1]);
 
 	/* Caller-driven poll loop */

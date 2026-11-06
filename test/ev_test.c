@@ -64,7 +64,7 @@ test_backend(struct mbt_ev *ev, const char *name)
 	rv = mbt_ev_timer_new(ev, &tmr, 10000, on_timer, ev);
 	assert(rv == 0);
 
-	write(pfd[1], "hello", 5);
+	assert(write(pfd[1], "hello", 5) == 5);
 
 	rv = mbt_ev_run(ev);
 

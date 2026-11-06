@@ -50,15 +50,15 @@ test_single_file(void)
 	uint8_t buf[8];
 
 	fseek(fp, 0, SEEK_SET);
-	fread(buf, 1, 8, fp);
+	assert(fread(buf, 1, 8, fp) == 8);
 	assert(memcmp(buf, piece0, 8) == 0);
 
 	fseek(fp, 8, SEEK_SET);
-	fread(buf, 1, 8, fp);
+	assert(fread(buf, 1, 8, fp) == 8);
 	assert(memcmp(buf, piece1, 8) == 0);
 
 	fseek(fp, 16, SEEK_SET);
-	fread(buf, 1, 8, fp);
+	assert(fread(buf, 1, 8, fp) == 8);
 	assert(memcmp(buf, piece2, 8) == 0);
 
 	fclose(fp);
@@ -90,21 +90,21 @@ test_multi_file_spanning(void)
 
 	/* Write piece 0: first 6 bytes to A, next 2 to B */
 	uint8_t piece0[] = {10,20,30,40,50,60,70,80};
-	pwrite(fdA, piece0, 6, 0);      /* A gets bytes 0-5 */
-	pwrite(fdB, piece0 + 6, 2, 0);  /* B gets bytes 6-7 at file offset 0 */
+	assert(pwrite(fdA, piece0, 6, 0) == 6);      /* A gets bytes 0-5 */
+	assert(pwrite(fdB, piece0 + 6, 2, 0) == 2);  /* B gets bytes 6-7 at file offset 0 */
 
 	/* Write piece 1: 4 bytes to B at file offset 2 */
 	uint8_t piece1[] = {90,100,110,120};
-	pwrite(fdB, piece1, 4, 2);      /* B at offset 2 */
+	assert(pwrite(fdB, piece1, 4, 2) == 4);      /* B at offset 2 */
 
 	/* Verify file A */
 	uint8_t buf[8];
-	pread(fdA, buf, 6, 0);
+	assert(pread(fdA, buf, 6, 0) == 6);
 	assert(memcmp(buf, piece0, 6) == 0);
 
 	/* Verify file B: bytes 70,80,90,100,110,120 */
 	uint8_t expected_B[] = {70, 80, 90, 100, 110, 120};
-	pread(fdB, buf, 6, 0);
+	assert(pread(fdB, buf, 6, 0) == 6);
 	assert(memcmp(buf, expected_B, 6) == 0);
 
 	close(fdA);

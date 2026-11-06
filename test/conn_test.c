@@ -63,7 +63,7 @@ test_basic_rw(void)
 	assert(conn != NULL);
 
 	/* Write from the other end */
-	write(sv[1], "hello", 5);
+	assert(write(sv[1], "hello", 5) == 5);
 	close(sv[1]); /* will cause EOF after read */
 
 	mbt_ev_run(ev);
@@ -102,9 +102,9 @@ test_watermark(void)
 	mbt_conn_set_watermark(conn, 10);
 
 	/* Write 5 bytes - should not trigger read */
-	write(sv[1], "hello", 5);
+	assert(write(sv[1], "hello", 5) == 5);
 	/* Write 5 more - now we have 10 */
-	write(sv[1], "world", 5);
+	assert(write(sv[1], "world", 5) == 5);
 	close(sv[1]);
 
 	mbt_ev_run(ev);
@@ -186,7 +186,7 @@ test_available(void)
 	/* Set high watermark so read callback won't fire */
 	mbt_conn_set_watermark(conn, 100);
 
-	write(sv[1], "abc", 3);
+	assert(write(sv[1], "abc", 3) == 3);
 	close(sv[1]);
 
 	mbt_ev_run(ev);
@@ -234,7 +234,7 @@ test_set_callbacks(void)
 
 	mbt_conn_set_callbacks(conn, on_read2, on_event, NULL);
 
-	write(sv[1], "x", 1);
+	assert(write(sv[1], "x", 1) == 1);
 	close(sv[1]);
 
 	mbt_ev_run(ev);

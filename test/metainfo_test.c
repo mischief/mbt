@@ -20,7 +20,7 @@ test_create_single_file(void)
 	assert(fd >= 0);
 	uint8_t data[65536];
 	for (int i = 0; i < (int)sizeof(data); i++) data[i] = i & 0xff;
-	write(fd, data, sizeof(data));
+	assert(write(fd, data, sizeof(data)) == (ssize_t)sizeof(data));
 	close(fd);
 
 	struct mbt_metainfo *mi;
@@ -90,7 +90,7 @@ test_auto_piece_length(void)
 	int fd = mkstemp(path);
 	uint8_t data[1024];
 	memset(data, 'A', sizeof(data));
-	write(fd, data, sizeof(data));
+	assert(write(fd, data, sizeof(data)) == (ssize_t)sizeof(data));
 	close(fd);
 
 	struct mbt_metainfo *mi;
