@@ -1152,6 +1152,20 @@ l_session_dht_port(lua_State *L)
 }
 
 static int
+l_session_stop_announce(lua_State *L)
+{
+	lua_pushinteger(L, mbt_session_stop_announce(check_session(L, 1)->s));
+	return 1;
+}
+
+static int
+l_session_stops_pending(lua_State *L)
+{
+	lua_pushinteger(L, mbt_session_stops_pending(check_session(L, 1)->s));
+	return 1;
+}
+
+static int
 l_session_bytes_downloaded(lua_State *L)
 {
 	lua_pushinteger(L, (lua_Integer)mbt_session_bytes_downloaded(check_session(L, 1)->s));
@@ -2798,6 +2812,8 @@ static const luaL_Reg session_methods[] = {
     {"listen_port", l_session_listen_port},
     {"dht_port", l_session_dht_port},
     {"dht_bootstrap", l_session_dht_bootstrap},
+    {"stop_announce", l_session_stop_announce},
+    {"stops_pending", l_session_stops_pending},
     {"bytes_downloaded", l_session_bytes_downloaded},
     {"bytes_uploaded", l_session_bytes_uploaded},
     {"reannounce", l_session_reannounce},

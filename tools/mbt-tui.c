@@ -28,6 +28,8 @@
 struct mbt_ev_io;
 struct mbt_ev_timer;
 
+#define STOP_WAIT_STEPS 30 /* 3 seconds at 100 ms */
+
 static struct mbt_ev *ev;
 static struct mbt_session *session;
 static WINDOW *win_list, *win_detail, *win_cmd;
@@ -563,6 +565,9 @@ main(int argc, char *argv[])
 
 	mbt_ev_io_free(input_io);
 	mbt_ev_timer_free(refresh_timer);
+	mbt_session_stop_announce(session);
+	for (int i = 0; i < STOP_WAIT_STEPS && mbt_session_stops_pending(session) > 0; i++)
+		mbt_ev_step(ev, 100);
 	mbt_session_free(session);
 	mbt_ev_destroy(ev);
 

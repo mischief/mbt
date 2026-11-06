@@ -88,6 +88,8 @@ test('dht', dht_test, timeout: 10, suite: 'slow')
 
 tracker_server_test = executable('tracker_server_test', 'tracker_server_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_server', tracker_server_test, timeout: 15)
+tracker_stop_test = executable('tracker_stop_test', 'tracker_stop_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tracker_stop', tracker_stop_test, timeout: 30)
 
 metainfo_test = executable('metainfo_test', 'metainfo_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('metainfo', metainfo_test)

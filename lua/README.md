@@ -109,6 +109,9 @@ reference. A session that the collector frees stops its transfers.
 - `s:find(hex)` returns a torrent or nil. `s:torrents()` returns a list.
 - `s:listen_port()`, `s:dht_port()`.
 - `s:dht_bootstrap(addr, port)`, `s:reannounce()`.
+- `s:stop_announce()` sends event=stopped for all torrents, and returns the
+  replies to wait for. `s:stops_pending()` counts them. Wait a short time
+  before `s:close()`. `t:remove()` sends it for one torrent.
 - `s:bytes_downloaded()`, `s:bytes_uploaded()`: totals from peers, with removed
   torrents.
 - `s:set_upload_rate(n)`, `s:set_download_rate(n)`, `s:upload_rate()`,

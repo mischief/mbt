@@ -21,6 +21,8 @@
 
 struct mbt_torrent;
 
+#define STOP_WAIT_STEPS 30 /* 3 seconds at 100 ms */
+
 static struct mbt_session *session;
 static int seed_mode;
 static int no_progress;
@@ -341,6 +343,9 @@ main(int argc, char *argv[])
 
 	rv = mbt_session_run(session);
 
+	mbt_session_stop_announce(session);
+	for (int i = 0; i < STOP_WAIT_STEPS && mbt_session_stops_pending(session) > 0; i++)
+		mbt_ev_step(cfg.ev, 100);
 	mbt_session_free(session);
 	mbt_ev_destroy(cfg.ev);
 	return rv < 0 ? 1 : 0;

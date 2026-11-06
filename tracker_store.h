@@ -12,6 +12,8 @@ struct ts_torrent;
 
 struct ts_torrent *mbt_tracker_store_find(struct mbt_tracker_store *s, const uint8_t *ih);
 struct ts_torrent *mbt_tracker_store_get_or_create(struct mbt_tracker_store *s, const uint8_t *ih);
+void mbt_tracker_store_remove_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
+                                   const struct sockaddr_storage *addr);
 void mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
                                 const struct sockaddr_storage *addr, int is_seeder);
 int mbt_tracker_store_get_peers(struct ts_torrent *t, const struct sockaddr_in *exclude,

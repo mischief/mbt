@@ -25,6 +25,7 @@
 struct ts_peer {
 	struct sockaddr_storage addr;
 	time_t last_seen;
+	int is_seeder;
 };
 
 struct ts_torrent {
@@ -213,15 +214,36 @@ mbt_tracker_store_add_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
 	for (int i = 0; i < t->peer_count; i++) {
 		if (addr_equal(&t->peers[i].addr, addr)) {
 			t->peers[i].last_seen = time(NULL);
+			if (is_seeder && !t->peers[i].is_seeder) {
+				t->peers[i].is_seeder = 1;
+				t->seeders++;
+				t->leechers--;
+			}
 			return;
 		}
 	}
 	if (t->peer_count >= MAX_PEERS_PER_TORRENT) return;
 	t->peers[t->peer_count].addr = *addr;
 	t->peers[t->peer_count].last_seen = time(NULL);
+	t->peers[t->peer_count].is_seeder = is_seeder;
 	t->peer_count++;
 	s->num_peers++;
 	if (is_seeder) t->seeders++; else t->leechers++;
+}
+
+/* A peer sent event=stopped. */
+void
+mbt_tracker_store_remove_peer(struct mbt_tracker_store *s, struct ts_torrent *t,
+                              const struct sockaddr_storage *addr)
+{
+	for (int i = 0; i < t->peer_count; i++) {
+		if (!addr_equal(&t->peers[i].addr, addr))
+			continue;
+		if (t->peers[i].is_seeder) t->seeders--; else t->leechers--;
+		t->peers[i] = t->peers[--t->peer_count];
+		s->num_peers--;
+		return;
+	}
 }
 
 int
@@ -283,6 +305,7 @@ mbt_tracker_store_gc(struct mbt_tracker_store *s)
 			while (j < t->peer_count) {
 				if (now - t->peers[j].last_seen > PEER_EXPIRE_SECS) {
 					s->num_peers--;
+					if (t->peers[j].is_seeder) t->seeders--; else t->leechers--;
 					t->peers[j] = t->peers[--t->peer_count];
 				} else {
 					j++;

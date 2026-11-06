@@ -91,6 +91,7 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	long long num;
 	uint16_t port_v;
 	int numwant = 50;
+	int stopped = 0;
 
 	char *param, *saveptr;
 	char *qs_copy = strdup(qs);
@@ -103,6 +104,8 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 
 		if (strcmp(key, "info_hash") == 0)
 			urldecode_infohash(val, info_hash);
+		else if (strcmp(key, "event") == 0)
+			stopped = strcmp(val, "stopped") == 0;
 		else if (strcmp(key, "port") == 0)
 			peer_port = mbt_parse_port(val, '\0', &port_v) == 0 ? htons(port_v) : 0;
 		else if (strcmp(key, "left") == 0)
@@ -129,7 +132,10 @@ handle_request(struct mbt_tracker_http *th, int cfd, struct sockaddr_storage *fr
 	if (!t) return;
 
 	int is_seeder = (left == 0);
-	mbt_tracker_store_add_peer(th->store, t, &peer_addr, is_seeder);
+	if (stopped)
+		mbt_tracker_store_remove_peer(th->store, t, &peer_addr);
+	else
+		mbt_tracker_store_add_peer(th->store, t, &peer_addr, is_seeder);
 
 	/* Build bencoded response */
 	_cleanup_be_ struct mbt_be_value *resp = NULL;

@@ -61,6 +61,7 @@ struct session_torrent {
 	char *trackers[16];
 	int tracker_count;
 	int tracker_answers;
+	int stop_sent;       /* no more announces */
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
 	time_t last_dht_lookup;
@@ -136,6 +137,7 @@ struct mbt_session {
 	struct mbt_webseed_policy webseed;
 	int webseed_max;
 	int webseed_active;
+	int stops_pending;
 	int dht_no_bootstrap;
 	uint64_t down_gone;       /* totals of removed torrents */
 	uint64_t up_gone;
@@ -320,7 +322,7 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 
 		/* Announce event=completed once when torrent finishes */
 		if (mbt_torrent_complete(st->torrent) && !st->completed_announced &&
-		    st->tracker_count > 0) {
+		    st->tracker_count > 0 && !st->stop_sent) {
 			st->completed_announced = 1;
 			struct mbt_tracker_request treq = {
 				.ev = s->ev, .ih = st->ih, .peer_id = s->peer_id,
@@ -1615,7 +1617,7 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 	/* Schedule re-announce */
 	if (st)
 		st->emergency_reannounce = 0; /* fresh peers — allow one more emergency if needed */
-	if (st && interval > 0) {
+	if (st && interval > 0 && !st->stop_sent) {
 		/* Use configured interval if shorter than server's */
 		if (s->timers.tracker_interval > 0 && s->timers.tracker_interval < interval)
 			interval = s->timers.tracker_interval;
@@ -1639,9 +1641,67 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 }
 
 static void
+session_stop_done_cb(struct mbt_infohash *ih, int err, int interval, void *arg)
+{
+	struct mbt_session *s = arg;
+
+	(void)ih; (void)err; (void)interval;
+	if (s->stops_pending > 0)
+		s->stops_pending--;
+}
+
+/* Tell trackers that this client left. The torrent can go before the reply. */
+static void
+session_send_stopped(struct mbt_session *s, struct session_torrent *st)
+{
+	struct mbt_tracker_request treq = {
+		.ev = s->ev,
+		.ih = st->ih,
+		.peer_id = s->peer_id,
+		.listen_port = s->listen_port,
+		.downloaded = mbt_torrent_bytes_downloaded(st->torrent),
+		.uploaded = mbt_torrent_bytes_uploaded(st->torrent),
+		.event = MBT_TRACKER_EVENT_STOPPED,
+		.done_cb = session_stop_done_cb,
+		.arg = s,
+		.group = s->tracker_group,
+	};
+
+	if (st->stop_sent || !st->started_announced)
+		return;
+	st->stop_sent = 1;
+	if (st->reannounce_timer) {
+		mbt_ev_timer_free(st->reannounce_timer);
+		st->reannounce_timer = NULL;
+	}
+	for (int i = 0; i < st->tracker_count; i++) {
+		s->stops_pending++;
+		if (mbt_tracker_announce(st->trackers[i], &treq, s->http, s->http_arg) < 0)
+			s->stops_pending--;
+	}
+}
+
+int
+mbt_session_stop_announce(struct mbt_session *s)
+{
+	struct session_torrent *st;
+
+	ASSERT_RETURN(s, -EINVAL);
+	STAILQ_FOREACH(st, &s->torrents, next)
+		session_send_stopped(s, st);
+	return s->stops_pending;
+}
+
+int
+mbt_session_stops_pending(struct mbt_session *s)
+{
+	return s->stops_pending;
+}
+
+static void
 session_do_announce(struct mbt_session *s, struct session_torrent *st)
 {
-	if (st->tracker_count == 0)
+	if (st->tracker_count == 0 || st->stop_sent)
 		return;
 
 	struct mbt_torrent *t = st->torrent;
@@ -2043,6 +2103,7 @@ mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 	if (!st)
 		return -ENOENT;
 
+	session_send_stopped(s, st);
 	STAILQ_REMOVE(&s->torrents, st, session_torrent, next);
 	session_cancel_connects(s, st->torrent);
 	s->down_gone += mbt_torrent_bytes_downloaded(st->torrent);

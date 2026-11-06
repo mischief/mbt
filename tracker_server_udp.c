@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "mbt/tracker.h"
 #include "mbt/tracker_server.h"
 #include "mbt/log.h"
 #include "net.h"
@@ -92,7 +93,9 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		memcpy(&left, buf + 64, 8);
 		left = __builtin_bswap64(left);
 		/* bytes 72-79: uploaded */
-		/* bytes 80-83: event */
+		uint32_t event;
+		memcpy(&event, buf + 80, 4);
+		event = ntohl(event);
 		/* bytes 84-87: IP (0 = use source) */
 		/* bytes 88-91: key */
 		/* bytes 92-95: num_want */
@@ -116,7 +119,10 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		if (!t) return;
 
 		int is_seeder = (left == 0);
-		mbt_tracker_store_add_peer(ts->store, t, &peer_addr, is_seeder);
+		if (event == MBT_TRACKER_EVENT_STOPPED)
+			mbt_tracker_store_remove_peer(ts->store, t, &peer_addr);
+		else
+			mbt_tracker_store_add_peer(ts->store, t, &peer_addr, is_seeder);
 
 		/* Build response */
 		uint32_t a = htonl(ACTION_ANNOUNCE);
