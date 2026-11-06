@@ -1,149 +1,263 @@
 // SPDX-License-Identifier: ISC
-// Test: DHT routing table bucket splitting
-// Feeds many fake nodes to force bucket splits, verifies routing_closest works.
-#include <assert.h>
-#include <string.h>
-#include <unistd.h>
-#include <stdio.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+/* Replies fill the routing table only when they answer a query of ours. */
 #include <arpa/inet.h>
-#include <stdint.h>
+#include <assert.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
 
+#include "mbt/be.h"
 #include "mbt/dht.h"
 #include "mbt/event.h"
+#include "test_util.h"
 
-struct mbt_ev_timer;
+#define WAIT_SEC 5
+#define NODE_LEN 26
+#define BATCHES 8
+#define PER_BATCH 8
+#define TXN_MAX 32
+#define K_NODES 8
+
+struct txn {
+	uint8_t buf[TXN_MAX];
+	size_t len;
+};
 
 static struct mbt_ev *ev;
-static int stop_count;
+static struct sockaddr_in dht_addr;
+static const uint8_t node_id[20] = {0xAA, 0xAA, 0xAA};
+static const uint8_t stranger_id[20] = {0xCC, 0xCC, 0xCC};
 
-static void
-tick_cb(struct mbt_ev_timer *timer, void *v)
+static int
+udp_socket(uint16_t *port)
 {
-	stop_count++;
-	if (stop_count >= 3)
-		mbt_ev_stop(ev);
-	else
-		mbt_ev_timer_mod(timer, 100000);
+	struct sockaddr_in me = {.sin_family = AF_INET};
+	socklen_t len = sizeof(me);
+	int fd;
+
+	me.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	assert((fd = socket(AF_INET, SOCK_DGRAM, 0)) >= 0);
+	assert(bind(fd, (struct sockaddr *)&me, sizeof(me)) == 0);
+	assert(getsockname(fd, (struct sockaddr *)&me, &len) == 0);
+	*port = ntohs(me.sin_port);
+	return fd;
 }
 
-/* Simulate receiving a compact node info message by constructing a fake
- * UDP packet with nodes. This exercises routing_add through the normal
- * DHT response parsing path.
- *
- * Instead, we use the internal dht_recv path by sending crafted UDP packets
- * to the DHT's bound port. We'll send find_node responses with many nodes.
- */
-
-/* Build a "nodes" response: 26 bytes per node (20-byte id + 4 ip + 2 port) */
 static void
-build_nodes_response(uint8_t *buf, int *len, const uint8_t *txn,
-                     uint8_t nodes[][26], int nnodes)
+send_msg(int fd, struct mbt_be_value *msg)
 {
-	/* Bencode: d1:rd2:id20:<our_fake_id>5:nodes<N*26>:<compact>e1:t2:<txn>1:y1:re */
-	uint8_t fake_id[20];
-	memset(fake_id, 0xAA, 20);
+	unsigned char *enc;
+	size_t len;
 
-	int off = 0;
-	/* d */
-	buf[off++] = 'd';
-	/* 1:rd */
-	memcpy(buf + off, "1:rd", 4); off += 4;
-	/* 2:id20:<id> */
-	memcpy(buf + off, "2:id20:", 7); off += 7;
-	memcpy(buf + off, fake_id, 20); off += 20;
-	/* 5:nodes<len>:<data> */
-	int nlen = nnodes * 26;
-	off += sprintf((char *)buf + off, "5:nodes%d:", nlen);
-	for (int i = 0; i < nnodes; i++)
-		memcpy(buf + off + i * 26, nodes[i], 26);
-	off += nlen;
-	/* e (close r dict) */
-	buf[off++] = 'e';
-	/* 1:t2:<txn> */
-	memcpy(buf + off, "1:t2:", 5); off += 5;
-	memcpy(buf + off, txn, 2); off += 2;
-	/* 1:y1:r */
-	memcpy(buf + off, "1:y1:r", 6); off += 6;
-	/* e (close outer dict) */
-	buf[off++] = 'e';
-	*len = off;
+	assert(mbt_be_value_encode(msg, &enc, &len) == 0);
+	mbt_be_unref(msg);
+	assert(sendto(fd, enc, len, 0, (struct sockaddr *)&dht_addr, sizeof(dht_addr)) == (ssize_t)len);
+	free(enc);
 }
 
-int main(void)
+/* Wait for a message of kind y (and query name q, if given). */
+static struct mbt_be_value *
+wait_msg(int fd, const char *y, const char *q)
 {
-	int rv;
+	time_t end = time(NULL) + WAIT_SEC;
+	uint8_t buf[2048];
 
-	rv = mbt_ev_new_pollable(&ev);
-	assert(rv == 0);
+	for (;;) {
+		ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+		struct mbt_be_value *m = NULL;
 
-	struct mbt_dht *d;
-	rv = mbt_dht_new(&d, &(struct mbt_dht_config){.ev = ev, .port = 0}); /* ephemeral port */
-	assert(rv == 0);
-
-	uint16_t port = mbt_dht_port(d);
-	assert(port > 0);
-
-	/* Send many fake nodes via UDP to the DHT's port to trigger routing_add.
-	 * We'll send find_node responses with 8 nodes each, using different IDs
-	 * to force bucket splitting. */
-
-	int sock = socket(AF_INET, SOCK_DGRAM, 0);
-	assert(sock >= 0);
-
-	struct sockaddr_in dest = {
-		.sin_family = AF_INET,
-		.sin_port = htons(port),
-		.sin_addr.s_addr = htonl(INADDR_LOOPBACK),
-	};
-
-	/* Generate 64 unique node IDs spread across the ID space */
-	for (int batch = 0; batch < 8; batch++) {
-		uint8_t nodes[8][26];
-		for (int i = 0; i < 8; i++) {
-			/* Random-ish node ID */
-			int idx = batch * 8 + i;
-			memset(nodes[i], 0, 26);
-			nodes[i][0] = idx; /* vary first byte */
-			nodes[i][1] = idx ^ 0x55;
-			nodes[i][2] = idx * 7;
-			/* fake IPv4 + port */
-			nodes[i][20] = 10;
-			nodes[i][21] = 0;
-			nodes[i][22] = (uint8_t)batch;
-			nodes[i][23] = (uint8_t)i;
-			nodes[i][24] = 0x1A; /* port high */
-			nodes[i][25] = 0xE1; /* port low = 6881 */
+		assert(time(NULL) < end);
+		if (n <= 0) {
+			test_ev_step(ev, 5);
+			continue;
 		}
-
-		uint8_t txn[2] = { (uint8_t)batch, 0x01 };
-		uint8_t pkt[2048];
-		int pktlen;
-		build_nodes_response(pkt, &pktlen, txn, nodes, 8);
-
-		sendto(sock, pkt, pktlen, 0,
-		       (struct sockaddr *)&dest, sizeof(dest));
+		assert(mbt_be_value_parse(buf, (size_t)n, &m) > 0);
+		if (mbt_be_streq(mbt_be_find(m, "y"), y) &&
+		    (!q || mbt_be_streq(mbt_be_find(m, "q"), q)))
+			return m;
+		mbt_be_unref(m);
 	}
-	close(sock);
+}
 
-	/* Run event loop briefly to process the packets */
-	struct mbt_ev_timer *t;
-	mbt_ev_timer_new(ev, &t, 100000, tick_cb, NULL); /* 100ms ticks */
-	mbt_ev_run(ev);
-	mbt_ev_timer_free(t);
+static void
+get_txn(struct mbt_be_value *m, struct txn *t)
+{
+	struct mbt_be_value *v = mbt_be_find(m, "t");
 
-	/* Verify routing table has nodes */
-	int count = mbt_dht_node_count(d);
-	printf("dht_routing_test: %d nodes in routing table\n", count);
-	assert(count > 0);
+	assert(v && v->string.len <= TXN_MAX);
+	t->len = v->string.len;
+	memcpy(t->buf, v->string.buf, t->len);
+	mbt_be_unref(m);
+}
 
-	/* With 64 diverse IDs, we should have triggered at least one split */
-	/* (bucket_count > 1 would confirm, but we don't expose that) */
-	/* Just verify we can find closest nodes */
-	printf("dht_routing_test: PASS (%d nodes)\n", count);
+/* The reply of a node with this id, with n nodes that start at base. */
+static void
+send_reply(int fd, const uint8_t *id, const struct txn *t, int base, int n)
+{
+	uint8_t nodes[PER_BATCH * NODE_LEN] = {0};
+	struct mbt_be_value *msg, *r;
+
+	for (int i = 0; i < n; i++) {
+		uint8_t *p = nodes + i * NODE_LEN;
+
+		p[0] = (uint8_t)(base + i);
+		p[1] = (uint8_t)((base + i) ^ 0x55);
+		p[20] = 10;
+		p[22] = (uint8_t)(base >> 8);
+		p[23] = (uint8_t)(base + i);
+		p[24] = 0x1A;
+		p[25] = 0xE1;
+	}
+	assert(mbt_be_dict_new(&msg) == 0);
+	assert(mbt_be_dict_new(&r) == 0);
+	assert(mbt_be_dict_append_string(r, "id", id, 20) == 0);
+	if (n > 0)
+		assert(mbt_be_dict_append_string(r, "nodes", nodes, (size_t)n * NODE_LEN) == 0);
+	assert(mbt_be_dict_append_string(msg, "t", t->buf, t->len) == 0);
+	assert(mbt_be_dict_append_string(msg, "y", "r", 1) == 0);
+	assert(mbt_be_dict_append(msg, "r", r) == 0);
+	mbt_be_unref(r);
+	send_msg(fd, msg);
+}
+
+static void
+send_query(int fd, const uint8_t *id, const char *q, const uint8_t *target)
+{
+	struct mbt_be_value *msg, *a;
+
+	assert(mbt_be_dict_new(&msg) == 0);
+	assert(mbt_be_dict_new(&a) == 0);
+	assert(mbt_be_dict_append_string(a, "id", id, 20) == 0);
+	if (target)
+		assert(mbt_be_dict_append_string(a, "target", target, 20) == 0);
+	assert(mbt_be_dict_append_string(msg, "t", "aa", 2) == 0);
+	assert(mbt_be_dict_append_string(msg, "y", "q", 1) == 0);
+	assert(mbt_be_dict_append_string(msg, "q", q, strlen(q)) == 0);
+	assert(mbt_be_dict_append(msg, "a", a) == 0);
+	mbt_be_unref(a);
+	send_msg(fd, msg);
+}
+
+static void
+settle(void)
+{
+	for (int i = 0; i < 10; i++)
+		test_ev_step(ev, 5);
+}
+
+/* Ask our node, as fd, whether it tells others about id. */
+static int
+tells_about(int fd, const uint8_t *id)
+{
+	struct mbt_be_value *r, *m, *nodes;
+	int found = 0;
+
+	send_query(fd, stranger_id, "find_node", id);
+	m = wait_msg(fd, "r", NULL);
+	r = mbt_be_find(m, "r");
+	nodes = mbt_be_find(r, "nodes");
+	for (size_t i = 0; nodes && i < nodes->string.len / NODE_LEN; i++)
+		found |= memcmp((uint8_t *)nodes->string.buf + i * NODE_LEN, id, 20) == 0;
+	mbt_be_unref(m);
+	return found;
+}
+
+struct seek {
+	const uint8_t *id;
+	uint16_t port;
+};
+
+static void
+find_port(const uint8_t id[20], const char *addr, uint16_t port, void *arg)
+{
+	struct seek *s = arg;
+
+	(void)addr;
+	if (memcmp(id, s->id, 20) == 0)
+		s->port = port;
+}
+
+static uint16_t
+node_port(struct mbt_dht *d, const uint8_t *id)
+{
+	struct seek s = {.id = id};
+
+	mbt_dht_foreach_node(d, find_port, &s);
+	return s.port;
+}
+
+int
+main(void)
+{
+	struct mbt_dht *d;
+	struct txn t;
+	uint16_t node_port_nr, other_port;
+	int node, other, count;
+
+	assert(mbt_ev_new_pollable(&ev) == 0);
+	assert(mbt_dht_new(&d, &(struct mbt_dht_config){.ev = ev, .port = 0}) == 0);
+	dht_addr.sin_family = AF_INET;
+	dht_addr.sin_port = htons(mbt_dht_port(d));
+	dht_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	node = udp_socket(&node_port_nr);
+	other = udp_socket(&other_port);
+
+	/* Each answer to a query adds its nodes, enough to split buckets. */
+	for (int b = 0; b < BATCHES; b++) {
+		assert(mbt_dht_bootstrap(d, "127.0.0.1", node_port_nr) == 0);
+		get_txn(wait_msg(node, "q", "find_node"), &t);
+		send_reply(node, node_id, &t, b * PER_BATCH, PER_BATCH);
+		settle();
+	}
+	count = mbt_dht_node_count(d);
+	assert(count > K_NODES);
+
+	/* The same reply again answers nothing. */
+	send_reply(node, node_id, &t, 100, PER_BATCH);
+	settle();
+	assert(mbt_dht_node_count(d) == count);
+
+	/* A reply to no query proves nothing, and teaches nothing. */
+	t.buf[0] ^= 0xff;
+	send_reply(other, stranger_id, &t, 120, PER_BATCH);
+	settle();
+	assert(mbt_dht_node_count(d) == count);
+	assert(node_port(d, stranger_id) == 0);
+
+	/* The right id from the wrong source is forged too. */
+	assert(mbt_dht_bootstrap(d, "127.0.0.1", node_port_nr) == 0);
+	get_txn(wait_msg(node, "q", "find_node"), &t);
+	send_reply(other, stranger_id, &t, 140, PER_BATCH);
+	settle();
+	assert(node_port(d, stranger_id) == 0);
+	send_reply(node, node_id, &t, 0, 0);
+	settle();
+
+	/* A forged query cannot move a proved node. */
+	assert(node_port(d, node_id) == node_port_nr);
+	send_query(other, node_id, "ping", NULL);
+	settle();
+	assert(node_port(d, node_id) == node_port_nr);
+	mbt_be_unref(wait_msg(other, "r", NULL));
+
+	/* A query adds a node, but others hear of it only once it answers. */
+	send_query(other, stranger_id, "ping", NULL);
+	mbt_be_unref(wait_msg(other, "r", NULL));
+	assert(node_port(d, stranger_id) == other_port);
+	get_txn(wait_msg(other, "q", "ping"), &t);
+	assert(!tells_about(other, stranger_id));
+	send_reply(other, stranger_id, &t, 0, 0);
+	settle();
+	assert(tells_about(other, stranger_id));
 
 	mbt_dht_free(d);
 	mbt_ev_destroy(ev);
+	close(node);
+	close(other);
+	fprintf(stderr, "dht_routing_test: PASS (%d nodes)\n", count);
 	return 0;
 }

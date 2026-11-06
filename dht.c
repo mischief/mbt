@@ -41,6 +41,16 @@ struct mbt_ev_io;
 struct mbt_ev_timer;
 
 /* --- Constants --- */
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+/* Small limits, so that fuzz input reaches the full and overflow paths. */
+#define MAX_LOOKUP_NODES 8
+#define MAX_RPCS 4
+#define DHT_MSG_MAX 256
+#else
+#define MAX_LOOKUP_NODES 64  /* nodes tracked per lookup */
+#define MAX_RPCS 128         /* find_node, ping and announce in flight */
+#define DHT_MSG_MAX 2048     /* more than any KRPC message we send */
+#endif
 #define K 8              /* nodes per bucket */
 #define ALPHA 3          /* lookup parallelism */
 #define MAX_LOOKUPS 8    /* concurrent get_peers lookups */
@@ -48,7 +58,6 @@ struct mbt_ev_timer;
 #define TXN_LEN 4
 #define NODE_COMPACT_LEN 26   /* 20 id + 4 ip + 2 port */
 #define NODE6_COMPACT_LEN 38  /* 20 id + 16 ip + 2 port */
-#define MAX_LOOKUP_NODES 64  /* nodes tracked per lookup */
 #define LOOKUP_TIMEOUT_US (10 * 1000000ULL) /* 10s per lookup */
 #define QUERY_TIMEOUT_US (5 * 1000000ULL)   /* 5s per raw query */
 #define LOOKUP_TICK_US (100 * 1000ULL)
@@ -60,7 +69,8 @@ struct mbt_ev_timer;
 #define DHT_ERR_SEQ 302
 #define LOOKUP_NODE_SLOW_MS 500             /* then a query stops holding a slot */
 #define LOOKUP_NODE_TIMEOUT_MS 2000         /* then a node counts as silent */
-#define RPC_TIMEOUT_US   (5 * 1000000ULL)  /* 5s per RPC */
+#define RPC_TIMEOUT_MS 5000                /* then a reply counts as forged */
+#define VERIFY_RATE 5                      /* pings per second to unproved nodes */
 #define REFRESH_US       (15 * 60 * 1000000ULL) /* 15 min bucket refresh */
 
 /* Helper: format sockaddr_storage for logging (returns static buffer) */
@@ -102,7 +112,7 @@ struct dht_node {
 	struct sockaddr_storage addr;
 	time_t last_seen;
 	int pinged;
-	int verified;            /* it spoke to us under this id */
+	int verified;            /* it answered a query of ours under this id */
 	SLIST_ENTRY(dht_node) entry;
 };
 
@@ -141,6 +151,13 @@ struct dht_lookup {
 	struct mbt_dht *d;
 };
 
+/* A query that no lookup or caller waits on. sent_ms 0 marks a free slot. */
+struct dht_rpc {
+	uint8_t txn[TXN_LEN];
+	uint64_t sent_ms;
+	struct sockaddr_storage addr;
+};
+
 /* A pending mbt_dht_query. */
 struct dht_query {
 	SLIST_ENTRY(dht_query) entry;
@@ -152,7 +169,6 @@ struct dht_query {
 	void *arg;
 };
 
-#define DHT_MSG_MAX 2048    /* more than any KRPC message we send */
 #define DHT_DEFAULT_MAX_ITEMS 64
 #define DHT_ITEM_EXPIRE 7200
 #define DHT_DEFAULT_MAX_STORED 64
@@ -209,7 +225,7 @@ struct mbt_dht {
 	/* Active lookups */
 	struct dht_lookup lookups[MAX_LOOKUPS];
 
-	/* Transaction counter */
+	struct dht_rpc rpcs[MAX_RPCS];
 
 	/* Refresh timer */
 	struct mbt_ev_timer *refresh_timer;
@@ -223,6 +239,7 @@ struct mbt_dht {
 
 	/* Query rate limit (messages/sec as bytes, 1 msg = 1 token) */
 	struct mbt_ratelimit *send_limit;
+	struct mbt_ratelimit *verify_limit;
 
 	/* BEP 44: item storage */
 	struct dht_item *items;
@@ -297,6 +314,39 @@ make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 
 	(void)d;
 	memcpy(txn, &t, TXN_LEN);
+}
+
+/* Remember a query, so that its reply can prove its source. */
+static void
+rpc_track(struct mbt_dht *d, const struct sockaddr_storage *addr, uint8_t txn[TXN_LEN])
+{
+	struct dht_rpc *slot = &d->rpcs[0];
+
+	for (int i = 1; i < MAX_RPCS; i++)
+		if (d->rpcs[i].sent_ms < slot->sent_ms)
+			slot = &d->rpcs[i];
+	make_txn(d, txn);
+	memcpy(slot->txn, txn, TXN_LEN);
+	slot->addr = *addr;
+	slot->sent_ms = mono_ms();
+}
+
+/* True once, for a reply to a tracked query. */
+static int
+rpc_take(struct mbt_dht *d, const uint8_t *txn, const struct sockaddr_storage *from)
+{
+	uint64_t now = mono_ms();
+
+	for (int i = 0; i < MAX_RPCS; i++) {
+		struct dht_rpc *r = &d->rpcs[i];
+
+		if (r->sent_ms && now - r->sent_ms < RPC_TIMEOUT_MS &&
+		    sa_equal(&r->addr, from) && memcmp(r->txn, txn, TXN_LEN) == 0) {
+			r->sent_ms = 0;
+			return 1;
+		}
+	}
+	return 0;
 }
 
 /* Compute token = first TOKEN_LEN bytes of SHA1(secret || IP bytes) */
@@ -410,7 +460,27 @@ routing_split(struct mbt_dht *d, struct dht_bucket *b)
 }
 
 static void
-routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr)
+node_insert(struct dht_bucket *b, const uint8_t *id, const struct sockaddr_storage *addr, int proved)
+{
+	struct dht_node *n = calloc(1, sizeof(*n));
+
+	if (!n)
+		return;
+	memcpy(n->id, id, DHT_PEER_ID_LEN);
+	n->addr = *addr;
+	n->last_seen = time(NULL);
+	n->verified = proved;
+	SLIST_INSERT_HEAD(&b->nodes, n, entry);
+	b->count++;
+	b->last_changed = n->last_seen;
+}
+
+/*
+ * proved: the node answered a query of ours from addr. Without proof, addr is
+ * only a claim. A claim cannot change a proved node, or push one out.
+ */
+static void
+routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr, int proved)
 {
 	if (memcmp(id, d->id, DHT_PEER_ID_LEN) == 0) return;
 
@@ -419,23 +489,21 @@ routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage 
 	/* Already in bucket? Update */
 	struct dht_node *n;
 	SLIST_FOREACH(n, &b->nodes, entry) {
-		if (memcmp(n->id, id, DHT_PEER_ID_LEN) == 0) {
-			n->last_seen = time(NULL);
+		if (memcmp(n->id, id, DHT_PEER_ID_LEN) != 0)
+			continue;
+		if (proved || !n->verified) {
 			n->addr = *addr;
-			return;
+			n->verified |= proved;
+			n->last_seen = time(NULL);
+		} else if (sa_equal(&n->addr, addr)) {
+			n->last_seen = time(NULL);
 		}
+		return;
 	}
 
 	/* Room in bucket? Add */
 	if (b->count < K) {
-		n = calloc(1, sizeof(*n));
-		if (!n) return;
-		memcpy(n->id, id, 20);
-		n->addr = *addr;
-		n->last_seen = time(NULL);
-		SLIST_INSERT_HEAD(&b->nodes, n, entry);
-		b->count++;
-		b->last_changed = time(NULL);
+		node_insert(b, id, addr, proved);
 		mbt_log_debug(MBT_LOG_DHT, "routing add bucket=%d count=%d", b->depth, b->count);
 		return;
 	}
@@ -444,41 +512,35 @@ routing_add(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage 
 	if (bucket_contains_self(d, b)) {
 		routing_split(d, b);
 		/* Retry add into the (now smaller) appropriate bucket */
-		routing_add(d, id, addr);
+		routing_add(d, id, addr, proved);
 		return;
 	}
 
-	/* Bucket full and can't split — evict stale nodes */
+	/* Bucket full and can't split: replace a stale or unproved node. */
 	time_t now = time(NULL);
 	struct dht_node *stale = NULL;
 	SLIST_FOREACH(n, &b->nodes, entry) {
-		if (now - n->last_seen > 300) { stale = n; break; }
+		if (now - n->last_seen > 300 || (proved && !n->verified)) { stale = n; break; }
 	}
 	if (stale) {
 		SLIST_REMOVE(&b->nodes, stale, dht_node, entry);
 		b->count--;
 		free(stale);
-		/* Add the new node */
-		n = calloc(1, sizeof(*n));
-		if (!n) return;
-		memcpy(n->id, id, 20);
-		n->addr = *addr;
-		n->last_seen = time(NULL);
-		SLIST_INSERT_HEAD(&b->nodes, n, entry);
-		b->count++;
-		b->last_changed = time(NULL);
+		node_insert(b, id, addr, proved);
 	}
 }
 
 /* Drop nodes at addr under an id other than id. NULL drops all of them. */
 static void
-routing_drop_addr(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *id)
+routing_drop_addr(struct mbt_dht *d, const struct sockaddr_storage *addr, const uint8_t *id,
+                  int keep_proved)
 {
 	for (struct dht_bucket *b = d->buckets; b; b = b->next) {
 		struct dht_node *n, *tmp;
 
 		SLIST_FOREACH_SAFE(n, &b->nodes, entry, tmp) {
 			if (!sa_equal(&n->addr, addr) ||
+			    (keep_proved && n->verified) ||
 			    (id && memcmp(n->id, id, DHT_PEER_ID_LEN) == 0))
 				continue;
 			SLIST_REMOVE(&b->nodes, n, dht_node, entry);
@@ -489,29 +551,23 @@ routing_drop_addr(struct mbt_dht *d, const struct sockaddr_storage *addr, const 
 }
 
 /*
- * A message from addr proves its id. That replaces a placeholder from
- * bootstrap. Our own id at addr means we reached ourselves: returns 1.
+ * Note a message from addr. A reply proves its id, and replaces a placeholder
+ * from bootstrap. Our own id means we reached ourselves: returns 1.
  */
 static int
-routing_heard(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr)
+routing_heard(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr, int proved)
 {
-	struct dht_bucket *b;
-	struct dht_node *n;
-
 	if (memcmp(id, d->id, DHT_PEER_ID_LEN) == 0) {
-		routing_drop_addr(d, addr, NULL);
+		routing_drop_addr(d, addr, NULL, !proved);
 		return 1;
 	}
-	routing_drop_addr(d, addr, id);
-	routing_add(d, id, addr);
-	b = routing_bucket_for(d, id);
-	SLIST_FOREACH(n, &b->nodes, entry)
-		if (memcmp(n->id, id, DHT_PEER_ID_LEN) == 0)
-			n->verified = 1;
+	if (proved)
+		routing_drop_addr(d, addr, id, 0);
+	routing_add(d, id, addr, proved);
 	return 0;
 }
 
-/* Tell others only about nodes that spoke to us. */
+/* Tell others only about nodes that answered us. */
 static int
 routing_closest(struct mbt_dht *d, const uint8_t *target, struct dht_node *out, int max,
                 int verified_only)
@@ -646,7 +702,7 @@ dht_send_find_node(struct mbt_dht *d, const struct sockaddr_storage *addr, const
 
 	if (!mbt_ratelimit_allow(d->send_limit, 1))
 		return 0;
-	make_txn(d, txn);
+	rpc_track(d, addr, txn);
 	query_begin(&w, buf, sizeof(buf), d);
 	mbt_bew_key(&w, "target");
 	mbt_bew_str(&w, target, 20);
@@ -675,7 +731,7 @@ dht_send_announce(struct mbt_dht *d, const struct sockaddr_storage *addr,
 	uint8_t buf[DHT_MSG_MAX], txn[TXN_LEN];
 	struct mbt_bew w;
 
-	make_txn(d, txn);
+	rpc_track(d, addr, txn);
 	query_begin(&w, buf, sizeof(buf), d);
 	mbt_bew_key(&w, "implied_port");
 	mbt_bew_int(&w, 0);
@@ -694,7 +750,7 @@ dht_send_ping(struct mbt_dht *d, const struct sockaddr_storage *addr)
 	uint8_t buf[DHT_MSG_MAX], txn[TXN_LEN];
 	struct mbt_bew w;
 
-	make_txn(d, txn);
+	rpc_track(d, addr, txn);
 	query_begin(&w, buf, sizeof(buf), d);
 	return query_send(d, &w, addr, "ping", txn);
 }
@@ -874,7 +930,7 @@ parse_compact_nodes(struct mbt_dht *d, const uint8_t *data, size_t len, struct d
 
 		if (memcmp(p, d->id, DHT_PEER_ID_LEN) == 0)
 			continue;
-		routing_add(d, p, &addr);
+		routing_add(d, p, &addr, 0);
 		if (lk)
 			lookup_add_node(lk, p, &addr);
 	}
@@ -899,7 +955,7 @@ parse_compact_nodes6(struct mbt_dht *d, const uint8_t *data, size_t len, struct 
 
 		if (memcmp(p, d->id, DHT_PEER_ID_LEN) == 0)
 			continue;
-		routing_add(d, p, &addr);
+		routing_add(d, p, &addr, 0);
 		if (lk)
 			lookup_add_node(lk, p, &addr);
 	}
@@ -968,23 +1024,24 @@ query_timeout_cb(struct mbt_ev_timer *timer, void *v)
 	query_finish(v, NULL, -ETIMEDOUT);
 }
 
-static void
+static int
 query_reply(struct mbt_dht *d, struct mbt_be_value *msg, const struct sockaddr_storage *from)
 {
 	struct mbt_be_value *t = mbt_be_find(msg, "t");
 	struct dht_query *q;
 
 	if (!t || t->type != BE_STRING || t->string.len != TXN_LEN)
-		return;
+		return 0;
 	SLIST_FOREACH(q, &d->queries, entry) {
 		if (sa_equal(&q->addr, from) && memcmp(q->txn, t->string.buf, TXN_LEN) == 0) {
 			query_finish(q, msg, 0);
-			return;
+			return 1;
 		}
 	}
+	return 0;
 }
 
-/* Add "nodes", and "nodes6" if wanted: the K closest nodes that spoke to us. */
+/* Add "nodes", and "nodes6" if wanted: the K closest nodes that answered us. */
 static void
 reply_add_nodes(struct mbt_dht *d, struct mbt_bew *w, const uint8_t *target, int with_v6)
 {
@@ -1130,6 +1187,46 @@ stored_put(struct mbt_dht *d, const uint8_t *infohash, const struct sockaddr_sto
 	d->stored[slot].peers[target] = packed;
 }
 
+/* The lookup query that this reply answers. */
+static struct lookup_node *
+lookup_match(struct mbt_dht *d, const uint8_t *txn, const struct sockaddr_storage *from,
+             struct dht_lookup **lk)
+{
+	for (int i = 0; i < MAX_LOOKUPS; i++) {
+		if (!d->lookups[i].active)
+			continue;
+		for (int j = 0; j < d->lookups[i].node_count; j++) {
+			struct lookup_node *ln = &d->lookups[i].nodes[j];
+
+			if (ln->queried && !ln->responded && sa_equal(&ln->addr, from) &&
+			    memcmp(ln->txn, txn, TXN_LEN) == 0) {
+				*lk = &d->lookups[i];
+				return ln;
+			}
+		}
+	}
+	return NULL;
+}
+
+/* A query proves nothing, since its source can be forged. Ask the node once. */
+static void
+routing_verify(struct mbt_dht *d, const uint8_t *id, const struct sockaddr_storage *addr)
+{
+	struct dht_bucket *b = routing_bucket_for(d, id);
+	struct dht_node *n;
+
+	SLIST_FOREACH(n, &b->nodes, entry) {
+		if (memcmp(n->id, id, DHT_PEER_ID_LEN) != 0)
+			continue;
+		if (!n->verified && !n->pinged && sa_equal(&n->addr, addr) &&
+		    mbt_ratelimit_allow(d->verify_limit, 1)) {
+			n->pinged = 1;
+			dht_send_ping(d, addr);
+		}
+		return;
+	}
+}
+
 static void
 dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
            const struct sockaddr_storage *fromp)
@@ -1146,19 +1243,36 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 
 	char type = *(char *)y->string.buf;
 
-	if (type == 'r' || type == 'e')
-		query_reply(d, msg, &from);
+	if (type == 'r' || type == 'e') {
+		struct mbt_be_value *rt = mbt_be_find(msg, "t");
+		struct dht_lookup *lk = NULL;
+		struct lookup_node *ln = NULL;
+		int asked;
 
-	if (type == 'r') {
+		if (!rt || rt->type != BE_STRING || rt->string.len != TXN_LEN)
+			goto out;
+		asked = query_reply(d, msg, &from);
+		if (type == 'e')
+			goto out;
+		ln = lookup_match(d, rt->string.buf, &from, &lk);
+		asked |= ln != NULL;
+		asked |= rpc_take(d, rt->string.buf, &from);
+		if (!asked)
+			goto out; /* an answer to no query of ours proves nothing */
+
 		/* Response */
 		struct mbt_be_value *r = mbt_be_find(msg, "r");
 		if (!r) goto out;
 
 		/* Extract sender's node ID and add to routing table */
 		struct mbt_be_value *rid = mbt_be_find(r, "id");
-		if (rid && rid->type == BE_STRING && rid->string.len == 20 &&
-		    routing_heard(d, rid->string.buf, &from))
+		int have_id = rid && rid->type == BE_STRING && rid->string.len == 20;
+
+		if (have_id && routing_heard(d, rid->string.buf, &from, 1)) {
+			if (ln)
+				ln->silent = 1;
 			goto out;
+		}
 
 		/* Check for nodes (find_node or get_peers response) */
 		struct mbt_be_value *nodes = mbt_be_find(r, "nodes");
@@ -1166,32 +1280,16 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		struct mbt_be_value *values = mbt_be_find(r, "values");
 		struct mbt_be_value *token = mbt_be_find(r, "token");
 
-		/* A reply belongs to a lookup by its transaction id and source. */
-		struct mbt_be_value *rt = mbt_be_find(msg, "t");
-		struct dht_lookup *lk = NULL;
-		for (int i = 0; i < MAX_LOOKUPS; i++) {
-			if (!d->lookups[i].active) continue;
-			if (!rt || rt->type != BE_STRING || rt->string.len != TXN_LEN) break;
-			for (int j = 0; j < d->lookups[i].node_count; j++) {
-				if (d->lookups[i].nodes[j].queried && !d->lookups[i].nodes[j].responded &&
-				    sa_equal(&d->lookups[i].nodes[j].addr, &from) &&
-				    memcmp(d->lookups[i].nodes[j].txn, rt->string.buf, TXN_LEN) == 0) {
-					d->lookups[i].nodes[j].responded = 1;
-					if (!d->lookups[i].nodes[j].slow)
-						d->lookups[i].pending--;
-					/* Update node ID from response */
-					if (rid && rid->type == BE_STRING && rid->string.len == 20)
-						memcpy(d->lookups[i].nodes[j].id, rid->string.buf, 20);
-					/* Store token */
-					if (token && token->type == BE_STRING && token->string.len <= TOKEN_LEN) {
-						memcpy(d->lookups[i].nodes[j].token, token->string.buf, token->string.len);
-						d->lookups[i].nodes[j].token_len = token->string.len;
-					}
-					lk = &d->lookups[i];
-					break;
-				}
+		if (ln) {
+			ln->responded = 1;
+			if (!ln->slow)
+				lk->pending--;
+			if (have_id)
+				memcpy(ln->id, rid->string.buf, 20);
+			if (token && token->type == BE_STRING && token->string.len <= TOKEN_LEN) {
+				memcpy(ln->token, token->string.buf, token->string.len);
+				ln->token_len = token->string.len;
 			}
-			if (lk) break;
 		}
 
 		/* Parse nodes */
@@ -1238,7 +1336,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			dht_send_error(d, &from, t, DHT_ERR_PROTOCOL, "bad id");
 			goto out;
 		}
-		if (routing_heard(d, qid->string.buf, &from))
+		if (routing_heard(d, qid->string.buf, &from, 0))
 			goto out;
 
 		uint8_t rbuf[DHT_MSG_MAX];
@@ -1447,8 +1545,8 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 		} else {
 			dht_send_error(d, &from, t, DHT_ERR_METHOD, "unknown method");
 		}
+		routing_verify(d, qid->string.buf, &from);
 	}
-	/* Ignore errors ('e') */
 
 out:
 	mbt_be_unref(msg);
@@ -1595,6 +1693,7 @@ mbt_dht_new_mux(struct mbt_dht **out, const struct mbt_dht_config *cfg, struct m
 	int rate = cfg->send_rate ? cfg->send_rate : DHT_DEFAULT_SEND_RATE;
 
 	mbt_ratelimit_new(&d->send_limit, (uint64_t)rate, (uint64_t)rate * 2);
+	mbt_ratelimit_new(&d->verify_limit, VERIFY_RATE, VERIFY_RATE * 2);
 
 	char hex[41];
 	mbt_hex_encode(d->id, 20, hex, sizeof(hex));
@@ -1637,6 +1736,7 @@ mbt_dht_free(struct mbt_dht *d)
 	}
 	free(d->stored);
 	mbt_ratelimit_free(d->send_limit);
+	mbt_ratelimit_free(d->verify_limit);
 	if (d->mux) {
 		mbt_udp_mux_set_dht(d->mux, NULL, NULL);
 		if (d->owns_mux)
@@ -1658,7 +1758,7 @@ dht_bootstrap_resolved(struct sockaddr_storage *addr, socklen_t len, int err, vo
 
 	uint8_t fake_id[20];
 	arc4random_buf(fake_id, 20);
-	routing_add(ctx->d, fake_id, addr);
+	routing_add(ctx->d, fake_id, addr, 0);
 
 	char buf[INET6_ADDRSTRLEN];
 	if (addr->ss_family == AF_INET)
@@ -1697,7 +1797,7 @@ mbt_dht_bootstrap(struct mbt_dht *d, const char *addr, uint16_t port)
 	/* IP literal — immediate */
 	uint8_t fake_id[20];
 	arc4random_buf(fake_id, 20);
-	routing_add(d, fake_id, &sa);
+	routing_add(d, fake_id, &sa, 0);
 
 	mbt_log_info(MBT_LOG_DHT, "bootstrapping from %s:%hu", addr, port);
 	return dht_send_find_node(d, &sa, d->id);
