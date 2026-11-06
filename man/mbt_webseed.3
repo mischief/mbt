@@ -45,7 +45,9 @@ are these hooks for libcurl.
 .Fn mbt_http_curl_set_ca
 sets the CA list from memory, for a process that cannot read CA files.
 .Pp
-A web seed requests one piece at a time.
+A web seed sends one request at a time, for a run of contiguous pieces.
+It claims each piece as its bytes arrive, so peers can take the rest of the run.
+If a peer has the next piece, the web seed ends the request.
 Each piece gets a hash check like a piece from a peer.
 .Fn mbt_torrent_webseed_bytes
 returns the bytes received from web seeds.
@@ -67,6 +69,14 @@ and a
 .Fa low_rate
 of 64 KiB per second.
 With any other mode, each field is used as given, and 0 is valid.
+.Pp
+A run is 5 percent of the file, within
+.Fa run_min
+and
+.Fa run_max .
+With a rate limit, a run is one piece.
+For these two fields, 0 means 4 MiB and 64 MiB.
+Set both to the piece length for one piece in each request.
 .Bl -tag -width Ds
 .It Dv MBT_WEBSEED_OFF
 Web seeds do not run.

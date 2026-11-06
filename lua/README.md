@@ -39,7 +39,8 @@ removed torrent.
   - `dir`: the default data directory (default `"."`).
   - `storage`: the default storage, in place of `dir`.
   - `webseed`: a table with `mode` (`default`, `off`, `fallback` or
-    `always`), `no_peer_delay_ms`, `low_rate_delay_ms` and `low_rate`.
+    `always`), `no_peer_delay_ms`, `low_rate_delay_ms`, `low_rate`, `run_min` and
+    `run_max`.
     The add calls take the same field in `opts`.
   - `webseed_max_requests`: range requests in the session at once.
   - `port`: the listen port. 0 (the default) binds a free port; see

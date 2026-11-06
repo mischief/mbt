@@ -254,7 +254,8 @@
 ### HTTP seeding (BEP 19)
 - [x] `url-list`, range hook, whole pieces, single-file torrents (`webseed.c`, `mbt/webseed.h`)
 - [ ] Multi-file torrents
-- [ ] Contiguous ranges in one request, starting at the biggest gap
+- [x] Contiguous ranges in one request
+- [ ] Start at the biggest gap
 
 ## Phase 10: Portability hardening
 

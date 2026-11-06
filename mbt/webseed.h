@@ -20,6 +20,9 @@ struct mbt_webseed_policy {
 	uint32_t no_peer_delay_ms;  /* start after this long with no connected peer */
 	uint32_t low_rate_delay_ms; /* or after this long below low_rate */
 	uint64_t low_rate;          /* bytes per second from peers */
+	/* One range request takes 5% of the file, within these. 0 = 4 MiB and 64 MiB. */
+	uint64_t run_min;
+	uint64_t run_max;
 };
 
 /* One byte range of the file at url. total is the file size. */

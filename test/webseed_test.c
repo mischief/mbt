@@ -201,11 +201,14 @@ struct run {
 };
 
 static const struct mbt_webseed_policy now_policy = {.mode = MBT_WEBSEED_FALLBACK};
+static const struct mbt_webseed_policy one_piece = {.mode = MBT_WEBSEED_FALLBACK,
+    .run_min = PIECE_LEN, .run_max = PIECE_LEN};
 
 static void
-run_start(struct run *r, const unsigned char *buf, size_t len)
+run_start(struct run *r, const unsigned char *buf, size_t len,
+          const struct mbt_webseed_policy *policy)
 {
-	struct mbt_session_config cfg = {.ev = ev, .disable_utp = 1, .webseed = now_policy};
+	struct mbt_session_config cfg = {.ev = ev, .disable_utp = 1, .webseed = *policy};
 
 	memset(r, 0, sizeof(*r));
 	r->m = mbt_storage_memory_new();
@@ -253,11 +256,11 @@ add_url(struct run *r, const char *path)
 /* --- Tests through libcurl --- */
 
 static void
-test_download(void)
+test_download(const struct mbt_webseed_policy *policy)
 {
 	struct run r;
 
-	run_start(&r, enc, enc_len);
+	run_start(&r, enc, enc_len, policy);
 	/* The trailing slash adds the name, with its space escaped. */
 	add_url(&r, "/good/");
 	add_url(&r, "/good/");
@@ -273,7 +276,7 @@ test_bad_then_good(const char *bad)
 {
 	struct run r;
 
-	run_start(&r, enc, enc_len);
+	run_start(&r, enc, enc_len, &one_piece);
 	add_url(&r, bad);
 	for (int i = 0; i < 100; i++)
 		mbt_ev_step(ev, 10);
@@ -290,10 +293,17 @@ test_small_whole_file(void)
 {
 	struct run r;
 
-	run_start(&r, small_enc, small_len);
+	run_start(&r, small_enc, small_len, &now_policy);
 	add_url(&r, "/small/whole");
 	assert(wait_complete(r.t, WAIT_STEPS));
 	assert(memcmp(mbt_storage_memory_data(r.m), data, SMALL_LEN) == 0);
+	run_end(&r);
+
+	/* A run of the whole file accepts a 200. */
+	run_start(&r, enc, enc_len, &now_policy);
+	add_url(&r, "/full");
+	assert(wait_complete(r.t, WAIT_STEPS));
+	assert(memcmp(mbt_storage_memory_data(r.m), data, TOTAL_LEN) == 0);
 	run_end(&r);
 }
 
@@ -346,16 +356,16 @@ fake_finish(struct fake *f, int status)
 {
 	f->active = 0;
 	fake_active--;
-	if (status == 206)
-		assert(f->data(data + f->offset, f->length, f->arg) == 0);
+	if (status == 206 && f->data(data + f->offset, f->length, f->arg) != 0)
+		status = -ECANCELED;
 	f->done(status, 0, f->arg);
 }
 
 static struct mbt_session *
-fake_session(int max, struct mbt_storage_memory *m)
+fake_session(int max, struct mbt_storage_memory *m, const struct mbt_webseed_policy *policy)
 {
 	struct mbt_session_config cfg = {
-		.ev = ev, .disable_utp = 1, .webseed = now_policy,
+		.ev = ev, .disable_utp = 1, .webseed = *policy,
 		.default_storage = mbt_storage_memory_storage(m),
 		.http_range = fake_range, .http_range_cancel = fake_cancel,
 		.webseed_max_requests = max,
@@ -384,7 +394,7 @@ static void
 test_cap(void)
 {
 	struct mbt_storage_memory *m = mbt_storage_memory_new();
-	struct mbt_session *s = fake_session(1, m);
+	struct mbt_session *s = fake_session(1, m, &now_policy);
 	struct mbt_torrent *t;
 
 	fake_reset();
@@ -405,7 +415,7 @@ static void
 test_policy_off(void)
 {
 	struct mbt_storage_memory *m = mbt_storage_memory_new();
-	struct mbt_session *s = fake_session(0, m);
+	struct mbt_session *s = fake_session(0, m, &now_policy);
 	struct mbt_add_torrent_cfg acfg = {.webseed = {.mode = MBT_WEBSEED_OFF}};
 	struct mbt_torrent *t;
 
@@ -454,7 +464,7 @@ test_peer_wins(void)
 	struct mbt_storage_memory *lm = mbt_storage_memory_new();
 	struct mbt_session_config cfg = {.ev = ev, .disable_utp = 1,
 	    .default_storage = mbt_storage_memory_storage(sm)};
-	struct mbt_session *seed, *leech = fake_session(0, lm);
+	struct mbt_session *seed, *leech = fake_session(0, lm, &one_piece);
 	struct mbt_torrent *st, *lt;
 	struct mbt_torrent_callbacks cb = {.on_piece_complete = count_piece};
 
@@ -497,6 +507,58 @@ test_peer_wins(void)
 	mbt_storage_memory_destroy(sm);
 }
 
+/* A run stops at a piece that another source holds. */
+static void
+test_lazy_claim(void)
+{
+	struct mbt_storage_memory *m = mbt_storage_memory_new();
+	struct mbt_session *s = fake_session(0, m, &now_policy);
+	struct mbt_torrent *t;
+	struct mbt_torrent_callbacks cb = {.on_piece_complete = count_piece};
+	struct fake *a = NULL, *b = NULL;
+
+	fake_reset();
+	memset(piece_hits, 0, sizeof(piece_hits));
+	assert(mbt_session_add_torrent_buf(s, enc, enc_len, NULL, &t) == 0);
+	mbt_torrent_set_callbacks(t, &cb, NULL);
+	assert(mbt_torrent_add_webseed(t, "http://a/x") == 0);
+	assert(mbt_torrent_add_webseed(t, "http://b/x") == 0);
+	test_wait_verified(ev, t);
+	steps(10);
+	assert(fake_active == 2);
+	for (int i = 0; i < FAKE_MAX; i++) {
+		if (fakes[i].active && fakes[i].offset == 0)
+			a = &fakes[i];
+		else if (fakes[i].active)
+			b = &fakes[i];
+	}
+	assert(a && b);
+	assert(a->length == TOTAL_LEN);
+	assert(b->offset == PIECE_LEN && b->length == TOTAL_LEN - PIECE_LEN);
+
+	/* a gets all of piece 0. Piece 1 belongs to b, so a stops there. */
+	assert(a->data(data, PIECE_LEN, a->arg) == 0);
+	assert(a->data(data + PIECE_LEN, 1, a->arg) != 0);
+	a->active = 0;
+	fake_active--;
+	a->done(-ECANCELED, 0, a->arg);
+	steps(5);
+	assert(mbt_torrent_have_count(t) == 1);
+
+	for (int i = 0; i < 50 && !mbt_torrent_complete(t); i++) {
+		for (int j = 0; j < FAKE_MAX; j++)
+			if (fakes[j].active)
+				fake_finish(&fakes[j], 206);
+		steps(5);
+	}
+	assert(mbt_torrent_complete(t));
+	assert(memcmp(mbt_storage_memory_data(m), data, TOTAL_LEN) == 0);
+	for (int i = 0; i < NUM_PIECES; i++)
+		assert(piece_hits[i] == 1);
+	mbt_session_free(s);
+	mbt_storage_memory_destroy(m);
+}
+
 int
 main(void)
 {
@@ -511,7 +573,8 @@ main(void)
 	start_server();
 	assert(mbt_ev_new_default(&ev) == 0);
 
-	test_download();
+	test_download(&now_policy);
+	test_download(&one_piece);
 	test_bad_then_good("/missing");
 	test_bad_then_good("/wrong");
 	test_bad_then_good("/short");
@@ -523,6 +586,7 @@ main(void)
 	test_policy_off();
 	test_no_hook();
 	test_peer_wins();
+	test_lazy_claim();
 
 	mbt_ev_destroy(ev);
 	kill(server, SIGTERM);

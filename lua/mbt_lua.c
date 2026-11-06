@@ -641,6 +641,8 @@ opt_webseed(lua_State *L, int idx, struct mbt_webseed_policy *p)
 		p->no_peer_delay_ms = (uint32_t)opt_int(L, t, "no_peer_delay_ms", 5000);
 		p->low_rate_delay_ms = (uint32_t)opt_int(L, t, "low_rate_delay_ms", 10000);
 		p->low_rate = (uint64_t)opt_int(L, t, "low_rate", 64 * 1024);
+		p->run_min = (uint64_t)opt_int(L, t, "run_min", 0);
+		p->run_max = (uint64_t)opt_int(L, t, "run_max", 0);
 	}
 	lua_pop(L, 1);
 }

@@ -88,7 +88,11 @@ uint64_t torrent_total_length(struct mbt_torrent *t);
 int torrent_webseed_wanted(struct mbt_torrent *t);
 int torrent_webseed_throttled(struct mbt_torrent *t);
 void torrent_webseed_consume(struct mbt_torrent *t, size_t len);
-int torrent_webseed_pick(struct mbt_torrent *t, size_t *len);
+int torrent_webseed_limited(struct mbt_torrent *t);
+int torrent_webseed_pick(struct mbt_torrent *t);
+int torrent_webseed_claim(struct mbt_torrent *t, uint32_t piece, size_t *len);
+uint32_t torrent_webseed_run_end(struct mbt_torrent *t, uint32_t first, uint32_t max,
+                                 uint64_t *bytes);
 void torrent_webseed_release(struct mbt_torrent *t, uint32_t piece);
 void torrent_webseed_drive(struct mbt_torrent *t);
 int torrent_webseed_commit(struct mbt_torrent *t, uint32_t piece, const void *buf, size_t len);

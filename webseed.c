@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: ISC
 /*
- * BEP 19 web seeds. A web seed is not a peer: it takes whole pieces, one at a
- * time, and gives them to the torrent's commit path. Each torrent owns a list
- * of them and one tick timer that decides when they may run.
+ * BEP 19 web seeds. A web seed is not a peer. It streams a run of pieces in one
+ * range request. It claims a piece only as its bytes arrive, so peers can take
+ * the rest. Data callbacks run inside libcurl, so they only copy bytes: a timer
+ * commits full pieces, because a commit can stop other transfers.
  */
 #include <ctype.h>
 #include <errno.h>
@@ -26,6 +27,18 @@
 #define BACKOFF_MAX_MS 300000
 #define HTTP_PARTIAL 206
 #define URL_MAX 4096
+#define RUN_MIN (4 * 1024 * 1024ULL)
+#define RUN_MAX (64 * 1024 * 1024ULL)
+#define RUN_DIVISOR 20           /* BEP 19: about 5% of the file */
+#define READY_MAX 8
+
+/* A full piece that waits for the commit timer. */
+struct ready_piece {
+	STAILQ_ENTRY(ready_piece) entry;
+	uint32_t piece;
+	size_t len;
+	uint8_t *buf;
+};
 
 struct mbt_webseed {
 	SLIST_ENTRY(mbt_webseed) entry;
@@ -36,11 +49,16 @@ struct mbt_webseed {
 	int dropped;
 	uint64_t not_before;        /* monotonic ms */
 	uint32_t backoff_ms;
-	int piece;                  /* -1 when idle */
+	int piece;                  /* claimed and in progress, or -1 */
+	uint32_t next;              /* next piece of the run */
+	uint32_t run_end;           /* first piece after the run */
+	int stopped;                /* the data callback ended the run */
 	size_t received;
 	size_t plen;
 	uint8_t *buf;
 	struct mbt_http_range *req;
+	STAILQ_HEAD(, ready_piece) ready;
+	int ready_count;
 };
 
 struct mbt_webseed_set {
@@ -49,6 +67,7 @@ struct mbt_webseed_set {
 	int count;
 	struct mbt_ev *ev;
 	struct mbt_ev_timer *timer;
+	struct mbt_ev_timer *flush;
 	struct mbt_webseed_policy policy;
 	int armed;                  /* metadata and verify are done */
 	int sources_empty;
@@ -60,6 +79,7 @@ struct mbt_webseed_set {
 };
 
 static void webseed_start(struct mbt_webseed *w);
+static int set_open(struct mbt_webseed_set *set, uint64_t now);
 
 static uint64_t
 now_ms(void)
@@ -128,17 +148,77 @@ webseed_release(struct mbt_webseed *w)
 	w->piece = -1;
 }
 
+static void set_flush_cb(struct mbt_ev_timer *timer, void *arg);
+
+static void
+set_schedule_flush(struct mbt_webseed_set *set)
+{
+	if (set->flush)
+		mbt_ev_timer_mod(set->flush, 0);
+	else if (mbt_ev_timer_new(set->ev, &set->flush, 0, set_flush_cb, set) < 0)
+		set->flush = NULL;
+}
+
+/* Make the next piece of the run current. Returns 0, or -1 to end the run. */
+static int
+webseed_next_piece(struct mbt_webseed *w)
+{
+	if (w->next >= w->run_end || torrent_webseed_claim(w->t, w->next, &w->plen) < 0)
+		return -1;
+	if (!w->buf && (w->buf = malloc(mbt_torrent_piece_length(w->t))) == NULL) {
+		torrent_webseed_release(w->t, w->next);
+		return -1;
+	}
+	w->piece = (int)w->next++;
+	w->received = 0;
+	return 0;
+}
+
+static int
+webseed_queue_piece(struct mbt_webseed *w)
+{
+	struct ready_piece *r;
+
+	if (w->ready_count >= READY_MAX || (r = malloc(sizeof(*r))) == NULL)
+		return -1;
+	r->piece = (uint32_t)w->piece;
+	r->len = w->plen;
+	r->buf = w->buf;
+	STAILQ_INSERT_TAIL(&w->ready, r, entry);
+	w->ready_count++;
+	w->buf = NULL;
+	w->piece = -1;
+	set_schedule_flush(w->set);
+	return 0;
+}
+
 static int
 webseed_data(const void *data, size_t len, void *arg)
 {
 	struct mbt_webseed *w = arg;
+	const uint8_t *p = data;
 
-	if (len > w->plen - w->received)
-		return 1;
-	memcpy(w->buf + w->received, data, len);
-	w->received += len;
-	w->set->bytes += len;
-	torrent_webseed_consume(w->t, len);
+	while (len > 0) {
+		size_t n;
+
+		if (w->piece < 0 && webseed_next_piece(w) < 0) {
+			w->stopped = 1;
+			return 1;
+		}
+		n = w->plen - w->received;
+		if (n > len)
+			n = len;
+		memcpy(w->buf + w->received, p, n);
+		w->received += n;
+		w->set->bytes += n;
+		torrent_webseed_consume(w->t, n);
+		p += n;
+		len -= n;
+		if (w->received == w->plen && webseed_queue_piece(w) < 0) {
+			w->stopped = 1;
+			return 1;
+		}
+	}
 	return 0;
 }
 
@@ -146,27 +226,15 @@ static void
 webseed_done(int status, unsigned retry_after, void *arg)
 {
 	struct mbt_webseed *w = arg;
-	uint32_t piece = (uint32_t)w->piece;
-	int rv;
 
 	w->req = NULL;
 	session_webseed_release(torrent_session(w->t));
-	if (status == HTTP_PARTIAL && w->received == w->plen) {
-		w->piece = -1;
-		rv = torrent_webseed_commit(w->t, piece, w->buf, w->plen);
-		if (rv == TORRENT_COMMIT_DONE)
-			return;         /* the set may be gone */
-		if (rv == TORRENT_COMMIT_BAD_HASH) {
-			torrent_webseed_release(w->t, piece);
-			torrent_webseed_drive(w->t);
-			webseed_drop(w, "hash mismatch");
-		} else if (rv == TORRENT_COMMIT_OK) {
-			w->backoff_ms = 0;
-			webseed_start(w);
-		}
+	webseed_release(w);
+	if (status == HTTP_PARTIAL || w->stopped) {
+		w->stopped = 0;
+		set_schedule_flush(w->set);
 		return;
 	}
-	webseed_release(w);
 	torrent_webseed_drive(w->t);
 	if (status == 404 || status == 410) {
 		webseed_drop(w, "file not found");
@@ -174,6 +242,27 @@ webseed_done(int status, unsigned retry_after, void *arg)
 		mbt_log_info(MBT_LOG_TORRENT, "web seed %s: status %d", w->base, status);
 		webseed_back_off(w, retry_after);
 	}
+	set_schedule_flush(w->set);
+}
+
+/* Bytes for one request: BEP 19 suggests a share of the file. */
+static uint32_t
+webseed_run_pieces(struct mbt_webseed *w)
+{
+	const struct mbt_webseed_policy *p = &w->set->policy;
+	uint64_t min = p->run_min ? p->run_min : RUN_MIN;
+	uint64_t max = p->run_max ? p->run_max : RUN_MAX;
+	uint64_t run = torrent_total_length(w->t) / RUN_DIVISOR;
+	uint32_t plen = mbt_torrent_piece_length(w->t);
+
+	if (run < min)
+		run = min;
+	if (run > max)
+		run = max;
+	run /= plen;
+	if (run == 0 || torrent_webseed_limited(w->t))
+		return 1;
+	return run > UINT32_MAX ? UINT32_MAX : (uint32_t)run;
 }
 
 static void
@@ -184,9 +273,11 @@ webseed_start(struct mbt_webseed *w)
 	mbt_http_range_fn fn;
 	mbt_http_range_cancel_fn cancel;
 	void *arg;
+	uint64_t length;
+	uint32_t first;
 	int piece, rv;
 
-	if (w->dropped || w->req || now_ms() < w->not_before)
+	if (w->dropped || w->req || w->ready_count || now_ms() < w->not_before)
 		return;
 	if (!session_webseed_hook(s, &fn, &cancel, &arg) || torrent_webseed_throttled(t))
 		return;
@@ -194,21 +285,25 @@ webseed_start(struct mbt_webseed *w)
 		webseed_drop(w, "bad URL");
 		return;
 	}
-	if (!w->buf && (w->buf = malloc(mbt_torrent_piece_length(t))) == NULL)
-		return;
 	if (session_webseed_acquire(s) < 0)
 		return;
-	if ((piece = torrent_webseed_pick(t, &w->plen)) < 0) {
+	if ((piece = torrent_webseed_pick(t)) < 0) {
 		session_webseed_release(s);
 		return;
 	}
-	w->piece = piece;
-	w->received = 0;
+	first = (uint32_t)piece;
+	w->next = first;
+	w->run_end = torrent_webseed_run_end(t, first, webseed_run_pieces(w), &length);
+	w->stopped = 0;
+	if (webseed_next_piece(w) < 0) {
+		session_webseed_release(s);
+		return;
+	}
 
 	struct mbt_http_range_request req = {
 		.url = w->url,
-		.offset = (uint64_t)piece * mbt_torrent_piece_length(t),
-		.length = w->plen,
+		.offset = (uint64_t)first * mbt_torrent_piece_length(t),
+		.length = length,
 		.total = torrent_total_length(t),
 	};
 
@@ -225,6 +320,7 @@ static void
 webseed_stop(struct mbt_webseed *w)
 {
 	struct mbt_session *s = torrent_session(w->t);
+	struct ready_piece *r;
 	mbt_http_range_fn fn;
 	mbt_http_range_cancel_fn cancel;
 	void *arg;
@@ -236,6 +332,66 @@ webseed_stop(struct mbt_webseed *w)
 		session_webseed_release(s);
 	}
 	webseed_release(w);
+	while ((r = STAILQ_FIRST(&w->ready)) != NULL) {
+		STAILQ_REMOVE_HEAD(&w->ready, entry);
+		torrent_webseed_release(w->t, r->piece);
+		free(r->buf);
+		free(r);
+	}
+	w->ready_count = 0;
+}
+
+/* Commit queued pieces. Returns 1 if the set can be gone. */
+static int
+webseed_commit_ready(struct mbt_webseed *w)
+{
+	struct ready_piece *r;
+
+	while ((r = STAILQ_FIRST(&w->ready)) != NULL) {
+		int rv;
+
+		STAILQ_REMOVE_HEAD(&w->ready, entry);
+		w->ready_count--;
+		rv = torrent_webseed_commit(w->t, r->piece, r->buf, r->len);
+		if (rv == TORRENT_COMMIT_DONE || rv < 0) {
+			free(r->buf);
+			free(r);
+			return 1;
+		}
+		if (rv == TORRENT_COMMIT_BAD_HASH) {
+			torrent_webseed_release(w->t, r->piece);
+			free(r->buf);
+			free(r);
+			webseed_drop(w, "hash mismatch");
+			webseed_stop(w);
+			torrent_webseed_drive(w->t);
+			return 0;
+		}
+		w->backoff_ms = 0;
+		if (!w->buf)
+			w->buf = r->buf;
+		else
+			free(r->buf);
+		free(r);
+	}
+	return 0;
+}
+
+static void
+set_flush_cb(struct mbt_ev_timer *timer, void *arg)
+{
+	struct mbt_webseed_set *set = arg;
+	struct mbt_webseed *w;
+
+	(void)timer;
+	SLIST_FOREACH(w, &set->list, entry)
+		if (webseed_commit_ready(w))
+			return;
+	if (!torrent_webseed_wanted(set->t) || !set->armed)
+		return;
+	if (set_open(set, now_ms()))
+		SLIST_FOREACH(w, &set->list, entry)
+			webseed_start(w);
 }
 
 /* Should web seeds take new pieces now? */
@@ -332,6 +488,7 @@ webseed_set_add(struct mbt_webseed_set *set, const char *url)
 	w->t = set->t;
 	w->set = set;
 	w->piece = -1;
+	STAILQ_INIT(&w->ready);
 	SLIST_INSERT_HEAD(&set->list, w, entry);
 	set->count++;
 	return 0;
@@ -349,6 +506,9 @@ webseed_set_stop(struct mbt_webseed_set *set)
 	if (set->timer)
 		mbt_ev_timer_free(set->timer);
 	set->timer = NULL;
+	if (set->flush)
+		mbt_ev_timer_free(set->flush);
+	set->flush = NULL;
 }
 
 void

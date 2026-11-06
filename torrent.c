@@ -1354,24 +1354,49 @@ torrent_webseed_consume(struct mbt_torrent *t, size_t len)
 	mbt_ratelimit_consume(mbt_session_get_download_limit(t->session), len);
 }
 
-/* Claim the lowest missing piece with no active state. It has no owner and
- * counts as fully requested, so a peer takes it only in endgame. */
 int
-torrent_webseed_pick(struct mbt_torrent *t, size_t *len)
+torrent_webseed_limited(struct mbt_torrent *t)
 {
-	for (uint32_t i = 0; i < t->piece_count; i++) {
-		struct piece_info *pi;
+	return t->download_limit || mbt_session_get_download_limit(t->session);
+}
 
-		if (mbt_bitmap_isset(t->have, i) > 0 || piece_info_find(t, i))
-			continue;
-		if ((pi = piece_info_alloc(t, i)) == NULL)
-			return -1;
-		*len = piece_length_for(t, i);
-		pi->requested = *len;
-		bucket_piece_complete(t, i);
-		return (int)i;
-	}
+/* The lowest missing piece with no active state, or -1. */
+int
+torrent_webseed_pick(struct mbt_torrent *t)
+{
+	for (uint32_t i = 0; i < t->piece_count; i++)
+		if (mbt_bitmap_isset(t->have, i) <= 0 && !piece_info_find(t, i))
+			return (int)i;
 	return -1;
+}
+
+/* First piece after a free run from first, at most max long. first is free. */
+uint32_t
+torrent_webseed_run_end(struct mbt_torrent *t, uint32_t first, uint32_t max, uint64_t *bytes)
+{
+	uint32_t end = first;
+
+	*bytes = 0;
+	while (end < t->piece_count && end - first < max &&
+	       mbt_bitmap_isset(t->have, end) <= 0 && !piece_info_find(t, end))
+		*bytes += piece_length_for(t, end++);
+	return end;
+}
+
+/* Hold a piece with no owner. It counts as fully requested, so peers skip it. */
+int
+torrent_webseed_claim(struct mbt_torrent *t, uint32_t piece, size_t *len)
+{
+	struct piece_info *pi;
+
+	if (mbt_bitmap_isset(t->have, piece) > 0 || piece_info_find(t, piece))
+		return -1;
+	if ((pi = piece_info_alloc(t, piece)) == NULL)
+		return -1;
+	*len = piece_length_for(t, piece);
+	pi->requested = *len;
+	bucket_piece_complete(t, piece);
+	return 0;
 }
 
 void
