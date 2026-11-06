@@ -82,6 +82,7 @@ void webseed_set_free(struct mbt_webseed_set *set);
 void webseed_set_sources_empty(struct mbt_webseed_set *set);
 void webseed_set_kick(struct mbt_webseed_set *set);
 uint64_t webseed_set_bytes(const struct mbt_webseed_set *set);
+int webseed_set_busy(const struct mbt_webseed_set *set);
 
 struct mbt_session *torrent_session(struct mbt_torrent *t);
 uint64_t torrent_total_length(struct mbt_torrent *t);

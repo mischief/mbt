@@ -137,6 +137,9 @@ MBT_API void mbt_session_disable_lsd(struct mbt_session *s);
 MBT_API int mbt_session_enable_dht(struct mbt_session *s);
 MBT_API int mbt_session_enable_dht_local(struct mbt_session *s);
 MBT_API void mbt_session_disable_dht(struct mbt_session *s);
+/* Totals for this run, from peers. They include removed torrents. */
+MBT_API uint64_t mbt_session_bytes_downloaded(struct mbt_session *s);
+MBT_API uint64_t mbt_session_bytes_uploaded(struct mbt_session *s);
 MBT_API int mbt_session_dht_bootstrap(struct mbt_session *s, const char *addr, uint16_t port);
 MBT_API void mbt_session_dht_get_peers(struct mbt_session *s, struct mbt_infohash *ih);
 MBT_API uint16_t mbt_session_dht_port(struct mbt_session *s);

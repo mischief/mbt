@@ -544,6 +544,19 @@ webseed_set_kick(struct mbt_webseed_set *set)
 		mbt_ev_timer_mod(set->timer, 0);
 }
 
+int
+webseed_set_busy(const struct mbt_webseed_set *set)
+{
+	const struct mbt_webseed *w;
+
+	if (!set)
+		return 0;
+	SLIST_FOREACH(w, &set->list, entry)
+		if (w->req)
+			return 1;
+	return 0;
+}
+
 uint64_t
 webseed_set_bytes(const struct mbt_webseed_set *set)
 {

@@ -136,6 +136,8 @@ struct mbt_session {
 	struct mbt_webseed_policy webseed;
 	int webseed_max;
 	int webseed_active;
+	uint64_t down_gone;       /* totals of removed torrents */
+	uint64_t up_gone;
 	struct mbt_timers timers;
 	int max_peers;
 	int max_pieces_per_peer;
@@ -1400,6 +1402,28 @@ dht_done_cb(void *arg)
 	free(ctx);
 }
 
+uint64_t
+mbt_session_bytes_downloaded(struct mbt_session *s)
+{
+	uint64_t total = s->down_gone;
+	struct session_torrent *st;
+
+	STAILQ_FOREACH(st, &s->torrents, next)
+		total += mbt_torrent_bytes_downloaded(st->torrent);
+	return total;
+}
+
+uint64_t
+mbt_session_bytes_uploaded(struct mbt_session *s)
+{
+	uint64_t total = s->up_gone;
+	struct session_torrent *st;
+
+	STAILQ_FOREACH(st, &s->torrents, next)
+		total += mbt_torrent_bytes_uploaded(st->torrent);
+	return total;
+}
+
 int
 mbt_session_enable_dht(struct mbt_session *s)
 {
@@ -2018,6 +2042,8 @@ mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 
 	STAILQ_REMOVE(&s->torrents, st, session_torrent, next);
 	session_cancel_connects(s, st->torrent);
+	s->down_gone += mbt_torrent_bytes_downloaded(st->torrent);
+	s->up_gone += mbt_torrent_bytes_uploaded(st->torrent);
 	mbt_torrent_free(st->torrent);
 	mbt_infohash_unref(st->ih);
 	if (st->reannounce_timer)

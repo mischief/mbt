@@ -404,6 +404,7 @@ test_cap(void)
 	assert(mbt_torrent_add_webseed(t, "http://c/x") == 0);
 	steps(40);
 	assert(fake_peak == 1);
+	assert(mbt_torrent_state(t) == MBT_TORRENT_DOWNLOADING);
 
 	/* Session free with a request in flight cancels it. */
 	mbt_session_free(s);

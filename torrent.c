@@ -180,6 +180,9 @@ struct mbt_torrent {
 	int endgame;
 	int verifying; /* 1 while initial SHA1 verify is running */
 	int no_download; /* read-only storage: request no pieces */
+	uint64_t down_gone;      /* bytes from peers that left */
+	uint64_t up_gone;        /* bytes to peers that left */
+	uint64_t hash_failures;
 	struct mbt_webseed_set *webseeds;
 	struct mbt_webseed_policy webseed_policy;
 	int error;     /* first fatal -errno; 0 = none */
@@ -1269,6 +1272,7 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 			/* Penalize peer for hash failure */
 			tp->hash_failures++;
+			t->hash_failures++;
 			tp->failures += 3;
 			if (tp->hash_failures >= MAX_HASH_FAILURES) {
 				mbt_log_warn(MBT_LOG_TORRENT, "penalizing %s:%hu after %d hash failures",
@@ -1431,8 +1435,10 @@ torrent_webseed_commit(struct mbt_torrent *t, uint32_t piece, const void *buf, s
 	rv = piece_store(t, piece, buf, len, digest);
 	if (rv < 0)
 		return rv;
-	if (rv == PIECE_BAD_HASH)
+	if (rv == PIECE_BAD_HASH) {
+		t->hash_failures++;
 		return TORRENT_COMMIT_BAD_HASH;
+	}
 	mbt_log_debug(MBT_LOG_TORRENT, "piece %u verified from web seed", piece);
 	return piece_announce(t, piece) ? TORRENT_COMMIT_DONE : TORRENT_COMMIT_OK;
 }
@@ -1809,6 +1815,8 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	}
 
 	/* Remove peer from list */
+	t->down_gone += tp->total_down;
+	t->up_gone += tp->total_up;
 	TAILQ_REMOVE(&t->peers, tp, entry);
 
 	/* Don't free tp->peer here — we may be inside its callback chain.
@@ -2935,6 +2943,9 @@ mbt_torrent_state(struct mbt_torrent *t)
 	if (t->have_count == t->piece_count)
 		return MBT_TORRENT_SEEDING;
 
+	if (webseed_set_busy(t->webseeds))
+		return MBT_TORRENT_DOWNLOADING;
+
 	/* Check if any unchoked peer has a piece we need */
 	struct torrent_peer *tp;
 	TAILQ_FOREACH(tp, &t->peers, entry) {
@@ -2977,11 +2988,27 @@ mbt_torrent_have_count(struct mbt_torrent *t)
 uint64_t
 mbt_torrent_bytes_downloaded(struct mbt_torrent *t)
 {
-	uint64_t total = 0;
+	uint64_t total = t->down_gone;
 	struct torrent_peer *tp;
 	TAILQ_FOREACH(tp, &t->peers, entry)
 		total += tp->total_down;
 	return total;
+}
+
+uint64_t
+mbt_torrent_bytes_uploaded(struct mbt_torrent *t)
+{
+	uint64_t total = t->up_gone;
+	struct torrent_peer *tp;
+	TAILQ_FOREACH(tp, &t->peers, entry)
+		total += tp->total_up;
+	return total;
+}
+
+uint64_t
+mbt_torrent_hash_failures(struct mbt_torrent *t)
+{
+	return t->hash_failures;
 }
 
 int

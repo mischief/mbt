@@ -123,7 +123,10 @@ MBT_API int mbt_torrent_error(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_piece_count(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_piece_length(struct mbt_torrent *t);
 MBT_API uint32_t mbt_torrent_have_count(struct mbt_torrent *t);
+/* Totals for this run, from peers. They include peers that have left. */
 MBT_API uint64_t mbt_torrent_bytes_downloaded(struct mbt_torrent *t);
+MBT_API uint64_t mbt_torrent_bytes_uploaded(struct mbt_torrent *t);
+MBT_API uint64_t mbt_torrent_hash_failures(struct mbt_torrent *t); /* with web seeds */
 
 /*
  * Add a BEP 19 web seed for a single-file torrent. It runs when the session
