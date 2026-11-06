@@ -414,8 +414,8 @@ static struct dht_bucket *
 routing_bucket_for(struct mbt_dht *d, const uint8_t *id)
 {
 	int depth = bucket_index(d->id, id);
-	struct dht_bucket *best = d->buckets;
-	for (struct dht_bucket *b = d->buckets; b; b = b->next) {
+	struct dht_bucket *best = d->buckets;    /* mbt_dht_new makes the first bucket */
+	for (struct dht_bucket *b = best->next; b; b = b->next) {
 		if (b->depth <= depth)
 			best = b;
 	}

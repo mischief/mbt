@@ -106,11 +106,12 @@ draw_torrent_list(void)
 		int name_width = width - 30; /* space for stats */
 		if (name_width < 10) name_width = 10;
 		char namebuf[256];
+		int fit = name_width < (int)sizeof(namebuf) ? name_width : (int)sizeof(namebuf) - 1;
 		int nlen = strlen(name);
-		if (nlen > name_width) {
-			snprintf(namebuf, sizeof(namebuf), "%.*s...", name_width - 3, name);
+		if (nlen > fit) {
+			snprintf(namebuf, sizeof(namebuf), "%.*s...", fit - 3, name);
 		} else {
-			snprintf(namebuf, sizeof(namebuf), "%s", name);
+			snprintf(namebuf, sizeof(namebuf), "%.*s", fit, name);
 		}
 
 		const char *state = "";
