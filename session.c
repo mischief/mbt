@@ -26,6 +26,8 @@
 #include "udp_mux.h"
 #include "mbt/log.h"
 #include "mbt/lsd.h"
+#include "mbt/mse.h"
+#include "mbt/sha1_compat.h"
 #include "mbt/dht.h"
 #include "mbt/metainfo.h"
 #include "internal.h"
@@ -101,6 +103,9 @@ struct pending_utp_connect {
 
 STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 
+struct pending_utp_accept;
+LIST_HEAD(pending_accept_list, pending_utp_accept);
+
 /* --- Session --- */
 
 struct mbt_session {
@@ -116,6 +121,7 @@ struct mbt_session {
 	uint16_t listen_port;
 	int disable_tcp;
 	int disable_utp;
+	enum mbt_encryption encryption;
 	struct mbt_timers timers;
 	int max_peers;
 	int max_pieces_per_peer;
@@ -181,6 +187,7 @@ struct mbt_session {
 	/* Pending outgoing connections */
 	struct pending_connect_list pending;
 	struct pending_utp_connect_list pending_utp;
+	struct pending_accept_list pending_accepts; /* conns waiting for a BT handshake */
 
 	/* Rate limiting */
 	struct mbt_ratelimit *upload_limit;
@@ -333,6 +340,32 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 }
 
 static void session_generate_peer_id(uint8_t *id);
+static void pending_accept_mse(struct mbt_session *s, struct mbt_conn *conn,
+                               const void *seed, size_t len);
+
+/* Wrap a new outgoing conn in MSE if the policy calls for it. */
+static int
+session_wrap_dial(struct mbt_session *s, struct mbt_torrent *t, const char *addr,
+                  uint16_t port, struct mbt_conn **conn)
+{
+	struct mbt_peer_entry *pe = mbt_peerdb_find(mbt_torrent_peerdb(t), addr, port);
+	unsigned provide = MBT_MSE_RC4;
+	struct mbt_conn *wrapped;
+	int rv;
+
+	if (s->encryption == MBT_ENCRYPTION_DISABLE)
+		return 0;
+	if (s->encryption == MBT_ENCRYPTION_PREFER) {
+		if (pe && pe->mse_no)
+			return 0;
+		provide |= MBT_MSE_PLAINTEXT;
+	}
+	rv = mbt_mse_client(s->ev, *conn, mbt_torrent_infohash(t)->hash_sha1, provide, &wrapped);
+	if (rv < 0)
+		return rv;
+	*conn = wrapped;
+	return 0;
+}
 
 /* --- Pending connect handler --- */
 
@@ -406,10 +439,18 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 		goto fail;
 	}
 
+	rv = session_wrap_dial(s, pc->torrent, pc->addr, pc->port, &conn);
+	if (rv < 0) {
+		mbt_conn_free(conn);
+		pc->fd = -1;
+		goto fail;
+	}
+
 	/* Hand to torrent — torrent takes ownership of conn */
 	rv = mbt_torrent_add_peer(pc->torrent, conn, pc->source);
 	if (rv < 0) {
 		mbt_conn_free(conn);
+		pc->fd = -1;
 		goto fail;
 	}
 
@@ -421,7 +462,8 @@ pending_connect_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	return;
 
 fail:
-	close(pc->fd);
+	if (pc->fd >= 0)
+		close(pc->fd);
 	if (pc->io)
 		mbt_ev_io_free(pc->io);
 	if (pc->timeout)
@@ -501,9 +543,11 @@ pending_utp_connect_event(struct mbt_conn *c, int err, void *v)
 	struct mbt_conn *conn = pc->conn;
 	struct mbt_torrent *torrent = pc->torrent;
 	enum mbt_peer_source source = pc->source;
-	free(pc); /* conn ownership passes to torrent */
+	int rv = session_wrap_dial(s, torrent, pc->addr, pc->port, &conn);
 
-	int rv = mbt_torrent_add_peer(torrent, conn, source);
+	free(pc); /* conn ownership passes to torrent */
+	if (rv == 0)
+		rv = mbt_torrent_add_peer(torrent, conn, source);
 	if (rv < 0)
 		mbt_conn_free(conn);
 }
@@ -561,9 +605,23 @@ pending_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	if (pa->hs_got < HANDSHAKE_SIZE)
 		return;
 
-	if (pa->hs[0] != 19 || memcmp(pa->hs + 1, "BitTorrent protocol", 19) != 0) {
+	int plain = pa->hs[0] == 19 && memcmp(pa->hs + 1, "BitTorrent protocol", 19) == 0;
+
+	if (plain ? s->encryption == MBT_ENCRYPTION_REQUIRE
+	          : s->encryption == MBT_ENCRYPTION_DISABLE) {
 		close(pa->fd);
 		mbt_ev_io_free(pa->io);
+		free(pa);
+		return;
+	}
+	if (!plain) {
+		struct mbt_conn *mc;
+
+		mbt_ev_io_free(pa->io);
+		if (mbt_conn_new(s->ev, &mc, pa->fd, NULL, NULL, NULL) < 0)
+			close(pa->fd);
+		else
+			pending_accept_mse(s, mc, pa->hs, pa->hs_got);
 		free(pa);
 		return;
 	}
@@ -646,15 +704,54 @@ struct pending_utp_accept {
 	struct mbt_conn    *conn;
 	unsigned char       hs[HANDSHAKE_SIZE];
 	size_t              hs_got;
+	int                 mse;     /* conn is an MSE conn */
+	LIST_ENTRY(pending_utp_accept) next;
 };
 
 static void
 pending_utp_accept_free(struct pending_utp_accept *pa, int close_conn)
 {
+	LIST_REMOVE(pa, next);
 	if (close_conn)
 		mbt_conn_free(pa->conn);
 	free(pa);
 }
+
+/* MSE: find the torrent with SHA1("req2" + infohash) == hash. */
+static int
+session_mse_lookup(const uint8_t hash[20], uint8_t skey[20], void *arg)
+{
+	struct mbt_session *s = arg;
+	struct session_torrent *st;
+
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		uint8_t got[20];
+		SHA1_CTX ctx;
+
+		SHA1Init(&ctx);
+		SHA1Update(&ctx, (const uint8_t *)"req2", 4);
+		SHA1Update(&ctx, st->ih->hash_sha1, 20);
+		SHA1Final(got, &ctx);
+		if (memcmp(got, hash, 20) == 0) {
+			memcpy(skey, st->ih->hash_sha1, 20);
+			return 0;
+		}
+	}
+	return -ENOENT;
+}
+
+static int
+session_accept_mse(struct mbt_session *s, struct mbt_conn *conn, const void *seed,
+                   size_t len, struct mbt_conn **out)
+{
+	unsigned provide = MBT_MSE_RC4;
+
+	if (s->encryption == MBT_ENCRYPTION_PREFER)
+		provide |= MBT_MSE_PLAINTEXT;
+	return mbt_mse_server(s->ev, conn, seed, len, session_mse_lookup, s, provide, out);
+}
+
+static void pending_utp_event(struct mbt_conn *c, int err, void *v);
 
 static void
 pending_utp_read(struct mbt_conn *c, void *v)
@@ -671,7 +768,22 @@ pending_utp_read(struct mbt_conn *c, void *v)
 		return;
 
 	/* Validate BT handshake */
-	if (pa->hs[0] != 19 || memcmp(pa->hs + 1, "BitTorrent protocol", 19) != 0) {
+	int plain = pa->hs[0] == 19 && memcmp(pa->hs + 1, "BitTorrent protocol", 19) == 0;
+
+	if (!pa->mse && !plain && s->encryption != MBT_ENCRYPTION_DISABLE) {
+		struct mbt_conn *mc;
+
+		if (session_accept_mse(s, pa->conn, pa->hs, pa->hs_got, &mc) < 0) {
+			pending_utp_accept_free(pa, 1);
+			return;
+		}
+		pa->conn = mc;
+		pa->mse = 1;
+		pa->hs_got = 0;
+		mbt_conn_set_callbacks(mc, pending_utp_read, pending_utp_event, pa);
+		return;
+	}
+	if (!plain || (!pa->mse && s->encryption == MBT_ENCRYPTION_REQUIRE)) {
 		pending_utp_accept_free(pa, 1);
 		return;
 	}
@@ -716,7 +828,7 @@ pending_utp_read(struct mbt_conn *c, void *v)
 	mbt_log_info(MBT_LOG_SESSION, "incoming uTP peer %s:%hu", paddr, pport);
 
 	struct mbt_conn *conn = pa->conn;
-	free(pa); /* conn ownership transferred to torrent */
+	pending_utp_accept_free(pa, 0); /* conn ownership transferred to torrent */
 
 	int rv = mbt_torrent_add_peer_incoming(st->torrent, conn, ext, their_id);
 	if (rv < 0)
@@ -742,9 +854,30 @@ utp_accept_cb(struct mbt_utp_ctx *ctx, struct mbt_conn *conn,
 	if (!pa) { mbt_conn_free(conn); return; }
 	pa->session = s;
 	pa->conn = conn;
+	LIST_INSERT_HEAD(&s->pending_accepts, pa, next);
 
 	mbt_conn_set_watermark(conn, 1);
 	mbt_conn_set_callbacks(conn, pending_utp_read, pending_utp_event, pa);
+}
+
+/* conn sent bytes that are not a plaintext handshake. Takes ownership. */
+static void
+pending_accept_mse(struct mbt_session *s, struct mbt_conn *conn, const void *seed, size_t len)
+{
+	struct pending_utp_accept *pa = calloc(1, sizeof(*pa));
+	struct mbt_conn *mc;
+
+	if (!pa || session_accept_mse(s, conn, seed, len, &mc) < 0) {
+		free(pa);
+		mbt_conn_free(conn);
+		return;
+	}
+	pa->session = s;
+	pa->conn = mc;
+	pa->mse = 1;
+	LIST_INSERT_HEAD(&s->pending_accepts, pa, next);
+	mbt_conn_set_watermark(mc, 1);
+	mbt_conn_set_callbacks(mc, pending_utp_read, pending_utp_event, pa);
 }
 
 static void
@@ -867,6 +1000,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->listen_port = cfg->listen_port;
 	s->disable_tcp = cfg->disable_tcp;
 	s->disable_utp = cfg->disable_utp;
+	s->encryption = cfg->encryption;
 	s->timers = cfg->timers;
 	if (cfg->upload_rate)
 		mbt_ratelimit_new(&s->upload_limit, cfg->upload_rate, 0);
@@ -897,6 +1031,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	STAILQ_INIT(&s->torrents);
 	STAILQ_INIT(&s->pending);
 	STAILQ_INIT(&s->pending_utp);
+	LIST_INIT(&s->pending_accepts);
 
 	session_generate_peer_id(s->peer_id);
 	{
@@ -978,6 +1113,11 @@ mbt_session_free(struct mbt_session *s)
 		STAILQ_REMOVE_HEAD(&s->pending_utp, next);
 		pending_utp_connect_free(puc, 1);
 	}
+
+	struct pending_utp_accept *pua;
+	while ((pua = LIST_FIRST(&s->pending_accepts)))
+		pending_utp_accept_free(pua, 1);
+
 
 	/* Free torrents before utp_ctx: peers hold uTP conns; peer_free calls
 	 * conn_free which transitions them to FIN_SENT (removing from ctx).

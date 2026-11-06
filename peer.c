@@ -19,6 +19,7 @@
 #include "mbt/bitmap.h"
 #include "mbt/be.h"
 #include "mbt/holepunch.h"
+#include "mbt/mse.h"
 #include "internal.h"
 #include "version.h"
 #include "banned.h"
@@ -1104,6 +1105,18 @@ int
 mbt_peer_has_extension(struct mbt_peer *p)
 {
 	return p->flags & MBT_PEER_FLAG_EXTENSION;
+}
+
+unsigned
+mbt_peer_encryption(struct mbt_peer *p)
+{
+	return mbt_mse_selected(p->conn);
+}
+
+int
+mbt_peer_mse_incomplete(struct mbt_peer *p)
+{
+	return mbt_mse_incomplete(p->conn);
 }
 
 uint32_t

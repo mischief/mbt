@@ -1570,6 +1570,18 @@ on_error(struct mbt_peer *p, int err, void *arg)
 	struct torrent_peer *tp = find_torrent_peer(t, p);
 	if (!tp) return;
 
+	/* MSE failed on a conn we dialed: use plaintext on the next dial. */
+	if (mbt_peer_mse_incomplete(p)) {
+		/* mbt_session_add_peer does not record the peer, so do that here. */
+		struct mbt_peer_entry *pe = mbt_peerdb_insert(&t->peerdb, mbt_peer_addr(p),
+		                                              mbt_peer_conn_port(p),
+		                                              mbt_peer_source(p));
+		if (pe) {
+			pe->mse_no = 1;
+			pe->state = MBT_PEERDB_KNOWN;
+		}
+	}
+
 	/* We dialed ourselves: remember the address so we never dial it again,
 	 * and drop the entry from the peer list. */
 	if (err == -ELOOP) {

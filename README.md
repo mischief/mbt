@@ -88,6 +88,8 @@ Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_lsd`, `fuzz_dht`, `fuzz_magnet`.
 | 29 | µTP | ❌ Not implemented |
 | 55 | Holepunch | ❌ Not implemented |
 
+MSE/PE stream encryption has no BEP. mbt implements it: see `mbt_mse(3)`.
+
 ## Quick Start
 
 ```c

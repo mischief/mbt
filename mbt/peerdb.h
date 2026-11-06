@@ -36,6 +36,7 @@ struct mbt_peer_entry {
 	int source;              /* mbt_peer_source — how we first found this peer */
 	uint8_t flags;           /* PEX added.f wire flags: 0x04 = supports uTP */
 	uint8_t utp_cap;         /* enum mbt_utp_cap — learned transport capability */
+	uint8_t mse_no;          /* an MSE handshake failed; dial in plaintext */
 	int failures;            /* consecutive failure count */
 	uint64_t last_seen;      /* last time reported by tracker/DHT/PEX (usec) */
 	uint64_t last_attempt;   /* last time we tried connecting (usec) */

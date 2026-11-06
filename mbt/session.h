@@ -28,6 +28,13 @@ struct mbt_add_torrent_cfg {
 	const char *data_dir;       /* passed to mbt_torrent_data_dir(); NULL = unknown */
 };
 
+/* MSE/PE policy for peer connections. */
+enum mbt_encryption {
+	MBT_ENCRYPTION_PREFER = 0, /* dial with MSE, then plaintext if that fails; accept both */
+	MBT_ENCRYPTION_REQUIRE,    /* RC4 only, in both directions */
+	MBT_ENCRYPTION_DISABLE,    /* plaintext only, in both directions */
+};
+
 struct mbt_session_config {
 	struct mbt_ev *ev;
 
@@ -68,6 +75,8 @@ struct mbt_session_config {
 	 * [8, 1024] and rounded up to a power of two. The single uTP
 	 * memory-vs-throughput knob. */
 	uint32_t utp_window_pkts;
+
+	enum mbt_encryption encryption;
 };
 
 /* Session lifecycle */

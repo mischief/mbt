@@ -761,6 +761,21 @@ opt_timers(lua_State *L, int idx, struct mbt_timers *t)
 }
 
 /* mbt.session{...}: see README.md for the options. */
+static enum mbt_encryption
+opt_encryption(lua_State *L, int idx)
+{
+	static const char *const names[] = {"prefer", "require", "disable", NULL};
+	static const enum mbt_encryption vals[] = {
+		MBT_ENCRYPTION_PREFER, MBT_ENCRYPTION_REQUIRE, MBT_ENCRYPTION_DISABLE,
+	};
+	int i;
+
+	lua_getfield(L, idx, "encryption");
+	i = luaL_checkoption(L, -1, "prefer", names);
+	lua_pop(L, 1);
+	return vals[i];
+}
+
 static int
 l_session(lua_State *L)
 {
@@ -801,6 +816,7 @@ l_session(lua_State *L)
 	cfg.upload_rate = (uint64_t)opt_int(L, 1, "upload_rate", 0);
 	cfg.download_rate = (uint64_t)opt_int(L, 1, "download_rate", 0);
 	cfg.utp_window_pkts = (uint32_t)opt_int(L, 1, "utp_window_pkts", 0);
+	cfg.encryption = opt_encryption(L, 1);
 	cfg.mbt_lsd_announce = opt_bool(L, 1, "lsd", false);
 	cfg.enable_pcp = opt_bool(L, 1, "pcp", false);
 	cfg.picker = opt_picker(L, 1);

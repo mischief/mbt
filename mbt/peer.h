@@ -138,6 +138,10 @@ MBT_API void mbt_peer_disconnect(struct mbt_peer *p);
 MBT_API enum mbt_peer_state mbt_peer_state(struct mbt_peer *p);
 MBT_API int mbt_peer_choked(struct mbt_peer *p);      /* are we choked by them? */
 MBT_API int mbt_peer_interested(struct mbt_peer *p);   /* are we interested? */
+/* Selected mbt_mse_method, or 0 for a plaintext conn. */
+MBT_API unsigned mbt_peer_encryption(struct mbt_peer *p);
+/* 1 if the MSE handshake did not finish on this peer's conn. */
+MBT_API int mbt_peer_mse_incomplete(struct mbt_peer *p);
 MBT_API struct mbt_bitmap *mbt_peer_bitfield(struct mbt_peer *p);
 
 /* Commands (call down from torrent) */

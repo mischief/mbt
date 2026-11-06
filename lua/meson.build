@@ -35,4 +35,7 @@ if lua_bin.found() and get_option('tests')
   test('lua', lua_bin, depends: mbt_lua, args: files('mbt_test.lua'),
     env: {'LUA_CPATH': meson.current_build_dir() / '?.so;;'},
     timeout: 60)
+  test('lua_mse', lua_bin, depends: mbt_lua, args: files('mse_test.lua'),
+    env: {'LUA_CPATH': meson.current_build_dir() / '?.so;;'},
+    timeout: 60)
 endif

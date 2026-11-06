@@ -237,6 +237,18 @@ and
 return the current settings.
 Per-torrent limits are also available via
 .Xr mbt_torrent 3 .
+.Pp
+The
+.Fa encryption
+field of the config sets the MSE/PE policy, see
+.Xr mbt_mse 3 .
+.Dv MBT_ENCRYPTION_PREFER ,
+the default, dials with MSE, dials again in plaintext if the MSE handshake
+fails, and accepts both.
+.Dv MBT_ENCRYPTION_REQUIRE
+uses RC4 in both directions and drops plaintext peers.
+.Dv MBT_ENCRYPTION_DISABLE
+uses plaintext only.
 .Sh RETURN VALUES
 Functions returning
 .Ft int

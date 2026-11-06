@@ -126,7 +126,7 @@ on_signal(int sig)
 static void
 usage(const char *prog)
 {
-	fprintf(stderr, "usage: %s [-dRqDPSLTU] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] [-W pkts] <file.torrent | magnet:?... | infohash>\n", prog);
+	fprintf(stderr, "usage: %s [-dRqDPSLTU] [-e mode] [-l port] [-o dir] [-p max_peers] [-r KB/s] [-s strategy] [-W pkts] <file.torrent | magnet:?... | infohash>\n", prog);
 	fprintf(stderr, "  -d            enable debug logging\n");
 	fprintf(stderr, "  -R            enable trace logging (all components, very verbose)\n");
 	fprintf(stderr, "  -q            suppress progress output\n");
@@ -136,6 +136,7 @@ usage(const char *prog)
 	fprintf(stderr, "  -S            seed after download completes\n");
 	fprintf(stderr, "  -T            disable TCP (uTP only)\n");
 	fprintf(stderr, "  -U            disable uTP (TCP only)\n");
+	fprintf(stderr, "  -e mode       MSE encryption: prefer (default), require or disable\n");
 	fprintf(stderr, "  -l port       listen port (default: random)\n");
 	fprintf(stderr, "  -o dir        download directory (default: .)\n");
 	fprintf(stderr, "  -p N          max peers per torrent (default: 30)\n");
@@ -160,11 +161,12 @@ main(int argc, char *argv[])
 	int use_pcp = 0;
 	int max_peers = 0;
 	int utp_window = 0;
+	enum mbt_encryption encryption = MBT_ENCRYPTION_PREFER;
 	int listen_port = 0;
 	uint64_t dl_rate = 0;
 	mbt_picker_fn picker = mbt_picker_rarest;
 
-	while ((ch = getopt(argc, argv, "dhqDPSLRTUl:o:p:r:s:W:")) != -1) {
+	while ((ch = getopt(argc, argv, "dhqDPSLRTUe:l:o:p:r:s:W:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -192,6 +194,18 @@ main(int argc, char *argv[])
 			break;
 		case 'P':
 			use_pcp = 1;
+			break;
+		case 'e':
+			if (strcmp(optarg, "prefer") == 0)
+				encryption = MBT_ENCRYPTION_PREFER;
+			else if (strcmp(optarg, "require") == 0)
+				encryption = MBT_ENCRYPTION_REQUIRE;
+			else if (strcmp(optarg, "disable") == 0)
+				encryption = MBT_ENCRYPTION_DISABLE;
+			else {
+				fprintf(stderr, "unknown encryption: %s (use prefer, require or disable)\n", optarg);
+				return 1;
+			}
 			break;
 		case 'l':
 			listen_port = mbt_arg_int(optarg, 0, UINT16_MAX);
@@ -260,6 +274,7 @@ main(int argc, char *argv[])
 	cfg.download_rate = dl_rate;
 	cfg.disable_tcp = disable_tcp;
 	cfg.disable_utp = disable_utp;
+	cfg.encryption = encryption;
 	if (max_peers)
 		cfg.max_peers = max_peers;
 	if (utp_window)

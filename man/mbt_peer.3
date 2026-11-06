@@ -25,6 +25,8 @@
 .Nm mbt_peer_send_metadata_data ,
 .Nm mbt_peer_has_extension ,
 .Nm mbt_peer_flags ,
+.Nm mbt_peer_encryption ,
+.Nm mbt_peer_mse_incomplete ,
 .Nm mbt_peer_metadata_size ,
 .Nm mbt_peer_reqq ,
 .Nm mbt_peer_addr ,
@@ -82,6 +84,10 @@
 .Fn mbt_peer_has_extension "struct mbt_peer *p"
 .Ft uint32_t
 .Fn mbt_peer_flags "struct mbt_peer *p"
+.Ft unsigned
+.Fn mbt_peer_encryption "struct mbt_peer *p"
+.Ft int
+.Fn mbt_peer_mse_incomplete "struct mbt_peer *p"
 .Ft size_t
 .Fn mbt_peer_metadata_size "struct mbt_peer *p"
 .Ft int

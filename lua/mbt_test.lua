@@ -28,9 +28,21 @@ local function raises(fn, want)
 end
 
 -- Bound a wait, so a broken transfer fails and does not hang.
+-- A deadline covers one mbt.run. Its sleep can outlive that run.
+local runs = 0
+local mbt_run = mbt.run
+mbt.run = function(...)
+	runs = runs + 1
+	return mbt_run(...)
+end
+
 local function deadline(ms, what)
+	local run = runs
 	mbt.spawn(function()
 		mbt.sleep(ms)
+		if run ~= runs then
+			return
+		end
 		io.stderr:write("timeout: ", what, "\n")
 		cleanup()
 		os.exit(1)

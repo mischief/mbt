@@ -45,6 +45,8 @@ removed torrent.
   - `dht_max_stored`: infohashes the session's DHT node stores (default 64).
   - `picker`: `"rarest"` (default), `"random"` or `"sequential"`.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
+  - `encryption`: `"prefer"` (default), `"require"` or `"disable"`. See
+    `enum mbt_encryption`.
   - `max_peers`, `max_pieces_per_peer`, `min_peers_before_download`, `reqq`,
     `max_pipeline`, `utp_window_pkts`: see `struct mbt_session_config`.
   - `http`: default true in builds with libcurl. false stops HTTP and HTTPS

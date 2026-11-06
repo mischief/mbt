@@ -229,10 +229,11 @@
 - [ ] memory: lazy-allocate rbuf/sbuf/queues on first data, grow on demand (mbt_ringbuf); idle choked peers then cost ~1 KiB, not a full window
 - [ ] cleanup: seq_lt/seq_le helpers for the (int16_t) wrap compares; sanity-check reply_micro against bogus peer timestamps; confirm all-or-nothing utp_conn_write matches the mbt_conn contract
 
-### Message-stream encryption (MSE/PE, BEP 8)
-- [ ] DH key exchange + RC4 obfuscation. Needed to interop with peers that
-      REQUIRE encryption (e.g. transmission "require encryption" rejects our
-      plaintext handshake). uTP transport itself is unaffected.
+### Message-stream encryption (MSE/PE)
+- [x] DH key exchange + RC4 obfuscation, over TCP and uTP (`mse.c`, `mbt/mse.h`)
+- [x] Policy: prefer with plaintext fallback, require, disable
+- [ ] PEX: send and use the prefers-encryption flag (0x01)
+- [ ] BEP 8 tracker peer obfuscation (a different feature from MSE)
 
 ### Holepunch (BEP 55)
 - [x] `holepunch.c` / `mbt/holepunch.h`
