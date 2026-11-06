@@ -146,6 +146,14 @@
 - [ ] Persistence: optional `-Dsqlite`, batched writes of `downloaded`, separate from live swarms
 - [ ] Measure one session with thousands of torrents
 
+### Many torrents in one session
+- [x] DHT: queue lookups per session, downloads before seeds
+- [ ] DHT and trackers: one scheduler with a budget per service
+- [ ] Spread each due time over the refresh window
+- [ ] Limit the torrents that announce at one time, and rotate the rest
+- [ ] Longer refresh for idle seeds
+- [ ] Rate that scales with the torrent count, with a hard cap
+
 ### Storage compatibility
 - [ ] Clean unsafe metadata paths like other clients, not refuse the torrent
 - [ ] `path.utf-8` and `name.utf-8`: prefer them over `path` and `name`

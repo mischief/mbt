@@ -69,7 +69,8 @@ struct session_torrent {
 	time_t last_dht_lookup;
 	time_t last_dht_announce;
 	time_t announce_lookup;  /* a lookup for the next announce started here */
-	int dht_want;            /* DHT_WANT_ bits; nonzero while on dht_queue */
+	int dht_want;            /* DHT_WANT_ bits; nonzero while on a dht_queue */
+	int dht_class;           /* DHT_Q_ index of that queue */
 	TAILQ_ENTRY(session_torrent) dht_entry;
 	int started_announced;   /* sent event=started on first announce */
 	int started_acked;       /* a tracker answered event=started */
@@ -114,6 +115,9 @@ struct pending_utp_connect {
 STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 
 #define LISTEN_TRIES 8
+/* A download looks up before a seed announces. */
+enum { DHT_Q_DOWNLOAD, DHT_Q_SEED, DHT_Q_COUNT };
+
 #define DHT_WANT_PEERS 1
 #define DHT_WANT_ANNOUNCE 2
 #define WEBSEED_NO_PEER_DELAY_MS 5000
@@ -214,7 +218,7 @@ struct mbt_session {
 
 	/* Torrents */
 	struct session_torrent_list torrents;
-	TAILQ_HEAD(, session_torrent) dht_queue;
+	TAILQ_HEAD(dht_queue_head, session_torrent) dht_queue[DHT_Q_COUNT];
 	struct mbt_ev_timer *dht_pump;
 
 	/* Pending outgoing connections */
@@ -1147,7 +1151,8 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->dht_no_bootstrap = cfg->dht_no_bootstrap;
 
 	STAILQ_INIT(&s->torrents);
-	TAILQ_INIT(&s->dht_queue);
+	for (int i = 0; i < DHT_Q_COUNT; i++)
+		TAILQ_INIT(&s->dht_queue[i]);
 	STAILQ_INIT(&s->pending);
 	STAILQ_INIT(&s->pending_utp);
 	LIST_INIT(&s->pending_accepts);
@@ -1482,6 +1487,22 @@ session_dht_start(struct mbt_session *s, struct mbt_infohash *ih, int announce)
 	return rv;
 }
 
+/* A torrent can finish while it waits, and a verify can show a full torrent. */
+static struct session_torrent *
+session_dht_next(struct mbt_session *s)
+{
+	struct session_torrent *st;
+
+	while ((st = TAILQ_FIRST(&s->dht_queue[DHT_Q_DOWNLOAD])) != NULL) {
+		if (!mbt_torrent_complete(st->torrent))
+			return st;
+		TAILQ_REMOVE(&s->dht_queue[DHT_Q_DOWNLOAD], st, dht_entry);
+		TAILQ_INSERT_TAIL(&s->dht_queue[DHT_Q_SEED], st, dht_entry);
+		st->dht_class = DHT_Q_SEED;
+	}
+	return TAILQ_FIRST(&s->dht_queue[DHT_Q_SEED]);
+}
+
 /* Start queued lookups. The node has a few slots, and a session can hold many torrents. */
 static void
 session_dht_pump_cb(struct mbt_ev_timer *timer, void *v)
@@ -1490,13 +1511,13 @@ session_dht_pump_cb(struct mbt_ev_timer *timer, void *v)
 	struct session_torrent *st;
 
 	(void)timer;
-	while (s->dht && (st = TAILQ_FIRST(&s->dht_queue)) != NULL) {
+	while (s->dht && (st = session_dht_next(s)) != NULL) {
 		int announce = (st->dht_want & DHT_WANT_ANNOUNCE) != 0;
 		int rv = session_dht_start(s, st->ih, announce);
 
 		if (rv == -EBUSY)
 			return;
-		TAILQ_REMOVE(&s->dht_queue, st, dht_entry);
+		TAILQ_REMOVE(&s->dht_queue[st->dht_class], st, dht_entry);
 		st->dht_want = 0;
 		if (rv < 0 && announce)
 			st->announce_lookup = 0;
@@ -1507,7 +1528,7 @@ session_dht_pump_cb(struct mbt_ev_timer *timer, void *v)
 static void
 session_dht_schedule(struct mbt_session *s)
 {
-	if (TAILQ_EMPTY(&s->dht_queue))
+	if (TAILQ_EMPTY(&s->dht_queue[DHT_Q_DOWNLOAD]) && TAILQ_EMPTY(&s->dht_queue[DHT_Q_SEED]))
 		return;
 	if (s->dht_pump)
 		mbt_ev_timer_mod(s->dht_pump, 0);
@@ -1520,8 +1541,10 @@ session_dht_request(struct mbt_session *s, struct session_torrent *st, int want)
 {
 	if (!s->dht)
 		return;
-	if (!st->dht_want)
-		TAILQ_INSERT_TAIL(&s->dht_queue, st, dht_entry);
+	if (!st->dht_want) {
+		st->dht_class = mbt_torrent_complete(st->torrent) ? DHT_Q_SEED : DHT_Q_DOWNLOAD;
+		TAILQ_INSERT_TAIL(&s->dht_queue[st->dht_class], st, dht_entry);
+	}
 	st->dht_want |= want;
 	session_dht_schedule(s);
 }
@@ -1530,7 +1553,7 @@ static void
 session_dht_unqueue(struct mbt_session *s, struct session_torrent *st)
 {
 	if (st->dht_want)
-		TAILQ_REMOVE(&s->dht_queue, st, dht_entry);
+		TAILQ_REMOVE(&s->dht_queue[st->dht_class], st, dht_entry);
 	st->dht_want = 0;
 }
 

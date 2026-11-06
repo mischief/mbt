@@ -35,7 +35,7 @@ struct mbt_dht_config {
 	int max_stored;             /* infohashes stored, about 300 bytes each; default 64 */
 	int max_items;              /* BEP 44 items stored, up to about 1.3 KB each; default 64 */
 	int peer_ttl;               /* seconds an announce lasts; default 7200 */
-	int send_rate;              /* queries per second; default 20 */
+	int send_rate;              /* queries per second; default 50 */
 	mbt_dht_verify_cb verify;   /* NULL = refuse mutable items */
 	void *verify_arg;
 };

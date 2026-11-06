@@ -57,7 +57,7 @@ removed torrent.
     same directory adds them again, with their trackers and web seeds.
     Fallback trackers are not saved.
   - `dht_max_stored`: infohashes the session's DHT node stores (default 64).
-  - `dht_send_rate`: queries per second from the session's DHT node (default 20).
+  - `dht_send_rate`: queries per second from the session's DHT node (default 50).
   - `picker`: `"rarest"` (default), `"random"` or `"sequential"`.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
   - `encryption`: `"prefer"` (default), `"require"` or `"disable"`. See
@@ -197,7 +197,7 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 ## DHT
 
 `mbt.dht{port = 0, id = hex, verify = fn, peer_ttl = 7200, max_stored = 64,
-max_items = 64, send_rate = 20}` makes a DHT node on its own, with
+max_items = 64, send_rate = 50}` makes a DHT node on its own, with
 no session. `port` 0 binds a free port. `id` is 40 hex digits, and the default
 comes from the machine and port. `verify` is `function(k, sig, payload)` for
 BEP 44 mutable items: return true to accept. It runs at once under libmbt, so
