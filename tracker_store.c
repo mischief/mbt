@@ -20,6 +20,8 @@
 #define MAX_PEERS_PER_TORRENT 200
 #define MAX_TORRENTS 4096
 #define PEER_EXPIRE_SECS (30 * 60) /* 30 minutes */
+#define GC_DIVISOR 6
+#define GC_MAX_SECS 300
 #define TORRENT_BUCKETS 256
 
 struct ts_peer {
@@ -41,6 +43,7 @@ struct mbt_tracker_store {
 	SLIST_HEAD(, ts_torrent) torrents[TORRENT_BUCKETS];
 	int num_torrents;
 	int num_peers;
+	int expire_secs;
 	uint8_t secret[16]; /* for connection_id generation */
 };
 
@@ -51,6 +54,7 @@ mbt_tracker_store_new(struct mbt_tracker_store **out)
 {
 	struct mbt_tracker_store *s = calloc(1, sizeof(*s));
 	if (!s) return -1;
+	s->expire_secs = PEER_EXPIRE_SECS;
 	/* Random secret for connection_id HMAC */
 	arc4random_buf(s->secret, sizeof(s->secret));
 	*out = s;
@@ -72,6 +76,26 @@ mbt_tracker_store_free(struct mbt_tracker_store *s)
 }
 
 int mbt_tracker_store_num_torrents(struct mbt_tracker_store *s) { return s->num_torrents; }
+void
+mbt_tracker_store_set_expire(struct mbt_tracker_store *s, int secs)
+{
+	if (secs > 0)
+		s->expire_secs = secs;
+}
+
+/* A server's timer runs the store gc this often. */
+uint64_t
+mbt_tracker_store_gc_usec(const struct mbt_tracker_store *s)
+{
+	int secs = s->expire_secs / GC_DIVISOR;
+
+	if (secs < 1)
+		secs = 1;
+	if (secs > GC_MAX_SECS)
+		secs = GC_MAX_SECS;
+	return (uint64_t)secs * 1000000ULL;
+}
+
 int mbt_tracker_store_num_peers(struct mbt_tracker_store *s) { return s->num_peers; }
 
 void
@@ -303,7 +327,7 @@ mbt_tracker_store_gc(struct mbt_tracker_store *s)
 			/* Expire stale peers */
 			int j = 0;
 			while (j < t->peer_count) {
-				if (now - t->peers[j].last_seen > PEER_EXPIRE_SECS) {
+				if (now - t->peers[j].last_seen > s->expire_secs) {
 					s->num_peers--;
 					if (t->peers[j].is_seeder) t->seeders--; else t->leechers--;
 					t->peers[j] = t->peers[--t->peer_count];

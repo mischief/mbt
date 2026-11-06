@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "mbt/event.h"
 #include "mbt/tracker.h"
 #include "mbt/tracker_server.h"
 #include "mbt/log.h"
@@ -39,6 +40,7 @@ struct mbt_tracker_server {
 	uint16_t port;
 	struct mbt_tracker_store *store;
 	int owns_store;
+	struct mbt_ev_timer *gc_timer;
 };
 
 /* --- Hash table helpers --- */
@@ -177,6 +179,15 @@ tracker_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 /* --- Public API --- */
 
+static void
+tracker_gc_cb(struct mbt_ev_timer *timer, void *arg)
+{
+	struct mbt_tracker_server *ts = arg;
+
+	mbt_tracker_store_gc(ts->store);
+	mbt_ev_timer_mod(timer, mbt_tracker_store_gc_usec(ts->store));
+}
+
 int
 mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint16_t port, struct mbt_tracker_store *store)
 {
@@ -191,6 +202,12 @@ mbt_tracker_server_new(struct mbt_tracker_server **out, struct mbt_ev *ev, uint1
 	int rv = mbt_listen_udp(&ts->listener, ev, port, tracker_recv, ts);
 	if (rv < 0) { free(ts); return rv; }
 	ts->port = ts->listener.port;
+	if ((rv = mbt_ev_timer_new(ev, &ts->gc_timer, mbt_tracker_store_gc_usec(ts->store),
+	                           tracker_gc_cb, ts)) < 0) {
+		mbt_listener_close(&ts->listener);
+		free(ts);
+		return rv;
+	}
 
 	mbt_log_info(MBT_LOG_SESSION, "tracker server listening on UDP port %hu", port);
 	*out = ts;
@@ -207,6 +224,8 @@ void
 mbt_tracker_server_free(struct mbt_tracker_server *ts)
 {
 	if (!ts) return;
+	if (ts->gc_timer)
+		mbt_ev_timer_free(ts->gc_timer);
 	mbt_listener_close(&ts->listener);
 	if (ts->store && ts->owns_store) mbt_tracker_store_free(ts->store);
 	free(ts);

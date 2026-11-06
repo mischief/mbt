@@ -124,5 +124,11 @@ Returns the number of torrents known by this HTTP server instance.
 .It .Fn mbt_tracker_http_num_peers
 Returns the number of peers known by this HTTP server instance.
 .El
+.Pp
+Each server runs
+.Fn mbt_tracker_store_gc
+on a timer.
+.Fn mbt_tracker_store_set_expire
+sets the age at which a silent peer goes, 30 minutes by default.
 .Sh SEE ALSO
 .Xr mbt 3

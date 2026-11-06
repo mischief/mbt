@@ -130,7 +130,7 @@
 - [x] 100% man page coverage (check-docs.sh with mandoc lint)
 
 ### Medium-term (swarm quality)
-- [ ] Tracker store: call `mbt_tracker_store_gc` from a timer; nothing runs it yet
+- [x] Tracker store: servers expire stale peers on a timer
 - [ ] HTTP tracker server: IPv6 support (compact6, dual-stack listen)
 
 ### Storage compatibility

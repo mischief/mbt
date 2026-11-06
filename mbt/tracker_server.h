@@ -46,7 +46,9 @@ MBT_API uint16_t mbt_tracker_http_port(struct mbt_tracker_http *th);
 MBT_API int mbt_tracker_http_num_torrents(struct mbt_tracker_http *th);
 MBT_API int mbt_tracker_http_num_peers(struct mbt_tracker_http *th);
 
-/* Expire stale peers (>30min) and remove empty torrents */
+/* Expire stale peers (30 minutes by default) and remove empty torrents. Servers
+ * run this on a timer. */
+MBT_API void mbt_tracker_store_set_expire(struct mbt_tracker_store *s, int secs);
 MBT_API void mbt_tracker_store_gc(struct mbt_tracker_store *s);
 
 #endif

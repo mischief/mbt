@@ -37,6 +37,7 @@ struct mbt_tracker_http {
 	uint16_t port;
 	TAILQ_HEAD(, http_conn) conns;
 	int nconns;
+	struct mbt_ev_timer *gc_timer;
 };
 
 /* A connection that has not sent its request line. */
@@ -237,6 +238,15 @@ http_accept_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 /* --- Public API --- */
 
+static void
+http_gc_cb(struct mbt_ev_timer *timer, void *arg)
+{
+	struct mbt_tracker_http *th = arg;
+
+	mbt_tracker_store_gc(th->store);
+	mbt_ev_timer_mod(timer, mbt_tracker_store_gc_usec(th->store));
+}
+
 int
 mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev, uint16_t port, struct mbt_tracker_store *store)
 {
@@ -252,6 +262,12 @@ mbt_tracker_http_new(struct mbt_tracker_http **out, struct mbt_ev *ev, uint16_t 
 	if (rv < 0) { free(th); return rv; }
 
 	th->port = th->listener.port;
+	if ((rv = mbt_ev_timer_new(ev, &th->gc_timer, mbt_tracker_store_gc_usec(th->store),
+	                           http_gc_cb, th)) < 0) {
+		mbt_listener_close(&th->listener);
+		free(th);
+		return rv;
+	}
 	mbt_log_info(MBT_LOG_SESSION, "HTTP tracker listening on port %hu", th->port);
 	*out = th;
 	return 0;
@@ -261,6 +277,8 @@ void
 mbt_tracker_http_free(struct mbt_tracker_http *th)
 {
 	if (!th) return;
+	if (th->gc_timer)
+		mbt_ev_timer_free(th->gc_timer);
 	mbt_listener_close(&th->listener);
 	while (!TAILQ_EMPTY(&th->conns))
 		conn_free(TAILQ_FIRST(&th->conns));

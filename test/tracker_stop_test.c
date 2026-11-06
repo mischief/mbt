@@ -140,6 +140,33 @@ main(void)
 	assert(mbt_session_stops_pending(s2) == 0);
 	assert(mbt_tracker_server_num_peers(ts) == 0);
 
+	/* A client that vanishes with no stopped event ages out. */
+	struct mbt_storage_memory *m3 = mbt_storage_memory_new();
+	struct mbt_tracker_store *store;
+	struct mbt_tracker_server *ts2, *keep = ts;
+	struct mbt_session *s3;
+
+	assert(mbt_tracker_store_new(&store) == 0);
+	mbt_tracker_store_set_expire(store, 1);
+	assert(mbt_tracker_server_new(&ts2, ev, 0, store) == 0);
+	ts = ts2;
+	unsigned char *c;
+	size_t clen;
+
+	encode("c", &c, &clen);
+	s3 = new_session(m3);
+	assert(mbt_session_add_torrent_buf(s3, c, clen, NULL, NULL) == 0);
+	assert(wait_peers(1));
+	mbt_session_free(s3);
+	assert(mbt_tracker_server_num_peers(ts2) == 1);
+	assert(wait_peers(0));
+	assert(mbt_tracker_store_num_torrents(store) == 0);
+	mbt_tracker_server_free(ts2);
+	mbt_tracker_store_free(store);
+	mbt_storage_memory_destroy(m3);
+	free(c);
+	ts = keep;
+
 	/* A torrent that stopped does not announce again. */
 	mbt_session_reannounce(s2, mbt_torrent_infohash(t));
 	for (int i = 0; i < 100; i++)
