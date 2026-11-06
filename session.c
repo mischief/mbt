@@ -38,6 +38,7 @@
 #include "mbt/picker.h"
 #include "mbt/storage.h"
 #include "mbt/timers.h"
+#include "backoff.h"
 #include "cleanup.h"
 
 #define TORRENT_FILE_MAX (64 * 1024 * 1024)
@@ -69,6 +70,9 @@ struct session_torrent {
 	time_t last_dht_announce;
 	time_t announce_lookup;  /* a lookup for the next announce started here */
 	int started_announced;   /* sent event=started on first announce */
+	int started_acked;       /* a tracker answered event=started */
+	int announce_settled;    /* this round has a reply, or a retry timer */
+	struct mbt_backoff announce_backoff;
 	int completed_announced; /* sent event=completed to tracker */
 	int emergency_reannounce; /* fired one early reannounce due to dry peerdb */
 	STAILQ_ENTRY(session_torrent) next;
@@ -1110,6 +1114,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	if (!s->timers.tracker_interval) s->timers.tracker_interval = 1800;
 	if (!s->timers.connect_timeout) s->timers.connect_timeout = 10;
 	if (!s->timers.accept_timeout) s->timers.accept_timeout = 30;
+	if (!s->timers.announce_retry) s->timers.announce_retry = 5;
 	s->max_peers = cfg->max_peers ? cfg->max_peers : 30;
 	s->max_pieces_per_peer = cfg->max_pieces_per_peer ? cfg->max_pieces_per_peer : 4;
 	s->min_peers_before_download = cfg->min_peers_before_download;
@@ -1575,6 +1580,8 @@ session_tracker_peer_cb(struct mbt_infohash *ih, const char *addr, uint16_t port
 
 static void session_reannounce_timer_cb(struct mbt_ev_timer *timer, void *v);
 
+#define ANNOUNCE_RETRY_MAX_USEC (300 * 1000000ULL)
+
 /* No connected peer, and none to try. */
 static int
 session_peers_absent(struct mbt_torrent *t)
@@ -1627,6 +1634,26 @@ session_webseed_release(struct mbt_session *s)
 }
 
 static void
+session_reannounce_arm(struct mbt_session *s, struct session_torrent *st, uint64_t delay)
+{
+	if (!st->reannounce_timer)
+		mbt_ev_timer_new(s->ev, &st->reannounce_timer, delay,
+		                 session_reannounce_timer_cb, st);
+	else
+		mbt_ev_timer_mod(st->reannounce_timer, delay);
+}
+
+/* All trackers failed so far in this round. A later success sets the interval. */
+static void
+session_announce_retry(struct mbt_session *s, struct session_torrent *st)
+{
+	if (st->announce_settled || st->stop_sent)
+		return;
+	st->announce_settled = 1;
+	session_reannounce_arm(s, st, mbt_backoff_next(&st->announce_backoff));
+}
+
+static void
 session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *arg)
 {
 	struct mbt_session *s = arg;
@@ -1638,12 +1665,18 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 
 	if (err < 0) {
 		mbt_log_warn(MBT_LOG_SESSION, "tracker announce failed: %s", strerror(-err));
+		if (st)
+			session_announce_retry(s, st);
 		return;
 	}
 
 	/* Schedule re-announce */
-	if (st)
+	if (st) {
 		st->emergency_reannounce = 0; /* fresh peers — allow one more emergency if needed */
+		st->announce_settled = 1;
+		st->started_acked = 1;
+		mbt_backoff_reset(&st->announce_backoff);
+	}
 	if (st && interval > 0 && !st->stop_sent) {
 		/* Use configured interval if shorter than server's */
 		if (s->timers.tracker_interval > 0 && s->timers.tracker_interval < interval)
@@ -1656,12 +1689,7 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 		uint64_t base = (uint64_t)interval * 1000000ULL;
 		uint64_t jitter = base / 4;
 		uint64_t delay = base - jitter / 2 + arc4random_uniform(jitter);
-		if (!st->reannounce_timer) {
-			mbt_ev_timer_new(s->ev, &st->reannounce_timer,
-			                 delay, session_reannounce_timer_cb, st);
-		} else {
-			mbt_ev_timer_mod(st->reannounce_timer, delay);
-		}
+		session_reannounce_arm(s, st, delay);
 		mbt_log_debug(MBT_LOG_SESSION, "next announce in %llums",
 		              (unsigned long long)(delay / 1000));
 	}
@@ -1733,8 +1761,14 @@ session_do_announce(struct mbt_session *s, struct session_torrent *st)
 
 	struct mbt_torrent *t = st->torrent;
 	uint64_t left = 0;
-	int event = st->started_announced ? MBT_TRACKER_EVENT_NONE : MBT_TRACKER_EVENT_STARTED;
-	if (!st->started_announced) st->started_announced = 1;
+	int event = st->started_acked ? MBT_TRACKER_EVENT_NONE : MBT_TRACKER_EVENT_STARTED;
+
+	st->started_announced = 1;
+	st->announce_settled = 0;
+	if (st->announce_backoff.initial_us == 0)
+		mbt_backoff_init(&st->announce_backoff,
+		                 (uint64_t)s->timers.announce_retry * 1000000ULL,
+		                 ANNOUNCE_RETRY_MAX_USEC, 200, 25);
 
 	if (t && mbt_torrent_piece_count(t) > 0) {
 		uint64_t total = (uint64_t)mbt_torrent_piece_length(t) * mbt_torrent_piece_count(t);

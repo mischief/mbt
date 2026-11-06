@@ -15,6 +15,7 @@ struct mbt_timers {
 	int tracker_interval;    /* default 1800 (30 min) */
 	int connect_timeout;     /* default 10 */
 	int accept_timeout;      /* default 30: accepted peer must send a BT handshake */
+	int announce_retry;      /* default 5: first retry of a failed announce, doubles to 300 */
 };
 
 #endif
