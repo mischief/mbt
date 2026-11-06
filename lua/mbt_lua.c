@@ -919,6 +919,7 @@ l_session(lua_State *L)
 	cfg.enable_pcp = opt_bool(L, 1, "pcp", false);
 	cfg.picker = opt_picker(L, 1);
 	cfg.dht.max_stored = (int)opt_int(L, 1, "dht_max_stored", 0);
+	cfg.dht.send_rate = (int)opt_int(L, 1, "dht_send_rate", 0);
 	opt_timers(L, 1, &cfg.timers);
 	lsd = cfg.mbt_lsd_announce != 0;
 	dht = opt_bool(L, 1, "dht", false);

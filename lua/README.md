@@ -57,6 +57,7 @@ removed torrent.
     same directory adds them again, with their trackers and web seeds.
     Fallback trackers are not saved.
   - `dht_max_stored`: infohashes the session's DHT node stores (default 64).
+  - `dht_send_rate`: queries per second from the session's DHT node (default 20).
   - `picker`: `"rarest"` (default), `"random"` or `"sequential"`.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
   - `encryption`: `"prefer"` (default), `"require"` or `"disable"`. See
