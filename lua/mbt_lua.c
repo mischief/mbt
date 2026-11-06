@@ -672,6 +672,15 @@ l_storage_dir(lua_State *L)
 	return 1;
 }
 
+/* st:close(): drop this reference. A torrent that uses st keeps its own. */
+static int l_storage_gc(lua_State *L);
+
+static int
+l_storage_close(lua_State *L)
+{
+	return l_storage_gc(L);
+}
+
 static int
 l_storage_gc(lua_State *L)
 {
@@ -804,6 +813,39 @@ opt_timers(lua_State *L, int idx, struct mbt_timers *t)
 	lua_pop(L, 1);
 }
 
+/* Bootstrap from opts.dht_bootstrap = {"host:port", ...}, at index 1. */
+static int
+session_bootstrap_list(lua_State *L, struct lsession *ls)
+{
+	int rv = 0;
+
+	lua_getfield(L, 1, "dht_bootstrap");
+	if (lua_istable(L, -1)) {
+		lua_Integer n = luaL_len(L, -1);
+
+		for (lua_Integer i = 1; i <= n && rv == 0; i++) {
+			char host[256];
+			const char *entry, *colon;
+			long port;
+
+			lua_geti(L, -1, i);
+			entry = lua_tostring(L, -1);
+			colon = entry ? strrchr(entry, ':') : NULL;
+			if (colon == NULL || (size_t)(colon - entry) >= sizeof(host) ||
+			    (port = strtol(colon + 1, NULL, 10)) <= 0 || port > UINT16_MAX) {
+				rv = -EINVAL;
+			} else {
+				memcpy(host, entry, (size_t)(colon - entry));
+				host[colon - entry] = '\0';
+				rv = mbt_session_dht_bootstrap(ls->s, host, (uint16_t)port);
+			}
+			lua_pop(L, 1);
+		}
+	}
+	lua_pop(L, 1);
+	return rv;
+}
+
 /* mbt.session{...}: see README.md for the options. */
 static enum mbt_encryption
 opt_encryption(lua_State *L, int idx)
@@ -833,7 +875,7 @@ l_session(lua_State *L)
 	struct lstorage *lst = NULL;
 	struct lsession *ls;
 	const char *dir;
-	bool lsd, dht;
+	bool lsd, dht, no_storage = false;
 	int rv;
 
 	if (lua_isnoneornil(L, 1)) {
@@ -842,7 +884,9 @@ l_session(lua_State *L)
 	}
 	luaL_checktype(L, 1, LUA_TTABLE);
 	lua_getfield(L, 1, "storage");
-	if (!lua_isnil(L, -1))
+	if (lua_isboolean(L, -1) && !lua_toboolean(L, -1))
+		no_storage = true;
+	else if (!lua_isnil(L, -1))
 		lst = check_storage(L, -1);
 	lua_getfield(L, 1, "dir");
 	if (lst != NULL && !lua_isnil(L, -1))
@@ -870,6 +914,9 @@ l_session(lua_State *L)
 	opt_timers(L, 1, &cfg.timers);
 	lsd = cfg.mbt_lsd_announce != 0;
 	dht = opt_bool(L, 1, "dht", false);
+	lua_getfield(L, 1, "dht_bootstrap");
+	cfg.dht_no_bootstrap = lua_istable(L, -1) || (lua_isboolean(L, -1) && !lua_toboolean(L, -1));
+	lua_pop(L, 1);
 
 	ls = lua_newuserdatauv(L, sizeof(*ls), 2);
 	memset(ls, 0, sizeof(*ls));
@@ -884,9 +931,10 @@ l_session(lua_State *L)
 	if ((ls->dir = strdup(dir)) == NULL)
 		return luaL_error(L, "mbt.session: out of memory");
 	cfg.default_data_dir = ls->dir;
-	cfg.default_storage = lst != NULL ? mbt_storage_ref(lst->st) :
-	    mbt_storage_file_new(ls->dir);
-	if (cfg.default_storage == NULL) {
+	if (!no_storage)
+		cfg.default_storage = lst != NULL ? mbt_storage_ref(lst->st) :
+		    mbt_storage_file_new(ls->dir);
+	if (!no_storage && cfg.default_storage == NULL) {
 		free(ls->dir);
 		ls->dir = NULL;
 		return fail(L, -ENOMEM);
@@ -927,6 +975,10 @@ l_session(lua_State *L)
 		return fail(L, rv);
 	}
 	if (dht && (rv = mbt_session_enable_dht(ls->s)) < 0) {
+		session_close(ls, false);
+		return fail(L, rv);
+	}
+	if (dht && (rv = session_bootstrap_list(L, ls)) < 0) {
 		session_close(ls, false);
 		return fail(L, rv);
 	}
@@ -1096,6 +1148,20 @@ static int
 l_session_dht_port(lua_State *L)
 {
 	lua_pushinteger(L, mbt_session_dht_port(check_session(L, 1)->s));
+	return 1;
+}
+
+static int
+l_session_bytes_downloaded(lua_State *L)
+{
+	lua_pushinteger(L, (lua_Integer)mbt_session_bytes_downloaded(check_session(L, 1)->s));
+	return 1;
+}
+
+static int
+l_session_bytes_uploaded(lua_State *L)
+{
+	lua_pushinteger(L, (lua_Integer)mbt_session_bytes_uploaded(check_session(L, 1)->s));
 	return 1;
 }
 
@@ -1336,6 +1402,9 @@ l_stats(lua_State *L)
 	SET_INT("piece_length", mbt_torrent_piece_length(t));
 	SET_INT("have_count", mbt_torrent_have_count(t));
 	SET_INT("bytes_downloaded", mbt_torrent_bytes_downloaded(t));
+	SET_INT("bytes_uploaded", mbt_torrent_bytes_uploaded(t));
+	SET_INT("hash_failures", mbt_torrent_hash_failures(t));
+	SET_INT("webseed_bytes", mbt_torrent_webseed_bytes(t));
 	SET_INT("peer_count", mbt_torrent_peer_count(t));
 	SET_INT("upload_rate", mbt_torrent_upload_rate(t));
 	SET_INT("download_rate", mbt_torrent_download_rate(t));
@@ -2729,6 +2798,8 @@ static const luaL_Reg session_methods[] = {
     {"listen_port", l_session_listen_port},
     {"dht_port", l_session_dht_port},
     {"dht_bootstrap", l_session_dht_bootstrap},
+    {"bytes_downloaded", l_session_bytes_downloaded},
+    {"bytes_uploaded", l_session_bytes_uploaded},
     {"reannounce", l_session_reannounce},
     {"set_upload_rate", l_session_set_upload_rate},
     {"set_download_rate", l_session_set_download_rate},
@@ -2787,6 +2858,7 @@ static const luaL_Reg dht_methods[] = {
 
 static const luaL_Reg storage_methods[] = {
     {"dir", l_storage_dir},
+    {"close", l_storage_close},
     {NULL, NULL},
 };
 
@@ -2920,6 +2992,8 @@ luaopen_mbt(lua_State *L)
 		lua_setfield(L, -2, "__index");
 		lua_pushcfunction(L, l_storage_gc);
 		lua_setfield(L, -2, "__gc");
+		lua_pushcfunction(L, l_storage_gc);
+		lua_setfield(L, -2, "__close");
 	}
 	lua_pop(L, 1);
 	if (luaL_newmetatable(L, DHT_META)) {

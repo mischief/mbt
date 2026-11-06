@@ -136,6 +136,7 @@ struct mbt_session {
 	struct mbt_webseed_policy webseed;
 	int webseed_max;
 	int webseed_active;
+	int dht_no_bootstrap;
 	uint64_t down_gone;       /* totals of removed torrents */
 	uint64_t up_gone;
 	struct mbt_timers timers;
@@ -1103,6 +1104,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->http_arg = cfg->http_arg;
 	s->http_free = cfg->http_free;
 	s->dht_cfg = cfg->dht;
+	s->dht_no_bootstrap = cfg->dht_no_bootstrap;
 
 	STAILQ_INIT(&s->torrents);
 	STAILQ_INIT(&s->pending);
@@ -1442,7 +1444,8 @@ mbt_session_enable_dht(struct mbt_session *s)
 		return rv;
 
 	/* Default bootstrap nodes */
-	mbt_session_dht_bootstrap(s, "dht.transmissionbt.com", 6881);
+	if (!s->dht_no_bootstrap)
+		mbt_session_dht_bootstrap(s, "dht.transmissionbt.com", 6881);
 
 	/* Map UDP port if PCP is active */
 	if (s->pcp_udp)

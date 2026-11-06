@@ -67,6 +67,7 @@ struct mbt_session_config {
 	/* Runs first in mbt_session_free, with http_arg. May be NULL. It must fail pending requests. */
 	void (*http_free)(void *arg);
 	struct mbt_dht_config dht;  /* for mbt_session_enable_dht; ev and port are ignored */
+	int dht_no_bootstrap;       /* no default node; use mbt_session_dht_bootstrap */
 
 	struct mbt_timers timers;  /* 0-initialized = all defaults */
 

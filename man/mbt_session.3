@@ -275,6 +275,19 @@ returns the UDP port used by the DHT node, or 0 if DHT is not enabled.
 .Pp
 .Fn mbt_session_enable_dht_local
 enables the DHT node on an already-created session (alternative to enable_dht).
+.Sh TOTALS
+.Fn mbt_session_bytes_downloaded
+and
+.Fn mbt_session_bytes_uploaded
+return the bytes moved with peers in this run, with removed torrents.
+.Sh DHT BOOTSTRAP
+.Fn mbt_session_enable_dht
+contacts a default node, unless
+.Fa dht_no_bootstrap
+is set in
+.Vt struct mbt_session_config .
+Then use
+.Fn mbt_session_dht_bootstrap .
 .Sh SEE ALSO
 .Xr mbt_torrent 3 ,
 .Xr mbt_pcp 3 ,

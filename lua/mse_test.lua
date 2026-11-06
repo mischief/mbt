@@ -56,6 +56,17 @@ local function check()
 	assert(wt:add_webseed("http://127.0.0.1:1/x"))
 	assert(wt:add_webseed("gopher://x") == nil)
 	assert(wt:webseed_bytes() == 0)
+
+	-- A session with no default storage, and no default DHT node.
+	local ns = assert(mbt.session{storage = false, dht = true, dht_bootstrap = {"127.0.0.1:1"}})
+	assert(ns:bytes_downloaded() == 0 and ns:bytes_uploaded() == 0)
+	assert(mbt.session{dht = true, dht_bootstrap = {"no-port"}} == nil)
+	assert(mbt.session{dht = true, dht_bootstrap = false})
+
+	local st = assert(mbt.storage.file(tmp .. "/st"))
+	st:close()
+	assert(not pcall(st.dir, st))
+	st:close()
 end
 
 local ok, err = pcall(check)

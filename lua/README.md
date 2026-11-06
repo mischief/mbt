@@ -37,7 +37,8 @@ removed torrent.
 
 - `mbt.session(opts)` makes a session, or returns nil and an error. `opts`:
   - `dir`: the default data directory (default `"."`).
-  - `storage`: the default storage, in place of `dir`.
+  - `storage`: the default storage, in place of `dir`. `false` means none:
+    each torrent then needs its own storage.
   - `webseed`: a table with `mode` (`default`, `off`, `fallback` or
     `always`), `no_peer_delay_ms`, `low_rate_delay_ms`, `low_rate`, `run_min` and
     `run_max`.
@@ -47,6 +48,8 @@ removed torrent.
     `s:listen_port()`.
   - `tcp`, `utp`: default true.
   - `dht`, `lsd`, `pcp`: default false.
+  - `dht_bootstrap`: `false` for no default node, or a list of `"host:port"`
+    strings to use in its place.
   - `dht_max_stored`: infohashes the session's DHT node stores (default 64).
   - `picker`: `"rarest"` (default), `"random"` or `"sequential"`.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
@@ -63,6 +66,8 @@ removed torrent.
 - `mbt.storage.fd(fd [, {readonly = true}])` makes a storage on an open
   descriptor, for one single-file torrent. It uses no path calls. On
   success it owns `fd`. `readonly` seeds and never requests pieces.
+- `st:close()` drops the Lua reference now. A torrent holds its own
+  reference until it is removed. `<close>` works too.
 - `mbt.storage.file(dir)` makes a file storage. Pass it to any number of
   sessions and torrents. `st:dir()` returns its directory. Two torrents on
   one storage that want one file path fail with `EEXIST`.
@@ -104,6 +109,8 @@ reference. A session that the collector frees stops its transfers.
 - `s:find(hex)` returns a torrent or nil. `s:torrents()` returns a list.
 - `s:listen_port()`, `s:dht_port()`.
 - `s:dht_bootstrap(addr, port)`, `s:reannounce()`.
+- `s:bytes_downloaded()`, `s:bytes_uploaded()`: totals from peers, with removed
+  torrents.
 - `s:set_upload_rate(n)`, `s:set_download_rate(n)`, `s:upload_rate()`,
   `s:download_rate()`.
 - `s:close()` frees the session. A pending `t:wait()` returns
