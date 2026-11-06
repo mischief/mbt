@@ -70,6 +70,7 @@ Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_torrent`, `fuzz_lsd`, `fuzz_dht`
 | `mbt-torrent` | Create, inspect, convert .torrent files (-w web seed) |
 | `mbt-dht` | Standalone DHT peer lookup |
 | `mbt-dhtd` | Persistent DHT node |
+| `mbt-dht-check` | Peer and announce counts from one DHT node, for a list of infohashes |
 | `mbt-tracker` | UDP + HTTP tracker daemon |
 | `mbt-pcp` | PCP port mapping tool (-k for persistent) |
 | `mbt-lsd` | LSD auto-discovery + replicate |

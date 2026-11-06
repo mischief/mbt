@@ -229,7 +229,9 @@ mbt_rpath = get_option('prefix') == '/usr' ? '' : get_option('prefix') / get_opt
 executable('mbt-lsd', 'tools/mbt-lsd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 executable('mbt-torrent', 'tools/mbt-torrent.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
-executable('mbt-dhtd', 'tools/mbt-dhtd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+mbt_dhtd_exe = executable('mbt-dhtd', 'tools/mbt-dhtd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+mbt_dht_check_exe = executable('mbt-dht-check', 'tools/mbt-dht-check.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+test('dht_check', find_program('test/dht_check_test.sh'), args: [mbt_dhtd_exe, mbt_dht_check_exe], timeout: 40)
 executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 
 if libcurl_dep.found()
