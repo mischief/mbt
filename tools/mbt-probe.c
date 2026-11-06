@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
 	hs[27] = 0x04; /* fast */
 	memcpy(hs + 28, hash, 20);
 	/* peer_id: random */
-	for (int i = 48; i < 68; i++) hs[i] = rand() & 0xff;
+	arc4random_buf(hs + 48, 20);
 
 	if (write(fd, hs, HANDSHAKE_SIZE) < 0) err(1, "write");
 

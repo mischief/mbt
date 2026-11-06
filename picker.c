@@ -42,7 +42,7 @@ mbt_picker_random(struct mbt_torrent *t, void *peer, void *ctx)
 
 	uint32_t bits = mbt_torrent_piece_count(t); if (bits == 0) return -1;
 
-	size_t start = mbt_random_uniform(bits);
+	size_t start = arc4random_uniform(bits);
 	for (size_t i = 0; i < bits; i++) {
 		size_t idx = (start + i) % bits;
 		if (mbt_bitmap_isset(peer_bits, idx) > 0

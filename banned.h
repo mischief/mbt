@@ -16,6 +16,9 @@
 /* No error detection: use parse.h. */
 #pragma GCC poison atoi atol atoll
 
+/* Predictable, and never seeded: use arc4random. */
+#pragma GCC poison rand srand random srandom
+
 /* Stack smashing hazard. */
 #ifdef alloca
 #undef alloca

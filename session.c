@@ -515,7 +515,7 @@ session_generate_peer_id(uint8_t *id)
 {
 	/* -MB0001- followed by 12 random bytes */
 	memcpy(id, "-MB0001-", 8);
-	if (getentropy(id + 8, 12) < 0) {}
+	arc4random_buf(id + 8, 12);
 }
 
 static struct session_torrent *
@@ -1324,7 +1324,7 @@ session_tracker_done_cb(struct mbt_infohash *ih, int err, int interval, void *ar
 		/* Add jitter: 75%-125% of interval to prevent thundering herd */
 		uint64_t base = (uint64_t)interval * 1000000ULL;
 		uint64_t jitter = base / 4;
-		uint64_t delay = base - jitter / 2 + mbt_random_uniform(jitter);
+		uint64_t delay = base - jitter / 2 + arc4random_uniform(jitter);
 		if (!st->reannounce_timer) {
 			mbt_ev_timer_new(s->ev, &st->reannounce_timer,
 			                 delay, session_reannounce_timer_cb, st);

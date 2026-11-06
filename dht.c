@@ -237,13 +237,6 @@ struct mbt_dht {
 
 static struct dht_item *dht_item_find(struct mbt_dht *d, const uint8_t *target);
 static struct dht_item *dht_item_alloc(struct mbt_dht *d, const uint8_t *target);
-static void
-random_bytes(uint8_t *buf, size_t len)
-{
-	for (size_t i = 0; i < len; i++)
-		buf[i] = mbt_random32() & 0xff;
-}
-
 /* Stable per machine and port: several nodes on one machine must differ. */
 static void
 dht_init_node_id(uint8_t *id, uint16_t port)
@@ -265,7 +258,7 @@ dht_init_node_id(uint8_t *id, uint16_t port)
 		fclose(fp);
 	}
 	/* Fallback: random */
-	random_bytes(id, 20);
+	arc4random_buf(id, 20);
 }
 
 /* XOR distance — returns bucket index (0 = closest to us) */
@@ -300,7 +293,7 @@ static void
 make_txn(struct mbt_dht *d, uint8_t txn[TXN_LEN])
 {
 	/* Random: a sender that cannot see the query cannot guess the reply. */
-	uint32_t t = mbt_random32();
+	uint32_t t = arc4random();
 
 	(void)d;
 	memcpy(txn, &t, TXN_LEN);
@@ -348,7 +341,7 @@ dht_token_rotate_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct mbt_dht *d = v;
 	memcpy(d->token_secret_prev, d->token_secret, TOKEN_SECRET_LEN);
-	random_bytes(d->token_secret, TOKEN_SECRET_LEN);
+	arc4random_buf(d->token_secret, TOKEN_SECRET_LEN);
 	mbt_ev_timer_mod(timer, TOKEN_ROTATE_US);
 }
 
@@ -1356,7 +1349,7 @@ dht_handle(struct mbt_dht *d, const uint8_t *buf, ssize_t n,
 			int nsamp = d->stored_count < 20 ? d->stored_count : 20;
 			uint8_t samples[20 * 20];
 			for (int i = 0; i < d->stored_count; i++) {
-				int at = i < nsamp ? i : (int)mbt_random_uniform((uint32_t)i + 1);
+				int at = i < nsamp ? i : (int)arc4random_uniform((uint32_t)i + 1);
 
 				if (at < nsamp)
 					memcpy(samples + at * 20, d->stored[i].infohash, 20);
@@ -1506,8 +1499,8 @@ dht_refresh_cb(struct mbt_ev_timer *timer, void *v)
 
 	/* Ping a random node to keep routing table alive */
 	if (total > 0) {
-		int pick = rand() % total;
-		int idx = 0;
+		uint32_t pick = arc4random_uniform((uint32_t)total);
+		uint32_t idx = 0;
 		for (struct dht_bucket *b = d->buckets; b; b = b->next) {
 			struct dht_node *n;
 			SLIST_FOREACH(n, &b->nodes, entry) {
@@ -1562,7 +1555,6 @@ mbt_dht_new_mux(struct mbt_dht **out, const struct mbt_dht_config *cfg, struct m
 	d->port = cfg->port;
 	d->verify_cb = cfg->verify;
 	d->verify_arg = cfg->verify_arg;
-	srand(time(NULL) ^ getpid());
 
 	/* Initialize routing table with one bucket covering all IDs */
 	d->buckets = calloc(1, sizeof(struct dht_bucket));
@@ -1596,8 +1588,8 @@ mbt_dht_new_mux(struct mbt_dht **out, const struct mbt_dht_config *cfg, struct m
 	mbt_ev_timer_new(ev, &d->refresh_timer, 5 * 1000000ULL, dht_refresh_cb, d);
 
 	/* Token secrets */
-	random_bytes(d->token_secret, TOKEN_SECRET_LEN);
-	random_bytes(d->token_secret_prev, TOKEN_SECRET_LEN);
+	arc4random_buf(d->token_secret, TOKEN_SECRET_LEN);
+	arc4random_buf(d->token_secret_prev, TOKEN_SECRET_LEN);
 	mbt_ev_timer_new(ev, &d->token_timer, TOKEN_ROTATE_US, dht_token_rotate_cb, d);
 
 	int rate = cfg->send_rate ? cfg->send_rate : DHT_DEFAULT_SEND_RATE;
@@ -1665,7 +1657,7 @@ dht_bootstrap_resolved(struct sockaddr_storage *addr, socklen_t len, int err, vo
 	if (err < 0 || !addr) { free(ctx); return; }
 
 	uint8_t fake_id[20];
-	random_bytes(fake_id, 20);
+	arc4random_buf(fake_id, 20);
 	routing_add(ctx->d, fake_id, addr);
 
 	char buf[INET6_ADDRSTRLEN];
@@ -1704,7 +1696,7 @@ mbt_dht_bootstrap(struct mbt_dht *d, const char *addr, uint16_t port)
 
 	/* IP literal — immediate */
 	uint8_t fake_id[20];
-	random_bytes(fake_id, 20);
+	arc4random_buf(fake_id, 20);
 	routing_add(d, fake_id, &sa);
 
 	mbt_log_info(MBT_LOG_DHT, "bootstrapping from %s:%hu", addr, port);

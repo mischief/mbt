@@ -188,7 +188,7 @@ pcp_recv(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 
 	/* Schedule renewal at 1/2 to 5/8 of lifetime */
 	uint64_t renew_usec = ((uint64_t)lifetime * 1000000ULL) / 2 +
-	                       (mbt_random_uniform(lifetime * 1000000ULL / 8));
+	                       (arc4random_uniform(lifetime * 1000000ULL / 8));
 	mbt_ev_timer_mod(p->timer, renew_usec);
 }
 
@@ -218,7 +218,7 @@ pcp_timer_cb(struct mbt_ev_timer *timer, void *v)
 
 	/* Add jitter ±10% */
 	uint64_t jitter = p->rt_usec / 10;
-	uint64_t next = p->rt_usec + mbt_random_uniform(jitter * 2) - jitter;
+	uint64_t next = p->rt_usec + arc4random_uniform(jitter * 2) - jitter;
 	mbt_ev_timer_mod(timer, next);
 }
 
@@ -314,7 +314,7 @@ mbt_pcp_new(struct mbt_pcp **out, struct mbt_ev *ev, const char *gateway)
 	if (rv < 0) { close(p->fd); free(p); return rv; }
 
 	/* Generate random nonce */
-	getentropy(p->nonce, 12);
+	arc4random_buf(p->nonce, 12);
 
 	*out = p;
 	return 0;

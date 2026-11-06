@@ -137,9 +137,7 @@ mbt_lsd_init(struct mbt_lsd **out, int setfl)
 	}
 
 	/* Generate random cookie to identify our own announces */
-	uint32_t r;
-	getentropy(&r, sizeof(r));
-	snprintf(lsd->cookie, sizeof(lsd->cookie), "%08x", r);
+	snprintf(lsd->cookie, sizeof(lsd->cookie), "%08x", arc4random());
 
 	*out = lsd;
 

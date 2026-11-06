@@ -51,7 +51,7 @@ mbt_tracker_store_new(struct mbt_tracker_store **out)
 	struct mbt_tracker_store *s = calloc(1, sizeof(*s));
 	if (!s) return -1;
 	/* Random secret for connection_id HMAC */
-	for (int i = 0; i < 16; i++) s->secret[i] = rand() & 0xff;
+	arc4random_buf(s->secret, sizeof(s->secret));
 	*out = s;
 	return 0;
 }

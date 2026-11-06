@@ -816,7 +816,7 @@ torrent_choke_cb(struct mbt_ev_timer *timer, void *v)
 	 * permanently starve every lower-ranked peer (the bug this replaces). */
 	int opt_idx = -1;
 	if (n > UNCHOKE_SLOTS && (t->choke_round % 3 == 0))
-		opt_idx = UNCHOKE_SLOTS + (int)mbt_random_uniform((uint32_t)(n - UNCHOKE_SLOTS));
+		opt_idx = UNCHOKE_SLOTS + (int)arc4random_uniform((uint32_t)(n - UNCHOKE_SLOTS));
 
 	/* Unchoke top UNCHOKE_SLOTS plus the optimistic pick */
 	for (int i = 0; i < n; i++) {
