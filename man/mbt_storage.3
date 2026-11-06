@@ -6,6 +6,7 @@
 .Nm mbt_storage_ref ,
 .Nm mbt_storage_unref ,
 .Nm mbt_storage_file_new ,
+.Nm mbt_storage_fd_new ,
 .Nm mbt_storage_memory_new ,
 .Nm mbt_storage_memory_destroy ,
 .Nm mbt_storage_memory_storage ,
@@ -24,6 +25,8 @@
 .Fn mbt_storage_unref "struct mbt_storage *s"
 .Ft struct mbt_storage *
 .Fn mbt_storage_file_new "const char *data_dir"
+.Ft struct mbt_storage *
+.Fn mbt_storage_fd_new "int fd" "int flags"
 .Ft struct mbt_storage_memory *
 .Fn mbt_storage_memory_new
 .Ft void
@@ -109,6 +112,10 @@ ignores data that a mark covers, so a move can retry after a crash.
 File storage uses a file named
 .Pa .mbt-move-<infohash>
 in the data directory.
+.Pp
+.Fa read_only
+returns 1 if the storage takes no writes.
+The torrent then requests no pieces, and logs the pieces that fail its verify.
 .Sh FILE STORAGE
 .Fn mbt_storage_file_new
 makes a storage for files under
@@ -122,6 +129,38 @@ A multi-file torrent uses
 fails with
 .Er EEXIST
 if a file path is in use by a torrent that is open on this storage.
+.Sh DESCRIPTOR STORAGE
+.Fn mbt_storage_fd_new
+makes a storage for one single-file torrent on an open descriptor.
+It calls no path API, so it works in a sandbox with no file access.
+.Fa fd
+must be a regular file without
+.Dv O_APPEND ,
+open for read and write.
+With
+.Dv MBT_STORAGE_FD_READONLY
+it can be open for read only, its size must equal the torrent size, and the
+torrent only seeds.
+.Pp
+On success the storage owns
+.Fa fd ,
+and the last reference closes it.
+If the function returns
+.Dv NULL ,
+the caller still owns
+.Fa fd .
+A second
+.Fa open
+fails with
+.Er EBUSY .
+.Fa open
+fails with
+.Er EINVAL
+for a multi-file torrent, a file that is not regular, a file with
+.Dv O_APPEND ,
+or a file of the wrong size.
+The storage does not call
+.Xr fsync 2 .
 .Sh MEMORY STORAGE
 The memory backend holds one torrent at a time in a flat buffer.
 A second

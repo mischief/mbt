@@ -134,6 +134,7 @@ bt_src = [
   'peerdb.c',
   'picker.c',
   'session.c',
+  'storage_fd.c',
   'storage.c',
   'storage_file.c',
   'storage_memory.c',

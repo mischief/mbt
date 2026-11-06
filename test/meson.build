@@ -58,6 +58,8 @@ test('e2e_tcp', e2e_test, timeout: 15, env: {'MBT_E2E_TRANSPORT': 'tcp'})
 
 storage_file_test = executable('storage_file_test', 'storage_file_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('storage_file', storage_file_test)
+storage_fd_test = executable('storage_fd_test', 'storage_fd_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('storage_fd', storage_fd_test, timeout: 60)
 
 storage_shared_test = executable('storage_shared_test', 'storage_shared_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('storage_shared', storage_shared_test, timeout: 60)

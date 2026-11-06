@@ -17,7 +17,7 @@ struct mbt_storage_handle;
  * handle to the other calls, and calls close before it drops its reference
  * to the storage. destroy is optional. It runs when the last reference goes.
  *
- * remove, exists, sync and mark are optional. See mbt_storage(3).
+ * remove, exists, sync, mark and read_only are optional. See mbt_storage(3).
  * mbt_torrent_move_storage needs remove.
  */
 struct mbt_storage_ops {
@@ -33,6 +33,7 @@ struct mbt_storage_ops {
 	int (*exists)(void *ctx, struct mbt_torrent *t); /* 1 if data blocks a move */
 	int (*sync)(struct mbt_storage_handle *h);      /* make writes durable */
 	int (*mark)(void *ctx, struct mbt_torrent *t, int on); /* move in progress */
+	int (*read_only)(struct mbt_storage_handle *h); /* 1: never request pieces */
 };
 
 /* A storage holds any number of torrents, if the backend allows it. */
@@ -54,6 +55,18 @@ MBT_API void mbt_storage_unref(struct mbt_storage *s);
  * file path is in use by a torrent that is open on this storage.
  */
 MBT_API struct mbt_storage *mbt_storage_file_new(const char *data_dir);
+
+/* --- Descriptor storage (one single-file torrent, no path calls) --- */
+
+#define MBT_STORAGE_FD_READONLY 0x1  /* seed only: the torrent requests no pieces */
+
+/*
+ * fd must be a regular file without O_APPEND, open for read and write, or for
+ * read with MBT_STORAGE_FD_READONLY. On success the storage owns fd. On NULL
+ * the caller keeps it. open fails for a bad fd, a multi-file torrent, a file
+ * above the torrent size, or a read-only file of another size.
+ */
+MBT_API struct mbt_storage *mbt_storage_fd_new(int fd, int flags);
 
 /* --- Memory storage (testing, small torrents) --- */
 

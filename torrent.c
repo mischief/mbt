@@ -178,6 +178,7 @@ struct mbt_torrent {
 	/* Endgame mode */
 	int endgame;
 	int verifying; /* 1 while initial SHA1 verify is running */
+	int no_download; /* read-only storage: request no pieces */
 	int error;     /* first fatal -errno; 0 = none */
 	int is_private; /* BEP 27: no DHT/PEX/LSD for this torrent */
 	int max_pieces_per_peer;
@@ -399,6 +400,9 @@ verify_complete(struct mbt_torrent *t)
 	if (t->cb.on_verify_complete)
 		t->cb.on_verify_complete(t, t->cb_arg);
 
+	if (t->no_download && t->have_count < t->piece_count)
+		mbt_log_warn(MBT_LOG_TORRENT, "read-only storage: %u of %u pieces failed verify",
+		             t->piece_count - t->have_count, t->piece_count);
 	if (t->have_count > 0) {
 		mbt_log_info(MBT_LOG_TORRENT, "resumed %u/%u pieces",
 		             t->have_count, t->piece_count);
@@ -952,7 +956,7 @@ on_active(struct mbt_peer *p, void *arg)
 
 	/* Express interest only if we need pieces (skip if no metadata yet) */
 	if (t->piece_count > 0)
-		mbt_peer_send_interested(p, t->have_count < t->piece_count ? 1 : 0);
+		mbt_peer_send_interested(p, !t->no_download && t->have_count < t->piece_count);
 
 	/* BEP 5: advertise our DHT port if DHT is active */
 	if (t->session && (mbt_peer_flags(p) & MBT_PEER_FLAG_DHT)) {
@@ -1018,7 +1022,7 @@ on_have(struct mbt_peer *p, uint32_t piece, void *arg)
 
 	/* Become interested if peer has a piece we need */
 	if (t->have && mbt_bitmap_isset(t->have, piece) <= 0 &&
-	    !mbt_peer_interested(p))
+	    !t->no_download && !mbt_peer_interested(p))
 		mbt_peer_send_interested(p, 1);
 
 	/* If we're unchoked and need this piece, maybe request it */
@@ -1855,7 +1859,7 @@ torrent_drive_all_peers(struct mbt_torrent *t)
 static void
 torrent_drive_peer(struct mbt_torrent *t, struct torrent_peer *tp)
 {
-	if (t->error)
+	if (t->error || t->no_download)
 		return;
 	if (!t->storage)
 		return;
@@ -2198,6 +2202,8 @@ storage_attach(struct mbt_torrent *t)
 			return rv;
 		}
 	}
+	t->no_download = t->storage_h && t->storage->ops->read_only &&
+	                 t->storage->ops->read_only(t->storage_h) > 0;
 	if (t->storage_h && t->storage->ops->read_piece && !t->verifying) {
 		t->verify_buf = malloc(t->piece_length);
 		if (t->verify_buf) {
