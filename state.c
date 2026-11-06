@@ -186,8 +186,9 @@ state_enumerate_impl(void *ctx,
 		if (tlen <= 0) { fclose(fp); continue; }
 		void *tbuf = malloc(tlen);
 		if (!tbuf) { fclose(fp); rv = -ENOMEM; break; }
-		fread(tbuf, 1, tlen, fp);
+		size_t got = fread(tbuf, 1, (size_t)tlen, fp);
 		fclose(fp);
+		if (got != (size_t)tlen) { free(tbuf); continue; }
 
 		/* Read paired .resume */
 		char rpath[512];
@@ -204,8 +205,8 @@ state_enumerate_impl(void *ctx,
 			if (rlen > 0) {
 				void *rbuf = malloc(rlen);
 				if (rbuf) {
-					fread(rbuf, 1, rlen, rfp);
-					mbt_be_value_parse(rbuf, rlen, &resume);
+					if (fread(rbuf, 1, (size_t)rlen, rfp) == (size_t)rlen)
+						mbt_be_value_parse(rbuf, rlen, &resume);
 					free(rbuf);
 				}
 			}

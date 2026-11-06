@@ -1563,6 +1563,11 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
 
 	/* Extract tracker URLs */
 	sta = session_find(s, ih);
+	if (!sta) {
+		/* The state save callback removed the torrent. */
+		mbt_metainfo_free(mi);
+		return -ENOENT;
+	}
 	int before = sta->tracker_count;
 
 	for (int i = 0; i < mbt_metainfo_tracker_count(mi); i++)
