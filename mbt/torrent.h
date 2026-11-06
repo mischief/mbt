@@ -171,6 +171,7 @@ struct mbt_peer_stats {
 	int interested;   /* we are interested */
 	int snubbed;
 	int utp;          /* nonzero if this peer is over uTP */
+	unsigned encryption; /* MBT_MSE_RC4, MBT_MSE_PLAINTEXT, or 0 with no MSE */
 	int outstanding;  /* in-flight requests */
 	int done_pct;     /* % of pieces this peer has (0-100) */
 	int hash_failures;

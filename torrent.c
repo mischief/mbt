@@ -3215,6 +3215,7 @@ mbt_torrent_peer_stats(struct mbt_torrent *t, int idx, struct mbt_peer_stats *ou
 			out->choked = mbt_peer_choked(tp->peer);
 			out->interested = mbt_peer_interested(tp->peer);
 			out->snubbed = tp->snubbed;
+			out->encryption = mbt_peer_encryption(tp->peer);
 			out->utp = strcmp(mbt_peer_transport_name(tp->peer), "utp") == 0;
 			out->outstanding = tp->outstanding;
 			out->hash_failures = tp->hash_failures;

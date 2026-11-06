@@ -23,12 +23,14 @@ local function transfer(seed_mode, leech_mode, wait_ms)
 	    encryption = seed_mode})
 	local b = assert(mbt.session{dir = dir, utp = false,
 	    encryption = leech_mode})
-	local ok
+	local ok, enc
 	mbt.run(function()
 		assert(assert(a:add_torrent_buf(torrent)):wait())
 		local t = assert(b:add_torrent_buf(torrent))
 		assert(t:add_peer("127.0.0.1", a:listen_port()))
 		for _ = 1, wait_ms / 10 do
+			local p = t:peers()[1]
+			enc = p and p.encryption or enc
 			if t:complete() then break end
 			mbt.sleep(10)
 		end
@@ -36,15 +38,17 @@ local function transfer(seed_mode, leech_mode, wait_ms)
 	end)
 	a:close()
 	b:close()
-	return ok
+	return ok, enc
 end
 
 local function check()
-	assert(transfer("require", "require", 10000))
+	local ok, enc = transfer("require", "require", 10000)
+	assert(ok and enc == "rc4")
 	assert(transfer("require", "prefer", 10000))
 	assert(transfer("prefer", "require", 10000))
 	assert(transfer("prefer", "prefer", 10000))
-	assert(transfer("disable", "disable", 10000))
+	ok, enc = transfer("disable", "disable", 10000)
+	assert(ok and enc == "none")
 	-- The leecher redials in plaintext.
 	assert(transfer("disable", "prefer", 30000))
 	assert(not transfer("require", "disable", 1000))
@@ -56,6 +60,7 @@ local function check()
 	assert(wt:add_webseed("http://127.0.0.1:1/x"))
 	assert(wt:add_webseed("gopher://x") == nil)
 	assert(wt:webseed_bytes() == 0)
+	assert(mbt.session{ca = "not a pem", http_low_speed = 2048, http_low_speed_sec = 5})
 	assert(wt:stats().hash_failures == 0)
 	assert(wt:piece_avail(0) == 0)
 	assert(#wt:metadata() > 0)

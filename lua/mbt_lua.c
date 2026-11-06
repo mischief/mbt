@@ -33,6 +33,7 @@
 #ifdef HAVE_CURL
 #include "mbt/http_curl.h"
 #endif
+#include "mbt/mse.h"
 #include "mbt/storage.h"
 #include "mbt/torrent.h"
 
@@ -952,6 +953,23 @@ l_session(lua_State *L)
 			ls->dir = NULL;
 			return fail(L, rv);
 		}
+		lua_getfield(L, 1, "ca");
+		if (lua_isstring(L, -1)) {
+			size_t calen;
+			const char *ca = lua_tolstring(L, -1, &calen);
+
+			if ((rv = mbt_http_curl_set_ca(http, ca, calen)) < 0) {
+				mbt_http_curl_free(http);
+				mbt_storage_unref(cfg.default_storage);
+				free(ls->dir);
+				ls->dir = NULL;
+				return fail(L, rv);
+			}
+		}
+		lua_pop(L, 1);
+		if (opt_int(L, 1, "http_low_speed", 0) > 0)
+			mbt_http_curl_set_low_speed(http, (long)opt_int(L, 1, "http_low_speed", 0),
+			                            (long)opt_int(L, 1, "http_low_speed_sec", 30));
 		cfg.http = mbt_http_curl_fn;
 		cfg.http_arg = http;
 		cfg.http_range = mbt_http_curl_range_fn;
@@ -1525,6 +1543,8 @@ l_peers(lua_State *L)
 		SET_BOOL("interested", ps.interested);
 		SET_BOOL("snubbed", ps.snubbed);
 		SET_BOOL("utp", ps.utp);
+		SET_STR("encryption", ps.encryption == MBT_MSE_RC4 ? "rc4" :
+		        ps.encryption == MBT_MSE_PLAINTEXT ? "mse_plaintext" : "none");
 		SET_INT("outstanding", ps.outstanding);
 		SET_INT("done_pct", ps.done_pct);
 		SET_INT("hash_failures", ps.hash_failures);

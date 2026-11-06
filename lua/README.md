@@ -43,6 +43,9 @@ removed torrent.
     `always`), `no_peer_delay_ms`, `low_rate_delay_ms`, `low_rate`, `run_min` and
     `run_max`.
     The add calls take the same field in `opts`.
+  - `ca`: PEM data to use in place of the CA files, for HTTPS.
+  - `http_low_speed`, `http_low_speed_sec`: a web seed request fails below
+    this many bytes per second for this long. Default 1024 and 30.
   - `webseed_max_requests`: range requests in the session at once.
   - `port`: the listen port. 0 (the default) binds a free port; see
     `s:listen_port()`.
@@ -146,7 +149,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   `peer_count`, `upload_rate`, `download_rate`, `dir`
   and, after a failure, `error`.
 - `t:peers()` returns a list of tables with `addr`, `client`, `port`,
-  `conn_port`, `choked`, `interested`, `snubbed`, `utp`, `outstanding`,
+  `conn_port`, `choked`, `interested`, `snubbed`, `utp`, `encryption`
+  (`none`, `mse_plaintext` or `rc4`), `outstanding`,
   `done_pct`, `hash_failures`, `score`, `source`, `downloaded` and
   `uploaded`.
 - `t:files()` returns a list of tables with `path`, `offset` and `length`.
