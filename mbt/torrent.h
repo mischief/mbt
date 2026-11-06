@@ -138,6 +138,8 @@ MBT_API uint64_t mbt_torrent_hash_failures(struct mbt_torrent *t); /* with web s
  */
 MBT_API int mbt_torrent_add_webseed(struct mbt_torrent *t, const char *url);
 MBT_API uint64_t mbt_torrent_webseed_bytes(struct mbt_torrent *t); /* bytes from web seeds */
+MBT_API int mbt_torrent_webseed_count(struct mbt_torrent *t);
+MBT_API const char *mbt_torrent_webseed(struct mbt_torrent *t, int idx);
 MBT_API int mbt_torrent_peer_count(struct mbt_torrent *t);
 MBT_API struct mbt_peer *mbt_torrent_peer_at(struct mbt_torrent *t, int idx);
 MBT_API int mbt_torrent_has_piece(struct mbt_torrent *t, uint32_t piece);

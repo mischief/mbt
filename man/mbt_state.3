@@ -31,9 +31,10 @@ returns the operations that use that directory.
 Other backends fill in
 .Vt struct mbt_state_ops .
 .Pp
-The saved data is the info dictionary, the data directory, and the time the
-torrent was added.
-Trackers and web seeds are not saved.
+The saved data is the .torrent file as it was added, or for a magnet its info
+dictionary, plus the data directory, the time the torrent was added, and its
+trackers and web seeds.
+Fallback trackers are not saved, because the caller adds them at each start.
 .Sh RETURN VALUES
 .Fn mbt_state_open
 returns 0 on success or a negative errno value on failure.

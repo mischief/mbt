@@ -83,8 +83,14 @@ void webseed_set_sources_empty(struct mbt_webseed_set *set);
 void webseed_set_kick(struct mbt_webseed_set *set);
 uint64_t webseed_set_bytes(const struct mbt_webseed_set *set);
 int webseed_set_busy(const struct mbt_webseed_set *set);
+int webseed_set_count(const struct mbt_webseed_set *set);
+const char *webseed_set_url(const struct mbt_webseed_set *set, int idx);
 
 struct mbt_session *torrent_session(struct mbt_torrent *t);
+int torrent_set_source(struct mbt_torrent *t, const void *data, size_t len);
+const void *torrent_source(struct mbt_torrent *t, size_t *len);
+void torrent_source_clear(struct mbt_torrent *t);
+const char *session_saved_tracker(struct mbt_session *s, struct mbt_torrent *t, int idx);
 uint64_t torrent_total_length(struct mbt_torrent *t);
 int torrent_webseed_wanted(struct mbt_torrent *t);
 int torrent_webseed_throttled(struct mbt_torrent *t);

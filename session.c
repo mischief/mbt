@@ -62,6 +62,7 @@ struct session_torrent {
 	int tracker_count;
 	int tracker_answers;
 	int stop_sent;       /* no more announces */
+	uint32_t fallback_mask;  /* trackers[i] came from the fallback list */
 	struct mbt_ev_timer *reannounce_timer;
 	int announce_interval;
 	time_t last_dht_lookup;
@@ -141,6 +142,7 @@ struct mbt_session {
 	int webseed_max;
 	int webseed_active;
 	int stops_pending;
+	int adding_fallbacks;
 	int dht_no_bootstrap;
 	uint64_t down_gone;       /* totals of removed torrents */
 	uint64_t up_gone;
@@ -1782,8 +1784,21 @@ session_state_restore_cb(const struct mbt_state_entry *e, void *arg)
 		.data_dir = e->data_dir,
 		.storage  = own,
 	};
-	int rv = mbt_session_add_torrent_buf(s, e->metadata, e->metadata_len, &cfg, NULL);
+	struct mbt_torrent *t = NULL;
+	int rv = mbt_session_add_torrent_buf(s, e->metadata, e->metadata_len, &cfg, &t);
+
 	mbt_storage_unref(own);
+	if (rv == 0) {
+		struct session_torrent *st = session_find(s, mbt_torrent_infohash(t));
+		int before = st ? st->tracker_count : 0;
+
+		for (int i = 0; i < e->tracker_count; i++)
+			(void)mbt_session_add_tracker(s, t, e->trackers[i]);
+		for (int i = 0; i < e->webseed_count; i++)
+			(void)mbt_torrent_add_webseed(t, e->webseeds[i]);
+		if (st && st->tracker_count > before)
+			session_do_announce(s, st);
+	}
 	if (rv < 0)
 		mbt_log_warn(MBT_LOG_SESSION, "state restore: failed to add torrent: %s", strerror(-rv));
 	return 0; /* continue enumeration even on error */
@@ -1939,6 +1954,12 @@ mbt_session_add_torrent_buf(struct mbt_session *s, const void *data, size_t len,
 
 	rv = mbt_session_add_infohash(s, ih, cfg, &t);
 	if (rv < 0) { mbt_metainfo_free(mi); return rv; }
+
+	/* The state keeps this file as it came. */
+	if (s->state_ops && (rv = torrent_set_source(t, data, len)) < 0) {
+		mbt_metainfo_free(mi);
+		return rv;
+	}
 
 	const void *raw = mbt_metainfo_raw_info(mi, &raw_len);
 	rv = mbt_torrent_set_metadata(t, raw, raw_len);
@@ -2206,9 +2227,29 @@ mbt_session_add_tracker(struct mbt_session *s, struct mbt_torrent *t, const char
 		char *u = strdup(url);
 		if (!u) return -ENOMEM;
 		st->trackers[st->tracker_count++] = u;
+		if (!s->adding_fallbacks)
+			mbt_session_save_torrent(s, t);
 		return 0;
 	}
 	return -ENOENT;
+}
+
+/* A tracker to save: the caller adds fallback trackers again at each start. */
+const char *
+session_saved_tracker(struct mbt_session *s, struct mbt_torrent *t, int idx)
+{
+	struct session_torrent *st;
+
+	if (!s)
+		return NULL;
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (st->torrent != t)
+			continue;
+		if (idx >= st->tracker_count || (st->fallback_mask >> idx & 1))
+			return NULL;
+		return st->trackers[idx];
+	}
+	return NULL;
 }
 
 void
@@ -2224,8 +2265,15 @@ mbt_session_add_tracker_fallbacks(struct mbt_session *s, struct mbt_torrent *t)
 
 		if (st->torrent != t)
 			continue;
-		for (int i = 0; mbt_fallback_trackers[i]; i++)
+		s->adding_fallbacks = 1;
+		for (int i = 0; mbt_fallback_trackers[i]; i++) {
+			int n = st->tracker_count;
+
 			(void)mbt_session_add_tracker(s, t, mbt_fallback_trackers[i]);
+			if (st->tracker_count > n)
+				st->fallback_mask |= 1U << n;
+		}
+		s->adding_fallbacks = 0;
 		if (st->tracker_count > before)
 			session_do_announce(s, st);
 		return;

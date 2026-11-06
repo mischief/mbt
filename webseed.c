@@ -545,6 +545,25 @@ webseed_set_kick(struct mbt_webseed_set *set)
 }
 
 int
+webseed_set_count(const struct mbt_webseed_set *set)
+{
+	return set ? set->count : 0;
+}
+
+const char *
+webseed_set_url(const struct mbt_webseed_set *set, int idx)
+{
+	const struct mbt_webseed *w;
+
+	if (!set)
+		return NULL;
+	SLIST_FOREACH(w, &set->list, entry)
+		if (idx-- == 0)
+			return w->base;
+	return NULL;
+}
+
+int
 webseed_set_busy(const struct mbt_webseed_set *set)
 {
 	const struct mbt_webseed *w;

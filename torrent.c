@@ -184,6 +184,8 @@ struct mbt_torrent {
 	uint64_t down_gone;      /* bytes from peers that left */
 	uint64_t up_gone;        /* bytes to peers that left */
 	uint64_t hash_failures;
+	void *source;            /* the .torrent, until the state saves it */
+	size_t source_len;
 	struct mbt_webseed_set *webseeds;
 	struct mbt_webseed_policy webseed_policy;
 	int error;     /* first fatal -errno; 0 = none */
@@ -1328,6 +1330,35 @@ on_piece(struct mbt_peer *p, uint32_t piece, uint32_t offset,
 
 /* --- Web seeds --- */
 
+int
+torrent_set_source(struct mbt_torrent *t, const void *data, size_t len)
+{
+	void *copy = malloc(len);
+
+	if (!copy)
+		return -ENOMEM;
+	memcpy(copy, data, len);
+	free(t->source);
+	t->source = copy;
+	t->source_len = len;
+	return 0;
+}
+
+const void *
+torrent_source(struct mbt_torrent *t, size_t *len)
+{
+	*len = t->source_len;
+	return t->source;
+}
+
+void
+torrent_source_clear(struct mbt_torrent *t)
+{
+	free(t->source);
+	t->source = NULL;
+	t->source_len = 0;
+}
+
 struct mbt_session *
 torrent_session(struct mbt_torrent *t)
 {
@@ -1486,7 +1517,22 @@ mbt_torrent_add_webseed(struct mbt_torrent *t, const char *url)
 	if (!t->webseeds &&
 	    (rv = webseed_set_new(&t->webseeds, t, t->ev, &t->webseed_policy)) < 0)
 		return rv;
-	return webseed_set_add(t->webseeds, url);
+	if ((rv = webseed_set_add(t->webseeds, url)) < 0)
+		return rv;
+	mbt_session_save_torrent(t->session, t);
+	return 0;
+}
+
+int
+mbt_torrent_webseed_count(struct mbt_torrent *t)
+{
+	return webseed_set_count(t->webseeds);
+}
+
+const char *
+mbt_torrent_webseed(struct mbt_torrent *t, int idx)
+{
+	return webseed_set_url(t->webseeds, idx);
 }
 
 uint64_t
@@ -2296,6 +2342,7 @@ mbt_torrent_free(struct mbt_torrent *t)
 		move_finish(t, -ECANCELED);
 	webseed_set_free(t->webseeds);
 	t->webseeds = NULL;
+	torrent_source_clear(t);
 
 	/* Free peers */
 	while (!TAILQ_EMPTY(&t->peers)) {

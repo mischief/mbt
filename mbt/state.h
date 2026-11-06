@@ -14,10 +14,14 @@ struct mbt_torrent;
  * All pointers are valid only for the duration of the callback.
  */
 struct mbt_state_entry {
-	const void *metadata;      /* raw info dict bytes; NULL if magnet not yet resolved */
+	const void *metadata;      /* a whole .torrent; NULL if magnet not yet resolved */
 	size_t      metadata_len;
 	const char *data_dir;      /* directory where piece data lives */
 	int64_t     added;         /* unix timestamp when torrent was added */
+	const char *const *trackers;  /* to add to what the .torrent lists */
+	int         tracker_count;
+	const char *const *webseeds;
+	int         webseed_count;
 };
 
 /*
