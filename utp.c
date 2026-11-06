@@ -503,6 +503,7 @@ utp_conn_set_watermark(struct mbt_conn *c, size_t low)
 }
 
 static int utp_flush(struct mbt_utp_sock *s);
+static void utp_arm_rto(struct mbt_utp_sock *s);
 static int utp_send_ack(struct mbt_utp_sock *s);
 static void utp_send_ack_now(struct mbt_utp_sock *s);
 static void utp_ack_delayed(struct mbt_utp_sock *s);
@@ -1044,6 +1045,9 @@ utp_flush(struct mbt_utp_sock *s)
 
 		utp_send_data(s, cur_seq, payload, chunk);
 	}
+	/* An ack rearms a running timer, but no ack can start one. */
+	if (s->send_una != s->seq_nr && !s->rto_timer)
+		utp_arm_rto(s);
 	return 0;
 }
 

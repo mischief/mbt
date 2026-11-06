@@ -156,6 +156,8 @@ static uint8_t  ow_recv_buf[OW_TOTAL];
 static int      ow_received;
 static struct mbt_conn *ow_server_conn;
 
+static int ow_total = OW_TOTAL;
+
 static void
 ow_server_readcb(struct mbt_conn *c, void *arg)
 {
@@ -163,11 +165,11 @@ ow_server_readcb(struct mbt_conn *c, void *arg)
 	uint8_t tmp[8192];
 	ssize_t n;
 	while ((n = mbt_conn_read(c, tmp, sizeof(tmp))) > 0) {
-		if (ow_received + (int)n <= OW_TOTAL)
+		if (ow_received + (int)n <= ow_total)
 			memcpy(ow_recv_buf + ow_received, tmp, (size_t)n);
 		ow_received += (int)n;
 	}
-	if (ow_received >= OW_TOTAL)
+	if (ow_received >= ow_total)
 		mbt_ev_stop(g_ev);
 }
 
@@ -188,8 +190,8 @@ static void ow_client_writecb(struct mbt_conn *c, void *arg);
 static void
 ow_client_pump(struct mbt_conn *c, struct ow_client *st)
 {
-	while (st->off < OW_TOTAL) {
-		size_t chunk = OW_TOTAL - st->off;
+	while (st->off < (size_t)ow_total) {
+		size_t chunk = (size_t)ow_total - st->off;
 		if (chunk > 8192) chunk = 8192;
 		ssize_t n = mbt_conn_write(c, st->data + st->off, chunk);
 		if (n == -ENOBUFS) {
@@ -260,8 +262,8 @@ run_oneway(const char *name, struct rx_fault *fault)
 	mbt_ev_timer_free(to);
 	if (fault->flush_timer) mbt_ev_timer_free(fault->flush_timer);
 
-	assert(ow_received == OW_TOTAL);
-	assert(memcmp(ow_recv_buf, send_data, OW_TOTAL) == 0);
+	assert(ow_received == ow_total);
+	assert(memcmp(ow_recv_buf, send_data, (size_t)ow_total) == 0);
 
 	mbt_conn_free(client_conn);
 	if (ow_server_conn) mbt_conn_free(ow_server_conn);
@@ -294,6 +296,18 @@ test_tail_loss(void)
 	run_oneway("tail_loss", &f);
 }
 
+static void
+test_first_packet_lost(void)
+{
+	/* One packet and no later traffic: no ack can trigger the resend. */
+	struct rx_fault f = {0};
+	f.drop_seq = 2;
+	f.drop_seq_times = 1;
+	ow_total = 300;
+	run_oneway("first_packet_lost", &f);
+	ow_total = OW_TOTAL;
+}
+
 int
 main(void)
 {
@@ -304,6 +318,7 @@ main(void)
 	}
 	test_deep_reorder();
 	test_tail_loss();
+	test_first_packet_lost();
 	printf("all utp robustness tests passed\n");
 	return 0;
 }
