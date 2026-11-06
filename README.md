@@ -2,7 +2,7 @@
 
 A production-grade BitTorrent client library and embeddable tracker, written in C.
 
-Downloads, seeds, and tracks torrents. Pluggable event loop (sd-event or libevent), pluggable storage, pluggable DNS resolver, no global state. Suitable for embedding in daemons, GUI applications, containers, or CLI tools.
+Downloads, seeds, and tracks torrents. Pluggable event loop (sd-event, libevent or poll), pluggable storage, pluggable DNS resolver, no global state. Suitable for embedding in daemons, GUI applications, containers, or CLI tools.
 
 ## Features
 
@@ -12,6 +12,9 @@ Downloads, seeds, and tracks torrents. Pluggable event loop (sd-event or libeven
 - UDP + HTTP tracker client and server
 - Magnet URI support with BEP 9 metadata exchange
 - Fast Extension (BEP 6), private torrents (BEP 27)
+- uTP (BEP 29), holepunch (BEP 55), MSE/PE encryption with a policy
+- Web seeds (BEP 19), BEP 44 DHT items, Lua bindings
+- Storage on a passed descriptor, for a sandboxed process
 - Choking algorithm (BEP 3 tit-for-tat, optimistic unchoke)
 - Rate limiting (token bucket, per-session and per-torrent)
 - NAT traversal via PCP (RFC 6887, TCP + UDP mapping)
@@ -19,21 +22,23 @@ Downloads, seeds, and tracks torrents. Pluggable event loop (sd-event or libeven
 - Async I/O throughout (no blocking in event loop)
 - Async HTTP tracker callback API
 - Memory-bounded (configurable pieces per peer, default 4)
-- 43 tests, ASan + valgrind clean, AFL fuzz-tested, zero leaks
-- Portable: Linux, OpenBSD 7.9 (amd64 + riscv64), FreeBSD 15.0
+- Test suite, ASan and valgrind runs, AFL fuzz targets
+- Portable: Linux, OpenBSD, FreeBSD, illumos, ESP32
 
 ## Building
 
 ```
-meson setup build -Devent_backend=sd-event   # or libevent
+meson setup build     # debugoptimized by default, -Devent_backend=auto
 ninja -C build
 meson test -C build
 ```
 
 Options:
 ```
--Devent_backend=sd-event|libevent
--Ddns_backend=blocking|cares|asr
+-Devent_backend=auto|sd-event|libevent|libevent1|poll
+-Ddns_backend=auto|blocking|cares|asr
+-Dlua=lua5.4     # build the Lua module; see lua/README.md
+-Dcurl=disabled  # no HTTPS trackers, no web seeds
 -Dtests=false    # skip tests and fuzz targets
 ```
 
@@ -52,16 +57,19 @@ ninja -C build-fuzz
 afl-fuzz -i fuzz/corpus -o fuzz/out_bencode -- ./build-fuzz/fuzz_bencode
 ```
 
-Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_lsd`, `fuzz_dht`, `fuzz_magnet`.
+`./fuzz.sh [name]` runs one target with ASan and UBSan.
+Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_torrent`, `fuzz_lsd`, `fuzz_dht`,
+`fuzz_magnet`, `fuzz_mse`.
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `mbt-get` | Download by .torrent or magnet URI (-r for rate limit) |
+| `mbt-get` | Download by .torrent or magnet URI (-r rate limit, -e encryption, -w web seed) |
 | `mbt-tui` | ncurses client (torrent list, peers, piece map, log) |
-| `mbt-torrent` | Create, inspect, convert .torrent files |
+| `mbt-torrent` | Create, inspect, convert .torrent files (-w web seed) |
 | `mbt-dht` | Standalone DHT peer lookup |
+| `mbt-dhtd` | Persistent DHT node |
 | `mbt-tracker` | UDP + HTTP tracker daemon |
 | `mbt-pcp` | PCP port mapping tool (-k for persistent) |
 | `mbt-lsd` | LSD auto-discovery + replicate |
@@ -81,12 +89,15 @@ Targets: `fuzz_bencode`, `fuzz_metainfo`, `fuzz_lsd`, `fuzz_dht`, `fuzz_magnet`.
 | 12 | Multi-tracker | ✅ Complete |
 | 14 | LSD | ✅ Complete |
 | 15 | UDP Tracker | ✅ Client + server |
+| 19 | HTTP Seeding | ✅ Single-file torrents |
 | 23 | Compact Peer Lists | ✅ Complete |
 | 27 | Private Torrents | ✅ Complete |
+| 29 | µTP | ✅ Complete |
 | 32 | DHT IPv6 | ✅ Complete |
-| 19 | HTTP Seeding | ✅ Single-file torrents |
-| 29 | µTP | ❌ Not implemented |
-| 55 | Holepunch | ❌ Not implemented |
+| 44 | DHT Items | ✅ Store and query; no signing |
+| 47 | Padding Files | ✅ Storage |
+| 51 | DHT Infohash Indexing | ✅ Server side |
+| 55 | Holepunch | ✅ Complete |
 
 MSE/PE stream encryption has no BEP. mbt implements it: see `mbt_mse(3)`.
 

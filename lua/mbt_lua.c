@@ -1585,6 +1585,28 @@ l_add_tracker(lua_State *L)
 }
 
 /* t:add_peer(addr, port[, utp]) */
+/* t:piece_avail(i): peers with piece i, from 0. */
+static int
+l_piece_avail(lua_State *L)
+{
+	lua_pushinteger(L, mbt_torrent_piece_avail(check_torrent(L, 1, NULL),
+	                                           (uint32_t)luaL_checkinteger(L, 2)));
+	return 1;
+}
+
+/* t:metadata(): the raw info dictionary, or nil before it is known. */
+static int
+l_metadata(lua_State *L)
+{
+	size_t len = 0;
+	const void *m = mbt_torrent_metadata(check_torrent(L, 1, NULL), &len);
+
+	if (m == NULL)
+		return 0;
+	lua_pushlstring(L, m, len);
+	return 1;
+}
+
 /* t:set_no_upload(on): send no pieces to peers. */
 static int
 l_set_no_upload(lua_State *L)
@@ -2510,6 +2532,13 @@ l_metainfo(lua_State *L)
 		lua_rawseti(L, -2, i + 1);
 	}
 	lua_setfield(L, -2, "trackers");
+	n = mbt_metainfo_webseed_count(mi);
+	lua_createtable(L, n, 0);
+	for (i = 0; i < n; i++) {
+		lua_pushstring(L, mbt_metainfo_webseed(mi, i));
+		lua_rawseti(L, -2, i + 1);
+	}
+	lua_setfield(L, -2, "webseeds");
 	n = mbt_metainfo_file_count(mi);
 	lua_createtable(L, n, 0);
 	for (i = 0; i < n; i++) {
@@ -2558,6 +2587,15 @@ l_create(lua_State *L)
 				lua_pop(L, 1);
 			}
 		}
+		lua_settop(L, 2);
+		lua_getfield(L, 2, "webseeds");
+		if (lua_istable(L, -1)) {
+			for (i = 1; rv >= 0 && lua_rawgeti(L, -1, i) == LUA_TSTRING; i++) {
+				rv = mbt_metainfo_add_webseed(mi, lua_tostring(L, -1));
+				lua_pop(L, 1);
+			}
+		}
+		lua_settop(L, 2);
 	}
 	if (rv >= 0)
 		rv = mbt_metainfo_set_content(mi, path, (uint32_t)plen);
@@ -2975,6 +3013,8 @@ static const luaL_Reg torrent_methods[] = {
     {"add_tracker", l_add_tracker},
     {"add_webseed", l_add_webseed},
     {"set_no_upload", l_set_no_upload},
+    {"piece_avail", l_piece_avail},
+    {"metadata", l_metadata},
     {"webseed_bytes", l_webseed_bytes},
     {"add_fallback_trackers", l_add_fallback_trackers},
     {"add_peer", l_add_peer},

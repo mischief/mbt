@@ -4,6 +4,9 @@
 .Os
 .Sh NAME
 .Nm mbt_torrent_new ,
+.Nm mbt_torrent_bytes_uploaded ,
+.Nm mbt_torrent_hash_failures ,
+.Nm mbt_torrent_set_no_upload ,
 .Nm mbt_torrent_free ,
 .Nm mbt_torrent_set_callbacks ,
 .Nm mbt_torrent_set_metadata ,
@@ -115,6 +118,12 @@
 .Fn mbt_torrent_download_rate "struct mbt_torrent *t"
 .Ft int
 .Fn mbt_torrent_peer_stats "struct mbt_torrent *t" "int idx" "struct mbt_peer_stats *out"
+.Ft uint64_t
+.Fn mbt_torrent_bytes_uploaded "struct mbt_torrent *t"
+.Ft uint64_t
+.Fn mbt_torrent_hash_failures "struct mbt_torrent *t"
+.Ft void
+.Fn mbt_torrent_set_no_upload "struct mbt_torrent *t" "int on"
 .Sh DESCRIPTION
 A torrent manages a single download or seed operation.
 It owns peer connections, piece state, storage access, and the piece picker.
@@ -266,6 +275,19 @@ if the torrent does not have the piece, and
 .Er ENOTSUP
 if the storage cannot read.
 Errors are negative.
+.Pp
+.Fn mbt_torrent_bytes_downloaded ,
+.Fn mbt_torrent_bytes_uploaded
+and
+.Fn mbt_torrent_hash_failures
+return totals for this run.
+They include peers that have left.
+The byte totals count peers only; see
+.Xr mbt_webseed 3 .
+.Pp
+.Fn mbt_torrent_set_no_upload
+stops or restarts sending pieces to peers.
+The torrent stays in the swarm, downloads, and answers metadata requests.
 .Sh RETURN VALUES
 Functions returning
 .Ft int

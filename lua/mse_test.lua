@@ -56,6 +56,12 @@ local function check()
 	assert(wt:add_webseed("http://127.0.0.1:1/x"))
 	assert(wt:add_webseed("gopher://x") == nil)
 	assert(wt:webseed_bytes() == 0)
+	assert(wt:stats().hash_failures == 0)
+	assert(wt:piece_avail(0) == 0)
+	assert(#wt:metadata() > 0)
+	local made = assert(mbt.create(path, {piece_length = 16384,
+	    webseeds = {"http://127.0.0.1:1/x"}}))
+	assert(mbt.metainfo(made).webseeds[1] == "http://127.0.0.1:1/x")
 
 	-- A session with no default storage, and no default DHT node.
 	local ns = assert(mbt.session{storage = false, dht = true, dht_bootstrap = {"127.0.0.1:1"}})

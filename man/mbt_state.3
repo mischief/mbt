@@ -1,0 +1,41 @@
+.\" SPDX-License-Identifier: ISC
+.Dd November 6, 2026
+.Dt MBT_STATE 3
+.Os
+.Sh NAME
+.Nm mbt_state_open ,
+.Nm mbt_state_close ,
+.Nm mbt_state_file_ops
+.Nd saved torrent list for a session
+.Sh SYNOPSIS
+.In mbt/state.h
+.Ft int
+.Fn mbt_state_open "struct mbt_state **out" "const char *dir"
+.Ft void
+.Fn mbt_state_close "struct mbt_state *st"
+.Ft const struct mbt_state_ops *
+.Fn mbt_state_file_ops void
+.Sh DESCRIPTION
+A session can save its torrents and add them again at the next start.
+Set
+.Fa state_ops
+and
+.Fa state_ctx
+in
+.Vt struct mbt_session_config .
+.Pp
+.Fn mbt_state_open
+opens or creates a state directory.
+.Fn mbt_state_file_ops
+returns the operations that use that directory.
+Other backends fill in
+.Vt struct mbt_state_ops .
+.Pp
+The saved data is the info dictionary, the data directory, and the time the
+torrent was added.
+Trackers and web seeds are not saved.
+.Sh RETURN VALUES
+.Fn mbt_state_open
+returns 0 on success or a negative errno value on failure.
+.Sh SEE ALSO
+.Xr mbt_session 3

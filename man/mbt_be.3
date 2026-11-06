@@ -3,6 +3,15 @@
 .Dt MBT_BE 3
 .Os
 .Sh NAME
+.Nm mbt_bew_init ,
+.Nm mbt_bew_dict ,
+.Nm mbt_bew_list ,
+.Nm mbt_bew_end ,
+.Nm mbt_bew_key ,
+.Nm mbt_bew_str ,
+.Nm mbt_bew_int ,
+.Nm mbt_bew_raw ,
+.Nm mbt_bew_finish ,
 .Nm mbt_be_value_parse ,
 .Nm mbt_be_value_encode ,
 .Nm mbt_be_ref ,
@@ -136,6 +145,27 @@ The list increments the reference count of
 .Fa val ;
 the caller retains its own reference.
 .El
+.Sh STREAMING WRITER
+.Vt struct mbt_bew
+writes bencode into a fixed buffer, with no allocation.
+.Fn mbt_bew_init
+starts it.
+.Fn mbt_bew_dict
+and
+.Fn mbt_bew_list
+open a container, and
+.Fn mbt_bew_end
+closes it.
+.Fn mbt_bew_key ,
+.Fn mbt_bew_str ,
+.Fn mbt_bew_int
+and
+.Fn mbt_bew_raw
+add values.
+After an error, later calls do nothing.
+.Fn mbt_bew_finish
+returns that error, or the length.
+Keys must come in sorted order.
 .Sh TRAVERSAL AND INSPECTION
 .Fn mbt_be_find
 searches for a key within a dictionary and returns the associated

@@ -93,10 +93,10 @@ removed torrent.
   0). Use it in place of `mbt.run` to drive the loop from your own loop.
 - `mbt.metainfo(data)` parses `.torrent` bytes into a table with `name`,
   `infohash`, `comment`, `piece_count`, `piece_length`, `length`, `private`,
-  `trackers` and `files` (`path`, `length`).
+  `trackers`, `webseeds` and `files` (`path`, `length`).
 - `mbt.create(path[, opts])` hashes a file or directory and returns
   `.torrent` bytes. It blocks the loop. `opts`: `piece_length` (default
-  262144), `trackers`, `comment` and `private`.
+  262144), `trackers`, `webseeds`, `comment` and `private`.
 - `mbt.magnet(uri)` parses a magnet URI into a table with `infohash`, `name`,
   `trackers` and `peers` (`addr`, `port`).
 - `mbt.log(false)` stops logging. `mbt.log(true)` logs to stderr.
@@ -142,7 +142,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
 - `t:error()` returns nil, or the message and errno that stopped the torrent.
 - `t:stats()` returns a table with `name`, `state`, `progress`, `complete`,
   `has_metadata`, `private`, `piece_count`, `piece_length`, `have_count`,
-  `bytes_downloaded`, `peer_count`, `upload_rate`, `download_rate`, `dir`
+  `bytes_downloaded`, `bytes_uploaded`, `hash_failures`, `webseed_bytes`,
+  `peer_count`, `upload_rate`, `download_rate`, `dir`
   and, after a failure, `error`.
 - `t:peers()` returns a list of tables with `addr`, `client`, `port`,
   `conn_port`, `choked`, `interested`, `snubbed`, `utp`, `outstanding`,
@@ -154,6 +155,8 @@ A torrent value holds the infohash. Two values for one torrent compare equal.
   periodic announce.
 - `t:add_fallback_trackers()` adds public trackers and announces. It does
   nothing for a private torrent.
+- `t:piece_avail(i)` counts peers with piece `i`, from 0. `t:metadata()` returns
+  the raw info dictionary, or nothing before it is known.
 - `t:set_no_upload(on)` stops sending pieces to peers. The add calls take
   `no_upload = true`. Metadata requests still get an answer.
 - `t:add_webseed(url)` adds a BEP 19 web seed, for a single-file torrent.

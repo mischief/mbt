@@ -3,6 +3,7 @@
 .Dt MBT_EVENT 3
 .Os
 .Sh NAME
+.Nm mbt_ev_watch ,
 .Nm mbt_ev_new_default ,
 .Nm mbt_ev_sd_new ,
 .Nm mbt_ev_sd_new_from ,
@@ -91,6 +92,20 @@ reschedules it for a new absolute time value.
 Functions returning
 .Ft int
 return 0 on success or a negative errno value on failure.
+.Sh WATCH DESCRIPTOR
+.Fn mbt_ev_watch
+is for a program with its own poll loop.
+It runs ready work, then returns one descriptor that becomes readable when the
+loop has work, and sets
+.Fa timeout_ms
+to the longest wait, or -1 for no limit.
+Call it before each poll, and
+.Fn mbt_ev_step
+with a timeout of 0 after.
+It needs the sd-event backend, or the poll backend on a system with kqueue.
+Others return
+.Er ENOTSUP
+as a negative value, because libevent keeps its sockets to itself.
 .Sh SEE ALSO
 .Xr mbt_session 3 ,
 .Xr mbt_conn 3

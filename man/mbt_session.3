@@ -20,6 +20,12 @@
 .Nm mbt_session_torrent_tracker_count ,
 .Nm mbt_session_torrent_tracker ,
 .Nm mbt_session_enable_dht ,
+.Nm mbt_session_stop_announce ,
+.Nm mbt_session_stops_pending ,
+.Nm mbt_session_bytes_downloaded ,
+.Nm mbt_session_bytes_uploaded ,
+.Nm mbt_session_add_tracker ,
+.Nm mbt_session_add_tracker_fallbacks ,
 .Nm mbt_session_disable_dht ,
 .Nm mbt_session_dht_bootstrap ,
 .Nm mbt_session_dht_get_peers ,
@@ -73,6 +79,18 @@
 .Fn mbt_session_torrent_tracker "struct mbt_session *s" "struct mbt_torrent *t" "int idx"
 .Ft int
 .Fn mbt_session_enable_dht "struct mbt_session *s"
+.Ft int
+.Fn mbt_session_stop_announce "struct mbt_session *s"
+.Ft int
+.Fn mbt_session_stops_pending "struct mbt_session *s"
+.Ft uint64_t
+.Fn mbt_session_bytes_downloaded "struct mbt_session *s"
+.Ft uint64_t
+.Fn mbt_session_bytes_uploaded "struct mbt_session *s"
+.Ft int
+.Fn mbt_session_add_tracker "struct mbt_session *s" "struct mbt_torrent *t" "const char *url"
+.Ft void
+.Fn mbt_session_add_tracker_fallbacks "struct mbt_session *s" "struct mbt_torrent *t"
 .Ft void
 .Fn mbt_session_disable_dht "struct mbt_session *s"
 .Ft int
@@ -236,6 +254,7 @@ and
 .Fn mbt_session_download_rate
 return the current settings.
 Per-torrent limits are also available via
+.Xr mbt_state 3 ,
 .Xr mbt_torrent 3 .
 .Pp
 The
@@ -249,6 +268,35 @@ fails, and accepts both.
 uses RC4 in both directions and drops plaintext peers.
 .Dv MBT_ENCRYPTION_DISABLE
 uses plaintext only.
+.Sh TRACKERS
+.Fn mbt_session_add_tracker
+adds one tracker URL to a torrent, at most 16.
+.Fn mbt_session_add_tracker_fallbacks
+adds public trackers, unless the torrent is private.
+.Sh LEAVING A SWARM
+.Fn mbt_session_stop_announce
+sends event=stopped to the trackers of all torrents, and returns the number of
+replies to wait for.
+Run the event loop until
+.Fn mbt_session_stops_pending
+returns 0, or for a short time, then call
+.Fn mbt_session_free ,
+which drops what is in flight.
+.Fn mbt_session_remove_torrent
+sends the event for one torrent.
+.Sh TOTALS
+.Fn mbt_session_bytes_downloaded
+and
+.Fn mbt_session_bytes_uploaded
+return the bytes moved with peers in this run, with removed torrents.
+.Sh DHT BOOTSTRAP
+.Fn mbt_session_enable_dht
+contacts a default node, unless
+.Fa dht_no_bootstrap
+is set in
+.Vt struct mbt_session_config .
+Then use
+.Fn mbt_session_dht_bootstrap .
 .Sh RETURN VALUES
 Functions returning
 .Ft int
@@ -275,30 +323,6 @@ returns the UDP port used by the DHT node, or 0 if DHT is not enabled.
 .Pp
 .Fn mbt_session_enable_dht_local
 enables the DHT node on an already-created session (alternative to enable_dht).
-.Sh LEAVING A SWARM
-.Fn mbt_session_stop_announce
-sends event=stopped to the trackers of all torrents, and returns the number of
-replies to wait for.
-Run the event loop until
-.Fn mbt_session_stops_pending
-returns 0, or for a short time, then call
-.Fn mbt_session_free ,
-which drops what is in flight.
-.Fn mbt_session_remove_torrent
-sends the event for one torrent.
-.Sh TOTALS
-.Fn mbt_session_bytes_downloaded
-and
-.Fn mbt_session_bytes_uploaded
-return the bytes moved with peers in this run, with removed torrents.
-.Sh DHT BOOTSTRAP
-.Fn mbt_session_enable_dht
-contacts a default node, unless
-.Fa dht_no_bootstrap
-is set in
-.Vt struct mbt_session_config .
-Then use
-.Fn mbt_session_dht_bootstrap .
 .Sh SEE ALSO
 .Xr mbt_torrent 3 ,
 .Xr mbt_pcp 3 ,

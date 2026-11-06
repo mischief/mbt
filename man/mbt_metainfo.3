@@ -8,6 +8,9 @@
 .Nm mbt_metainfo_free ,
 .Nm mbt_metainfo_set_content ,
 .Nm mbt_metainfo_add_tracker ,
+.Nm mbt_metainfo_add_webseed ,
+.Nm mbt_metainfo_webseed_count ,
+.Nm mbt_metainfo_webseed ,
 .Nm mbt_metainfo_add_node ,
 .Nm mbt_metainfo_set_comment ,
 .Nm mbt_metainfo_set_private ,
@@ -42,6 +45,12 @@
 .Fn mbt_metainfo_set_content "struct mbt_metainfo *mi" "const char *path" "uint32_t piece_length"
 .Ft int
 .Fn mbt_metainfo_add_tracker "struct mbt_metainfo *mi" "const char *url"
+.Ft int
+.Fn mbt_metainfo_add_webseed "struct mbt_metainfo *mi" "const char *url"
+.Ft int
+.Fn mbt_metainfo_webseed_count "struct mbt_metainfo *mi"
+.Ft const char *
+.Fn mbt_metainfo_webseed "struct mbt_metainfo *mi" "int idx"
 .Ft int
 .Fn mbt_metainfo_add_node "struct mbt_metainfo *mi" "const char *host" "uint16_t port"
 .Ft void
@@ -85,6 +94,16 @@
 .Ft int
 .Fn mbt_metainfo_encode "struct mbt_metainfo *mi" "unsigned char **out" "size_t *len"
 .Sh DESCRIPTION
+BEP 19 web seeds come from
+.Dq url-list .
+.Fn mbt_metainfo_add_webseed
+adds an http or https URL, at most 16 in all.
+.Fn mbt_metainfo_webseed_count
+and
+.Fn mbt_metainfo_webseed
+read them.
+They are not part of the infohash.
+.Pp
 Parses and builds .torrent metainfo files.
 .Pp
 .Fn mbt_metainfo_parse

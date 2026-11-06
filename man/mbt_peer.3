@@ -3,6 +3,7 @@
 .Dt MBT_PEER 3
 .Os
 .Sh NAME
+.Nm mbt_peer_send_reject ,
 .Nm mbt_peer_new ,
 .Nm mbt_peer_new_incoming ,
 .Nm mbt_peer_free ,
@@ -194,6 +195,10 @@ relevant state becomes available.
 Functions returning
 .Ft int
 return 0 on success or a negative errno value on failure.
+.Pp
+.Fn mbt_peer_send_reject
+refuses a request, as BEP 6 says.
+It does nothing for a peer without the fast extension.
 .Sh SEE ALSO
 .Xr mbt_session 3 ,
 .Xr mbt_torrent 3 ,

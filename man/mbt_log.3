@@ -5,6 +5,7 @@
 .Sh NAME
 .Nm mbt_log_set ,
 .Nm mbt_log_set_debug ,
+.Nm mbt_log_set_trace ,
 .Nm mbt_log_stderr ,
 .Nm mbt_log_syslog ,
 .Nm mbt_log_level_str ,
@@ -15,6 +16,8 @@
 .In mbt/log.h
 .Ft void
 .Fn mbt_log_set "mbt_log_fn fn" "void *arg"
+.Ft void
+.Fn mbt_log_set_trace "uint32_t component_mask"
 .Ft void
 .Fn mbt_log_set_debug "uint32_t component_mask"
 .Ft void
