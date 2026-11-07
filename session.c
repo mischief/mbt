@@ -73,6 +73,8 @@ struct session_torrent {
 	int dht_want;            /* DHT_WANT_ bits; nonzero while on a dht_queue */
 	int dht_class;           /* DHT_Q_ index of that queue */
 	TAILQ_ENTRY(session_torrent) dht_entry;
+	TAILQ_ENTRY(session_torrent) announce_entry;
+	int announce_class;      /* ANNOUNCE_Q_ index while queued, -1 when not */
 	int started_announced;   /* sent event=started on first announce */
 	int started_acked;       /* a tracker answered event=started */
 	int announce_settled;    /* this round has a reply, or a retry timer */
@@ -118,6 +120,9 @@ STAILQ_HEAD(pending_utp_connect_list, pending_utp_connect);
 #define LISTEN_TRIES 8
 /* A download looks up before a seed announces. */
 enum { DHT_Q_DOWNLOAD, DHT_Q_SEED, DHT_Q_COUNT };
+/* Torrents with no started announce yet go first. */
+enum { ANNOUNCE_Q_NEW, ANNOUNCE_Q_AGAIN, ANNOUNCE_Q_COUNT };
+#define ANNOUNCE_RATE 20
 
 #define DHT_WANT_PEERS 1
 #define DHT_WANT_ANNOUNCE 2
@@ -226,6 +231,11 @@ struct mbt_session {
 	TAILQ_HEAD(dht_queue_head, session_torrent) dht_queue[DHT_Q_COUNT];
 	LIST_HEAD(, dht_lookup_ctx) dht_lookups; /* in flight */
 	struct mbt_ev_timer *dht_pump;
+	TAILQ_HEAD(announce_queue_head, session_torrent) announce_queue[ANNOUNCE_Q_COUNT];
+	struct mbt_ev_timer *announce_pump;
+	int announce_pump_armed;
+	uint64_t announce_next;  /* earliest time of the next queued announce */
+	int announce_rate;
 
 	/* Pending outgoing connections */
 	struct pending_connect_list pending;
@@ -1271,6 +1281,9 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	LIST_INIT(&s->dht_lookups);
 	for (int i = 0; i < DHT_Q_COUNT; i++)
 		TAILQ_INIT(&s->dht_queue[i]);
+	for (int i = 0; i < ANNOUNCE_Q_COUNT; i++)
+		TAILQ_INIT(&s->announce_queue[i]);
+	s->announce_rate = cfg->announce_rate > 0 ? cfg->announce_rate : ANNOUNCE_RATE;
 	STAILQ_INIT(&s->pending);
 	STAILQ_INIT(&s->pending_utp);
 	LIST_INIT(&s->pending_accepts);
@@ -1305,6 +1318,9 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 		mbt_session_free(s);
 		return -ENOMEM;
 	}
+	/* One source port for all UDP trackers: the one that PCP maps. */
+	if (session_get_mux(s))
+		mbt_tracker_group_set_mux(s->tracker_group, s->udp_mux);
 
 	/* Restore persisted torrents */
 	if (s->state_ops && s->state_ops->enumerate) {
@@ -1374,6 +1390,10 @@ mbt_session_free(struct mbt_session *s)
 	if (s->dht_pump) {
 		mbt_ev_timer_free(s->dht_pump);
 		s->dht_pump = NULL;
+	}
+	if (s->announce_pump) {
+		mbt_ev_timer_free(s->announce_pump);
+		s->announce_pump = NULL;
 	}
 	while ((st = STAILQ_FIRST(&s->torrents))) {
 		STAILQ_REMOVE_HEAD(&s->torrents, next);
@@ -2017,8 +2037,76 @@ mbt_session_stops_pending(struct mbt_session *s)
 	return s->stops_pending;
 }
 
+static void session_announce_now(struct mbt_session *s, struct session_torrent *st);
+
+/* Send queued announces at announce_rate, so many torrents do not flood a tracker. */
+static void
+session_announce_pump_cb(struct mbt_ev_timer *timer, void *v)
+{
+	struct mbt_session *s = v;
+	struct session_torrent *st = NULL;
+	uint64_t gap = 1000000ULL / (uint64_t)s->announce_rate;
+
+	s->announce_pump_armed = 0;
+	for (int q = 0; q < ANNOUNCE_Q_COUNT && !st; q++)
+		st = TAILQ_FIRST(&s->announce_queue[q]);
+	if (!st)
+		return;
+	TAILQ_REMOVE(&s->announce_queue[st->announce_class], st, announce_entry);
+	st->announce_class = -1;
+	s->announce_next = session_now_usec() + gap;
+	session_announce_now(s, st);
+	for (int q = 0; q < ANNOUNCE_Q_COUNT; q++) {
+		if (!TAILQ_EMPTY(&s->announce_queue[q])) {
+			mbt_ev_timer_mod(timer, gap);
+			s->announce_pump_armed = 1;
+			break;
+		}
+	}
+}
+
 static void
 session_do_announce(struct mbt_session *s, struct session_torrent *st)
+{
+	int q = st->started_acked ? ANNOUNCE_Q_AGAIN : ANNOUNCE_Q_NEW;
+	uint64_t now, delay = 0;
+
+	if (st->tracker_count == 0 || st->stop_sent)
+		return;
+	if (st->announce_class == q)
+		return;
+	now = session_now_usec();
+	/* Within the rate and nothing waits: send now, in call order. */
+	if (st->announce_class < 0 && !s->announce_pump_armed && s->announce_next <= now) {
+		s->announce_next = now + 1000000ULL / (uint64_t)s->announce_rate;
+		session_announce_now(s, st);
+		return;
+	}
+	if (st->announce_class >= 0)
+		TAILQ_REMOVE(&s->announce_queue[st->announce_class], st, announce_entry);
+	TAILQ_INSERT_TAIL(&s->announce_queue[q], st, announce_entry);
+	st->announce_class = q;
+	if (s->announce_pump_armed)
+		return;
+	if (s->announce_next > now)
+		delay = s->announce_next - now;
+	if (s->announce_pump)
+		mbt_ev_timer_mod(s->announce_pump, delay);
+	else if (mbt_ev_timer_new(s->ev, &s->announce_pump, delay, session_announce_pump_cb, s) < 0)
+		return;
+	s->announce_pump_armed = 1;
+}
+
+static void
+session_announce_unqueue(struct mbt_session *s, struct session_torrent *st)
+{
+	if (st->announce_class >= 0)
+		TAILQ_REMOVE(&s->announce_queue[st->announce_class], st, announce_entry);
+	st->announce_class = -1;
+}
+
+static void
+session_announce_now(struct mbt_session *s, struct session_torrent *st)
 {
 	if (st->tracker_count == 0 || st->stop_sent)
 		return;
@@ -2167,6 +2255,7 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
 	st = calloc(1, sizeof(*st));
 	if (!st)
 		return -ENOMEM;
+	st->announce_class = -1;
 
 	struct mbt_storage *stor = (acfg && acfg->storage) ? acfg->storage : s->default_storage;
 
@@ -2448,6 +2537,7 @@ mbt_session_remove_torrent(struct mbt_session *s, struct mbt_infohash *ih)
 	session_send_stopped(s, st);
 	STAILQ_REMOVE(&s->torrents, st, session_torrent, next);
 	session_dht_unqueue(s, st);
+	session_announce_unqueue(s, st);
 	session_cancel_connects(s, st->torrent);
 	s->down_gone += mbt_torrent_bytes_downloaded(st->torrent);
 	s->up_gone += mbt_torrent_bytes_uploaded(st->torrent);

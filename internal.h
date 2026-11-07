@@ -90,6 +90,11 @@ struct mbt_session *torrent_session(struct mbt_torrent *t);
 int torrent_set_source(struct mbt_torrent *t, const void *data, size_t len);
 const void *torrent_source(struct mbt_torrent *t, size_t *len);
 void torrent_source_clear(struct mbt_torrent *t);
+struct mbt_tracker_group;
+struct mbt_udp_mux;
+/* Send the UDP announces of g through mux, the session socket. NULL: own sockets. */
+void mbt_tracker_group_set_mux(struct mbt_tracker_group *g, struct mbt_udp_mux *mux);
+
 const char *session_saved_tracker(struct mbt_session *s, struct mbt_torrent *t, int idx);
 uint64_t torrent_total_length(struct mbt_torrent *t);
 int torrent_webseed_wanted(struct mbt_torrent *t);

@@ -37,6 +37,8 @@ struct mbt_udp_mux {
 	void *utp_arg;
 	mbt_udp_handler dht_h;
 	void *dht_arg;
+	mbt_udp_handler tracker_h;
+	void *tracker_arg;
 	struct mbt_ratelimit *trunc_rl;  /* throttles the oversized-datagram warning */
 };
 
@@ -74,6 +76,9 @@ udp_mux_dispatch(struct mbt_udp_mux *m, const uint8_t *buf, size_t n,
 	} else if (buf[0] == 'd') {
 		if (m->dht_h)
 			m->dht_h(buf, n, src, srclen, m->dht_arg);
+	} else if (buf[0] == 0) {
+		if (m->tracker_h)
+			m->tracker_h(buf, n, src, srclen, m->tracker_arg);
 	}
 	/* unrecognized: drop */
 }
@@ -140,6 +145,13 @@ mbt_udp_mux_set_dht(struct mbt_udp_mux *m, mbt_udp_handler h, void *arg)
 {
 	m->dht_h = h;
 	m->dht_arg = arg;
+}
+
+void
+mbt_udp_mux_set_tracker(struct mbt_udp_mux *m, mbt_udp_handler h, void *arg)
+{
+	m->tracker_h = h;
+	m->tracker_arg = arg;
 }
 
 int

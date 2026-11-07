@@ -58,6 +58,7 @@ removed torrent.
     Fallback trackers are not saved.
   - `dht_max_stored`: infohashes the session's DHT node stores (default 64).
   - `dht_send_rate`: queries per second from the session's DHT node (default 50).
+  - `announce_rate`: torrents announced to their trackers per second (default 20). More wait in a queue, new torrents first.
   - `picker`: `"rarest"` (default), `"random"` or `"sequential"`.
   - `upload_rate`, `download_rate`: bytes per second, 0 for no limit.
   - `encryption`: `"prefer"` (default), `"require"` or `"disable"`. See

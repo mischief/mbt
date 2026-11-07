@@ -102,6 +102,8 @@ tracker_retry_test = executable('tracker_retry_test', 'tracker_retry_test.c', li
 test('tracker_retry', tracker_retry_test, timeout: 60)
 tracker_ip_test = executable('tracker_ip_test', 'tracker_ip_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_ip', tracker_ip_test, timeout: 30)
+tracker_pace_test = executable('tracker_pace_test', 'tracker_pace_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tracker_pace', tracker_pace_test, timeout: 60)
 tracker_burst_test = executable('tracker_burst_test', 'tracker_burst_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_burst', tracker_burst_test, timeout: 30)
 backoff_test = executable('backoff_test', 'backoff_test.c', include_directories: mbt_inc, dependencies: deps)

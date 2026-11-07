@@ -11,7 +11,8 @@
  *
  * Demux: a uTP packet's first byte is (type<<4)|version with version==1 and
  * type in 0..4, i.e. 0x01/0x11/0x21/0x31/0x41. A DHT KRPC message is a bencoded
- * dict starting with 'd' (0x64). These never collide.
+ * dict starting with 'd' (0x64). A UDP tracker reply (BEP 15) starts with a
+ * 32-bit action of 0 to 3, so its first byte is 0. These never collide.
  */
 
 #include <stdint.h>
@@ -42,6 +43,8 @@ int  mbt_udp_mux_new(struct mbt_udp_mux **out, struct mbt_ev *ev, uint16_t port)
  * bencoded (DHT) datagrams; either may be NULL. */
 void mbt_udp_mux_set_utp(struct mbt_udp_mux *m, mbt_udp_handler h, void *arg);
 void mbt_udp_mux_set_dht(struct mbt_udp_mux *m, mbt_udp_handler h, void *arg);
+/* UDP tracker replies: first byte 0. */
+void mbt_udp_mux_set_tracker(struct mbt_udp_mux *m, mbt_udp_handler h, void *arg);
 
 /* Send a datagram. Picks the v4/v6 socket from dst family. 0 on success. */
 int  mbt_udp_mux_sendto(struct mbt_udp_mux *m, const void *buf, size_t len,
