@@ -232,7 +232,8 @@ executable('mbt-dht', 'tools/mbt-dht.c', link_with: [libmbt], include_directorie
 mbt_dhtd_exe = executable('mbt-dhtd', 'tools/mbt-dhtd.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 mbt_dht_check_exe = executable('mbt-dht-check', 'tools/mbt-dht-check.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
 test('dht_check', find_program('test/dht_check_test.sh'), args: [mbt_dhtd_exe, mbt_dht_check_exe], timeout: 40)
-executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+mbt_tracker_exe = executable('mbt-tracker', 'tools/mbt-tracker.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)
+test('tracker_daemon', find_program('test/tracker_daemon_test.sh'), args: [mbt_tracker_exe], timeout: 30)
 
 if libcurl_dep.found()
   executable('mbt-get', 'tools/mbt-get.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps, install: true, install_rpath: mbt_rpath)

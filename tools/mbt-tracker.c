@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 /*
  * mbt-tracker: standalone UDP + HTTP tracker daemon
- * Usage: mbt-tracker [-u udp_port] [-H http_port] [-i interval] [-e expire] [-m max_torrents]
+ * Usage: mbt-tracker [-d] [-u udp_port] [-H http_port] [-i interval] [-e expire] [-m max_torrents]
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,12 +26,13 @@ int main(int argc, char *argv[])
 	int rv, ch;
 	uint16_t udp_port = 6969;
 	uint16_t http_port = 6969;
-	int use_udp = 0, use_http = 0;
+	int use_udp = 0, use_http = 0, debug = 0;
 	int interval = 0, expire = 0, max_torrents = 1 << 20;
 	struct mbt_tracker_store *store;
 
-	while ((ch = getopt(argc, argv, "hu:H:i:e:m:")) != -1) {
+	while ((ch = getopt(argc, argv, "dhu:H:i:e:m:")) != -1) {
 		switch (ch) {
+		case 'd': debug = 1; break;
 		case 'u': udp_port = mbt_arg_int(optarg, 0, UINT16_MAX); use_udp = 1; break;
 		case 'H': http_port = mbt_arg_int(optarg, 0, UINT16_MAX); use_http = 1; break;
 		case 'i': interval = mbt_arg_int(optarg, 1, 86400); break;
@@ -39,7 +40,7 @@ int main(int argc, char *argv[])
 		case 'm': max_torrents = mbt_arg_int(optarg, 1, 1 << 30); break;
 		case 'h':
 		default:
-			fprintf(stderr, "usage: mbt-tracker [-u udp_port] [-H http_port] [-i interval] "
+			fprintf(stderr, "usage: mbt-tracker [-d] [-u udp_port] [-H http_port] [-i interval] "
 			        "[-e expire] [-m max_torrents]\n");
 			return ch == 'h' ? 0 : 1;
 		}
@@ -49,7 +50,8 @@ int main(int argc, char *argv[])
 	if (!use_udp && !use_http) { use_udp = 1; use_http = 1; }
 
 	mbt_log_set(mbt_log_stderr, NULL);
-	mbt_log_set_debug(MBT_LOG_ALL);
+	if (debug)
+		mbt_log_set_debug(MBT_LOG_ALL);
 
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
@@ -76,6 +78,11 @@ int main(int argc, char *argv[])
 		if (rv < 0) errx(1, "HTTP tracker: %s", strerror(-rv));
 		fprintf(stderr, "HTTP tracker on port %hu\n", http_port);
 	}
+
+#ifdef __OpenBSD__
+	if (unveil("/", "") == -1 || pledge("stdio inet", NULL) == -1)
+		err(1, "sandbox");
+#endif
 
 	mbt_ev_run(ev);
 

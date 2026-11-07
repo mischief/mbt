@@ -1,6 +1,7 @@
 #!/bin/sh
 # usage: dht_check_test.sh mbt-dhtd mbt-dht-check
 # A private node with a dead bootstrap address, so no public traffic.
+# The name makes the resolver run under the sandbox of the node.
 set -u
 DHTD=$1
 CHECK=$2
@@ -10,7 +11,7 @@ B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 C=cccccccccccccccccccccccccccccccccccccccc
 LIST=$(mktemp)
 
-"$DHTD" -p "$PORT" -b 127.0.0.1:1 2>/dev/null &
+"$DHTD" -p "$PORT" -b localhost:1 2>/dev/null &
 NODE=$!
 trap 'kill $NODE 2>/dev/null; rm -f "$LIST"' EXIT
 sleep 0.3

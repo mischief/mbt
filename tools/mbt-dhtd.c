@@ -58,6 +58,11 @@ int main(int argc, char *argv[])
 	rv = mbt_dht_new(&dht, &cfg);
 	if (rv < 0) { fprintf(stderr, "dht_new: %s\n", strerror(-rv)); return 1; }
 
+#ifdef __OpenBSD__
+	if (unveil("/", "") == -1 || pledge("stdio inet dns", NULL) == -1)
+		err(1, "sandbox");
+#endif
+
 	/* Parse bootstrap host:port */
 	char host[256];
 	uint16_t bport = 6881;
