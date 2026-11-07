@@ -6,6 +6,9 @@
 
 struct mbt_lsd_frame_info;
 
+/* BEP 14: a packet with many infohashes stays at or below this size. */
+#define MBT_LSD_MAX_PACKET 1400
+
 struct mbt_lsd
 {
 	int fd;   /* IPv4 multicast */

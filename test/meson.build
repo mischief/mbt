@@ -139,6 +139,8 @@ test('choke', choke_test, timeout: 20)
 
 lsd_test = executable('lsd_test', 'lsd_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('lsd', lsd_test, timeout: 5)
+lsd_rotate_test = executable('lsd_rotate_test', 'lsd_rotate_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('lsd_rotate', lsd_rotate_test, timeout: 60)
 
 partial_resume_test = executable('partial_resume_test', 'partial_resume_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('partial_resume', partial_resume_test, timeout: 15)

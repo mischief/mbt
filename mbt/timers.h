@@ -11,7 +11,7 @@ struct mbt_timers {
 	int keepalive_interval;  /* default 120 */
 	int snub_timeout;        /* default 60 — no data from peer = snubbed */
 	int dht_refresh;         /* default 900 (15 min) */
-	int lsd_interval;        /* default 300 (5 min) */
+	int lsd_interval;        /* LSD, each torrent; default 300 (5 min), 5 packets each */
 	int tracker_interval;    /* default 1800 (30 min) */
 	int connect_timeout;     /* default 10 */
 	int accept_timeout;      /* default 30: accepted peer must send a BT handshake */

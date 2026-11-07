@@ -57,6 +57,7 @@ struct mbt_torrent;
 
 struct session_torrent {
 	struct mbt_session *session;
+	uint64_t lsd_last;       /* time of our last LSD announce, 0 for never */
 	struct mbt_torrent *torrent;
 	struct mbt_infohash *ih;
 	char *trackers[16];
@@ -216,6 +217,9 @@ struct mbt_session {
 
 	/* LSD announcer timer (optional) */
 	struct mbt_ev_timer *lsd_announce_timer;
+	uint64_t lsd_last_send;  /* time of the last LSD packet, 0 for never */
+	int lsd_cursor;          /* index in torrents where the next round starts */
+	int lsd_soon;            /* timer is armed early for a new torrent */
 
 	/* Torrents */
 	struct session_torrent_list torrents;
@@ -314,37 +318,108 @@ session_pcp_start(struct mbt_session *s)
 	            session_pcp_on_map, s);
 }
 
+static uint64_t
+session_now_usec(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL + 1;
+}
+
+/* Seconds between LSD packets: five per interval, and BEP 14 allows one per minute. */
+static int
+session_lsd_tick(const struct mbt_session *s)
+{
+	int tick = s->timers.lsd_interval / 5;
+
+	return tick < 1 ? 1 : tick > 60 ? 60 : tick;
+}
+
+#define LSD_BATCH 32
+
+/*
+ * Send at most one packet. New torrents go first, then torrents whose
+ * last announce is lsd_interval old, round-robin from lsd_cursor.
+ */
 static void
 session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 {
 	struct mbt_session *s = v;
-	struct session_torrent *st;
+	struct session_torrent *st, *pick[LSD_BATCH];
+	char hex[LSD_BATCH][MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
+	const char *hashes[LSD_BATCH];
+	int pick_idx[LSD_BATCH];
+	int n = 0, count = 0, i;
+	uint64_t now = session_now_usec();
+	uint64_t period = (uint64_t)s->timers.lsd_interval * 1000000ULL;
 
+	s->lsd_soon = 0;
 	if (!s->lsd || s->listen_port == 0)
 		goto reschedule;
 
-	/* Batch all infohashes into one announce */
-	const char *hashes[25];
-	int n = 0;
+	STAILQ_FOREACH(st, &s->torrents, next)
+		count++;
+	/* The list can shrink below the cursor. */
+	if (s->lsd_cursor >= count)
+		s->lsd_cursor = 0;
+
 	STAILQ_FOREACH(st, &s->torrents, next) {
-		if (mbt_torrent_is_private(st->torrent)) continue;
-		if (n >= 25) {
-			mbt_log_warn(MBT_LOG_LSD, "LSD announce truncated at 25 torrents");
-			break;
+		if (n < LSD_BATCH && st->lsd_last == 0 && !mbt_torrent_is_private(st->torrent)) {
+			pick_idx[n] = -1;
+			pick[n++] = st;
 		}
-		/* Use static buffer per entry — safe since we send before returning */
-		char hexbuf[25][MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
-		mbt_infohash_string(st->ih, hexbuf[n], sizeof(hexbuf[n]));
-		hashes[n] = hexbuf[n];
-		n++;
 	}
-	if (n > 0) {
-		mbt_lsd_announce_multi(s->lsd, hashes, n, s->listen_port);
-		mbt_log_debug(MBT_LOG_LSD, "LSD announce: %d torrents on port %hu", n, s->listen_port);
+	/* Two passes over the list: from the cursor to the end, then from the start. */
+	for (int pass = 0; pass < 2 && n < LSD_BATCH; pass++) {
+		i = 0;
+		STAILQ_FOREACH(st, &s->torrents, next) {
+			int in_pass = pass == 0 ? i >= s->lsd_cursor : i < s->lsd_cursor;
+
+			if (n < LSD_BATCH && in_pass && st->lsd_last != 0 &&
+			    now - st->lsd_last >= period && !mbt_torrent_is_private(st->torrent)) {
+				pick_idx[n] = i;
+				pick[n++] = st;
+			}
+			i++;
+		}
 	}
+	if (n == 0)
+		goto reschedule;
+
+	for (i = 0; i < n; i++) {
+		mbt_infohash_string(pick[i]->ih, hex[i], sizeof(hex[i]));
+		hashes[i] = hex[i];
+	}
+	int sent = mbt_lsd_announce_multi(s->lsd, hashes, n, s->listen_port);
+	if (sent <= 0)
+		goto reschedule;
+	s->lsd_last_send = now;
+	for (i = 0; i < sent; i++) {
+		pick[i]->lsd_last = now;
+		if (pick_idx[i] >= 0)
+			s->lsd_cursor = pick_idx[i] + 1;
+	}
+	mbt_log_debug(MBT_LOG_LSD, "LSD announce: %d of %d torrents on port %hu",
+	              sent, count, s->listen_port);
 
 reschedule:
-	mbt_ev_timer_mod(timer, (uint64_t)s->timers.lsd_interval * 1000000ULL);
+	mbt_ev_timer_mod(timer, (uint64_t)session_lsd_tick(s) * 1000000ULL);
+}
+
+/* A new torrent: send soon if the rate allows, so a burst of adds shares a packet. */
+static void
+session_lsd_wake(struct mbt_session *s)
+{
+	uint64_t tick = (uint64_t)session_lsd_tick(s) * 1000000ULL;
+	uint64_t now = session_now_usec(), wait = 1000000ULL;
+
+	if (!s->lsd_announce_timer || s->lsd_soon)
+		return;
+	if (s->lsd_last_send && now - s->lsd_last_send < tick)
+		return;
+	mbt_ev_timer_mod(s->lsd_announce_timer, wait);
+	s->lsd_soon = 1;
 }
 
 static void session_dht_request(struct mbt_session *s, struct session_torrent *st, int want);
@@ -1468,6 +1543,7 @@ mbt_session_disable_lsd(struct mbt_session *s)
 	if (s->lsd_io) { mbt_ev_io_free(s->lsd_io); s->lsd_io = NULL; }
 	if (s->lsd) { mbt_lsd_freep(&s->lsd); s->lsd = NULL; }
 	if (s->lsd_announce_timer) { mbt_ev_timer_free(s->lsd_announce_timer); s->lsd_announce_timer = NULL; }
+	s->lsd_soon = 0;
 }
 
 /* --- DHT --- */
@@ -2130,12 +2206,8 @@ mbt_session_add_infohash(struct mbt_session *s, struct mbt_infohash *ih,
 	if (s->dht && st->torrent && !mbt_torrent_is_private(st->torrent))
 		mbt_session_dht_get_peers(s, ih);
 
-	/* Immediate LSD announce for this infohash */
-	if (s->lsd && s->listen_port > 0 && !mbt_torrent_is_private(st->torrent)) {
-		char hex[MBT_MBT_INFOHASH_SHA1HEXLEN + 1];
-		mbt_infohash_string(ih, hex, sizeof(hex));
-		mbt_lsd_announce(s->lsd, hex, s->listen_port);
-	}
+	if (s->lsd && s->listen_port > 0 && !mbt_torrent_is_private(st->torrent))
+		session_lsd_wake(s);
 
 	if (out)
 		*out = st->torrent;

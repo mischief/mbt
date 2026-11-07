@@ -281,57 +281,64 @@ err:
 int
 mbt_lsd_announce(struct mbt_lsd *lsd, const char *infohash_hex, uint16_t port)
 {
-	return mbt_lsd_announce_multi(lsd, &infohash_hex, 1, port);
+	int rv = mbt_lsd_announce_multi(lsd, &infohash_hex, 1, port);
+	return rv < 0 ? rv : 0;
 }
+
+/* Build one BT-SEARCH packet. Returns its length, or -1 if it does not fit. */
+static int
+lsd_packet(char *buf, size_t size, const char *host, uint16_t port, const char *cookie,
+           const char **hashes, int count)
+{
+	int off = snprintf(buf, size,
+	    "BT-SEARCH * HTTP/1.1\r\nHost: %s\r\nPort: %hu\r\ncookie: %s\r\n",
+	    host, port, cookie);
+
+	for (int i = 0; i < count && off >= 0 && (size_t)off < size; i++)
+		off += snprintf(buf + off, size - off, "Infohash: %s\r\n", hashes[i]);
+	if (off >= 0 && (size_t)off < size)
+		off += snprintf(buf + off, size - off, "\r\n");
+	if (off < 0 || (size_t)off >= size)
+		return -1;
+	return off;
+}
+
+#define LSD_HOST4 "239.192.152.143:6771"
+#define LSD_HOST6 "[ff15::efc0:988f]:6771"
 
 int
 mbt_lsd_announce_multi(struct mbt_lsd *lsd, const char **hashes, int count, uint16_t port)
 {
-	char buf[1500];
-	int off = 0;
+	/* One extra byte, so a packet of exactly MBT_LSD_MAX_PACKET fits. */
+	char buf[MBT_LSD_MAX_PACKET + 1];
 	struct sockaddr_in dst = {
 		.sin_family = AF_INET,
 		.sin_port = htons(6771),
 		.sin_addr.s_addr = inet_addr("239.192.152.143"),
 	};
+	int len;
 
-	off += snprintf(buf + off, sizeof(buf) - off,
-		"BT-SEARCH * HTTP/1.1\r\n"
-		"Host: 239.192.152.143:6771\r\n"
-		"Port: %hu\r\n"
-		"cookie: %s\r\n", port, lsd->cookie);
+	ASSERT_RETURN(lsd, -EINVAL);
+	ASSERT_RETURN(hashes || count == 0, -EINVAL);
+	if (count <= 0)
+		return 0;
 
-	for (int i = 0; i < count && off < (int)sizeof(buf) - 60; i++)
-		off += snprintf(buf + off, sizeof(buf) - off, "Infohash: %s\r\n", hashes[i]);
+	/* The IPv6 host is the longer one, so fit the count to it. */
+	while (count > 0 &&
+	       lsd_packet(buf, sizeof(buf), LSD_HOST6, port, lsd->cookie, hashes, count) < 0)
+		count--;
+	if (count == 0)
+		return -EMSGSIZE;
 
-	off += snprintf(buf + off, sizeof(buf) - off, "\r\n");
+	len = lsd_packet(buf, sizeof(buf), LSD_HOST4, port, lsd->cookie, hashes, count);
+	sendto(lsd->fd, buf, len, 0, (struct sockaddr *)&dst, sizeof(dst));
 
-	if (off < 0 || (size_t)off >= sizeof(buf))
-		return -ENOMEM;
-
-	sendto(lsd->fd, buf, off, 0, (struct sockaddr *)&dst, sizeof(dst));
-
-	/* Also send on IPv6 multicast if available */
 	if (lsd->fd6 >= 0) {
-		char buf6[1500];
-		int off6 = 0;
 		struct sockaddr_in6 dst6 = { .sin6_family = AF_INET6, .sin6_port = htons(6771) };
 		inet_pton(AF_INET6, "ff15::efc0:988f", &dst6.sin6_addr);
-
-		off6 += snprintf(buf6 + off6, sizeof(buf6) - off6,
-			"BT-SEARCH * HTTP/1.1\r\n"
-			"Host: [ff15::efc0:988f]:6771\r\n"
-			"Port: %hu\r\n"
-			"cookie: %s\r\n", port, lsd->cookie);
-
-		for (int i = 0; i < count && off6 < (int)sizeof(buf6) - 60; i++)
-			off6 += snprintf(buf6 + off6, sizeof(buf6) - off6, "Infohash: %s\r\n", hashes[i]);
-
-		off6 += snprintf(buf6 + off6, sizeof(buf6) - off6, "\r\n");
-
-		if (off6 > 0 && (size_t)off6 < sizeof(buf6))
-			sendto(lsd->fd6, buf6, off6, 0, (struct sockaddr *)&dst6, sizeof(dst6));
+		len = lsd_packet(buf, sizeof(buf), LSD_HOST6, port, lsd->cookie, hashes, count);
+		sendto(lsd->fd6, buf, len, 0, (struct sockaddr *)&dst6, sizeof(dst6));
 	}
 
-	return 0;
+	return count;
 }
