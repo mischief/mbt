@@ -61,7 +61,7 @@ struct mbt_session_config {
 	int reqq;              /* max outstanding requests we accept (0 = don't advertise) */
 	int max_pipeline;      /* max in-flight requests per peer (0 = default 512) */
 	int mbt_lsd_announce;      /* if nonzero, periodically multicast our infohashes via LSD */
-	int enable_pcp;        /* if nonzero, map listen_port via PCP (RFC 6887) */
+	int enable_pcp;        /* if nonzero, map listen_port via PCP (RFC 6887), announce the map */
 	const char *pcp_gateway; /* NULL = auto-detect */
 	mbt_http_fn http;      /* HTTP callback for HTTP/HTTPS trackers (NULL = disabled) */
 	void *http_arg;

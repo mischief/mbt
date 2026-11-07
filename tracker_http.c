@@ -135,6 +135,7 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 	struct http_announce_ctx *ctx = calloc(1, sizeof(*ctx));
 	if (!ctx) return -ENOMEM;
 	ctx->req = *req;
+	ctx->req.ip = NULL;
 	ctx->req.ih = mbt_infohash_ref(req->ih); /* prevent use-after-free */
 
 	char announce_url[2048];
@@ -142,6 +143,12 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 
 	url_encode_binary(req->ih->hash_sha1, 20, ih_enc, sizeof(ih_enc));
 	url_encode_binary(req->peer_id, 20, pid_enc, sizeof(pid_enc));
+
+	char ip_param[INET6_ADDRSTRLEN + 4] = "";
+	uint8_t ipbuf[16];
+	if (req->ip && (inet_pton(AF_INET, req->ip, ipbuf) == 1 ||
+	                inet_pton(AF_INET6, req->ip, ipbuf) == 1))
+		snprintf(ip_param, sizeof(ip_param), "&ip=%s", req->ip);
 
 	const char *event_str = "";
 	if (req->event == MBT_TRACKER_EVENT_STARTED)   event_str = "&event=started";
@@ -151,14 +158,14 @@ mbt_tracker_http_announce(const char *url, struct mbt_tracker_request *req,
 	snprintf(announce_url, sizeof(announce_url),
 	         "%s%cinfo_hash=%s&peer_id=%s&port=%hu"
 	         "&uploaded=%llu&downloaded=%llu&left=%llu"
-	         "&compact=1%s&numwant=200",
+	         "&compact=1%s%s&numwant=200",
 	         url,
 	         strchr(url, '?') ? '&' : '?',
 	         ih_enc, pid_enc, req->listen_port,
 	         (unsigned long long)req->uploaded,
 	         (unsigned long long)req->downloaded,
 	         (unsigned long long)req->left,
-	         event_str);
+	         event_str, ip_param);
 
 	struct mbt_http_request hreq = {
 		.url = announce_url,

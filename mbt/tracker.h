@@ -23,6 +23,7 @@ struct mbt_tracker_request {
 	struct mbt_infohash *ih;
 	const uint8_t *peer_id;   /* 20 bytes */
 	uint16_t listen_port;
+	const char *ip;           /* address to report, NULL for none; read during the call */
 	uint64_t downloaded;
 	uint64_t uploaded;
 	uint64_t left;

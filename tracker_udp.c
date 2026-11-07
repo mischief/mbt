@@ -54,6 +54,7 @@ struct udp_tracker {
 	uint64_t connection_id;
 
 	struct mbt_tracker_request req;
+	uint8_t ip4[4];           /* BEP 15 IP field, zero for none */
 	struct sockaddr_storage addr;
 	socklen_t addrlen;
 };
@@ -130,7 +131,7 @@ udp_send_announce(struct udp_tracker *ut)
 
 	uint32_t event = htobe32(ut->req.event != 0 ? (uint32_t)ut->req.event : (uint32_t)EVENT_STARTED);
 	memcpy(buf + 80, &event, 4);                  /* event */
-	/* buf[84..87] = IP (0 = default) */
+	memcpy(buf + 84, ut->ip4, 4);                 /* IP, 0 = source address */
 	/* buf[88..91] = key (random) */
 	uint32_t key = htobe32(arc4random());
 	memcpy(buf + 88, &key, 4);
@@ -302,6 +303,7 @@ struct udp_announce_ctx {
 	char host[256];
 	uint16_t port;
 	uint8_t peer_id[20];
+	uint8_t ip4[4];
 	struct mbt_tracker_request req;
 };
 
@@ -359,6 +361,7 @@ udp_start(struct udp_announce_ctx *ctx, struct sockaddr_storage *addr, socklen_t
 	ut->ev = ctx->req.ev;
 	ut->req = ctx->req;
 	memcpy(ut->peer_id, ctx->peer_id, sizeof(ut->peer_id));
+	memcpy(ut->ip4, ctx->ip4, sizeof(ut->ip4));
 	ut->req.peer_id = ut->peer_id;
 	ut->req.ih = mbt_infohash_ref(ctx->req.ih);
 	ut->fd = -1;
@@ -444,6 +447,10 @@ mbt_tracker_udp_announce(const char *url, struct mbt_tracker_request *req)
 	memcpy(ctx->peer_id, req->peer_id, sizeof(ctx->peer_id));
 	ctx->req.peer_id = ctx->peer_id;
 	ctx->req.ih = mbt_infohash_ref(req->ih);
+	/* The field holds IPv4 only. */
+	if (req->ip && inet_pton(AF_INET, req->ip, ctx->ip4) != 1)
+		memset(ctx->ip4, 0, sizeof(ctx->ip4));
+	ctx->req.ip = NULL;
 	if (req->group) {
 		ctx->group = req->group;
 		TAILQ_INSERT_TAIL(&req->group->lookups, ctx, entries);

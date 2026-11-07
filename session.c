@@ -187,6 +187,7 @@ struct mbt_session {
 	const char *pcp_gateway;
 	int enable_pcp;
 	char external_addr[INET6_ADDRSTRLEN]; /* our external IP from PCP, empty if unknown */
+	uint16_t external_port;               /* our external TCP port from PCP, 0 if unknown */
 
 	/*
 	 * Our own addresses, to avoid dialing ourselves: a tracker, DHT or PEX
@@ -244,13 +245,48 @@ session_pcp_retry_cb(struct mbt_ev_timer *timer, void *v)
 	session_pcp_start(s);
 }
 
+static void session_reannounce_arm(struct mbt_session *s, struct session_torrent *st,
+                                   uint64_t delay);
+
+/* The port and address to announce: the PCP mapping when we have one. */
+static uint16_t
+session_announce_port(const struct mbt_session *s)
+{
+	return s->external_port ? s->external_port : s->listen_port;
+}
+
+static const char *
+session_announce_ip(const struct mbt_session *s)
+{
+	return s->external_addr[0] ? s->external_addr : NULL;
+}
+
+/* Tell the trackers a new external address soon, but spread the load. */
+static void
+session_reannounce_all(struct mbt_session *s)
+{
+	struct session_torrent *st;
+	uint64_t delay = 0;
+
+	STAILQ_FOREACH(st, &s->torrents, next) {
+		if (st->tracker_count == 0 || !st->started_announced || st->stop_sent)
+			continue;
+		session_reannounce_arm(s, st, delay);
+		delay += 20000;
+	}
+}
+
 static void
 session_pcp_on_map(const char *addr, uint16_t port, uint32_t lifetime, void *arg)
 {
 	struct mbt_session *s = arg;
 	(void)lifetime;
 	mbt_log_info(MBT_LOG_SESSION, "PCP: external %s:%hu", addr, port);
+	int changed = strcmp(s->external_addr, addr) != 0 || s->external_port != port;
 	snprintf(s->external_addr, sizeof(s->external_addr), "%s", addr);
+	s->external_port = port;
+	if (changed)
+		session_reannounce_all(s);
 	/* Success — cancel retry timer */
 	if (s->pcp_retry_timer) {
 		mbt_ev_timer_free(s->pcp_retry_timer);
@@ -353,7 +389,8 @@ session_maintain_cb(struct mbt_ev_timer *timer, void *v)
 			struct mbt_tracker_request treq = {
 				.ev = s->ev, .ih = st->ih, .peer_id = s->peer_id,
 				.group = s->tracker_group,
-				.listen_port = s->listen_port, .left = 0,
+				.listen_port = session_announce_port(s), .ip = session_announce_ip(s),
+				.left = 0,
 				.event = MBT_TRACKER_EVENT_COMPLETED,
 			};
 			for (int i = 0; i < st->tracker_count; i++)
@@ -1860,7 +1897,8 @@ session_send_stopped(struct mbt_session *s, struct session_torrent *st)
 		.ev = s->ev,
 		.ih = st->ih,
 		.peer_id = s->peer_id,
-		.listen_port = s->listen_port,
+		.listen_port = session_announce_port(s),
+		.ip = session_announce_ip(s),
 		.downloaded = mbt_torrent_bytes_downloaded(st->torrent),
 		.uploaded = mbt_torrent_bytes_uploaded(st->torrent),
 		.event = MBT_TRACKER_EVENT_STOPPED,
@@ -1927,7 +1965,8 @@ session_do_announce(struct mbt_session *s, struct session_torrent *st)
 		.ev = s->ev,
 		.ih = st->ih,
 		.peer_id = s->peer_id,
-		.listen_port = s->listen_port,
+		.listen_port = session_announce_port(s),
+		.ip = session_announce_ip(s),
 		.left = left,
 		.event = event,
 		.peer_cb = session_tracker_peer_cb,

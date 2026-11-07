@@ -100,6 +100,8 @@ dht_many_test = executable('dht_many_test', 'dht_many_test.c', link_with: [libmb
 test('dht_many', dht_many_test, timeout: 40)
 tracker_retry_test = executable('tracker_retry_test', 'tracker_retry_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_retry', tracker_retry_test, timeout: 60)
+tracker_ip_test = executable('tracker_ip_test', 'tracker_ip_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
+test('tracker_ip', tracker_ip_test, timeout: 30)
 tracker_burst_test = executable('tracker_burst_test', 'tracker_burst_test.c', link_with: [libmbt], include_directories: mbt_inc, dependencies: deps)
 test('tracker_burst', tracker_burst_test, timeout: 30)
 backoff_test = executable('backoff_test', 'backoff_test.c', include_directories: mbt_inc, dependencies: deps)

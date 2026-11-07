@@ -47,6 +47,17 @@ The 20-byte peer identifier.
 The port the peer is listening on.
 .El
 .Bl -tag -width 12
+.It .Vt ip
+The address to report to the tracker, or
+.Dv NULL .
+An HTTP announce sends it as the
+.Ar ip
+parameter.
+A UDP announce sends an IPv4 address in the IP field, and no IPv6 address.
+The tracker can ignore it.
+The string is read during the call.
+.El
+.Bl -tag -width 12
 .It .Vt peer_cb
 A callback invoked for each peer returned by the tracker.
 .El
