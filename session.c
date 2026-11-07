@@ -218,7 +218,7 @@ struct mbt_session {
 	/* LSD announcer timer (optional) */
 	struct mbt_ev_timer *lsd_announce_timer;
 	uint64_t lsd_last_send;  /* time of the last LSD packet, 0 for never */
-	int lsd_cursor;          /* index in torrents where the next round starts */
+	int lsd_cursor;          /* index in torrents where the next round starts, -1 for random */
 	int lsd_soon;            /* timer is armed early for a new torrent */
 
 	/* Torrents */
@@ -360,28 +360,31 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 
 	STAILQ_FOREACH(st, &s->torrents, next)
 		count++;
-	/* The list can shrink below the cursor. */
-	if (s->lsd_cursor >= count)
-		s->lsd_cursor = 0;
+	if (count == 0)
+		goto reschedule;
+	/*
+	 * Start at a random place, so nodes with the same torrents in the same
+	 * order announce different ones. The list can also shrink below it.
+	 */
+	if (s->lsd_cursor < 0 || s->lsd_cursor >= count)
+		s->lsd_cursor = (int)arc4random_uniform((uint32_t)count);
 
-	STAILQ_FOREACH(st, &s->torrents, next) {
-		if (n < LSD_BATCH && st->lsd_last == 0 && !mbt_torrent_is_private(st->torrent)) {
-			pick_idx[n] = -1;
-			pick[n++] = st;
-		}
-	}
-	/* Two passes over the list: from the cursor to the end, then from the start. */
-	for (int pass = 0; pass < 2 && n < LSD_BATCH; pass++) {
-		i = 0;
-		STAILQ_FOREACH(st, &s->torrents, next) {
-			int in_pass = pass == 0 ? i >= s->lsd_cursor : i < s->lsd_cursor;
+	/* New torrents, then due ones. Each walks from the cursor, then wraps. */
+	for (int due = 0; due < 2; due++) {
+		for (int pass = 0; pass < 2 && n < LSD_BATCH; pass++) {
+			i = 0;
+			STAILQ_FOREACH(st, &s->torrents, next) {
+				int in_pass = pass == 0 ? i >= s->lsd_cursor : i < s->lsd_cursor;
+				int want = due ? st->lsd_last != 0 && now - st->lsd_last >= period
+				               : st->lsd_last == 0;
 
-			if (n < LSD_BATCH && in_pass && st->lsd_last != 0 &&
-			    now - st->lsd_last >= period && !mbt_torrent_is_private(st->torrent)) {
-				pick_idx[n] = i;
-				pick[n++] = st;
+				if (n < LSD_BATCH && in_pass && want &&
+				    !mbt_torrent_is_private(st->torrent)) {
+					pick_idx[n] = i;
+					pick[n++] = st;
+				}
+				i++;
 			}
-			i++;
 		}
 	}
 	if (n == 0)
@@ -397,8 +400,7 @@ session_lsd_announce_cb(struct mbt_ev_timer *timer, void *v)
 	s->lsd_last_send = now;
 	for (i = 0; i < sent; i++) {
 		pick[i]->lsd_last = now;
-		if (pick_idx[i] >= 0)
-			s->lsd_cursor = pick_idx[i] + 1;
+		s->lsd_cursor = pick_idx[i] + 1;
 	}
 	mbt_log_debug(MBT_LOG_LSD, "LSD announce: %d of %d torrents on port %hu",
 	              sent, count, s->listen_port);
@@ -1265,6 +1267,7 @@ mbt_session_new(struct mbt_session **out, struct mbt_session_config *cfg)
 	s->dht_no_bootstrap = cfg->dht_no_bootstrap;
 
 	STAILQ_INIT(&s->torrents);
+	s->lsd_cursor = -1;
 	LIST_INIT(&s->dht_lookups);
 	for (int i = 0; i < DHT_Q_COUNT; i++)
 		TAILQ_INIT(&s->dht_queue[i]);

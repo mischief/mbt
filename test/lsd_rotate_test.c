@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: ISC
 /*
  * LSD announces rotate through all torrents, one packet per tick, and
- * the rotation survives a list that shrinks below its cursor.
+ * the rotation survives a list that shrinks below its cursor. Nodes with
+ * the same torrents in the same order start at different places.
  */
 #include <sys/queue.h>
 #include <assert.h>
@@ -10,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "mbt/event.h"
 #include "mbt/infohash.h"
@@ -24,7 +26,7 @@ static struct mbt_ev *ev;
 static struct mbt_lsd *lsd;
 static uint16_t port;
 static char hashes[N][41];
-static int seen[N], packets, max_len, burst;
+static int seen[N], packets, max_len, burst, first_idx = -1;
 static double last_packet, min_gap = 1e9;
 
 static double
@@ -66,9 +68,13 @@ lsd_io_cb(struct mbt_ev_io *io, int fd, uint32_t events, void *v)
 	last_packet = t;
 	STAILQ_FOREACH(ih, &info->infohashes, next) {
 		mbt_infohash_string(ih, hex, sizeof(hex));
-		for (int i = 0; i < N; i++)
-			if (strcmp(hex, hashes[i]) == 0)
-				seen[i]++;
+		for (int i = 0; i < N; i++) {
+			if (strcmp(hex, hashes[i]) != 0)
+				continue;
+			seen[i]++;
+			if (first_idx < 0)
+				first_idx = i;
+		}
 	}
 	mbt_lsd_frame_info_freep(&info);
 }
@@ -92,6 +98,38 @@ count_seen(int from, int to)
 	return c;
 }
 
+static struct mbt_session *
+start(struct mbt_storage_memory *mem, struct mbt_infohash **ih)
+{
+	struct mbt_session *s;
+	struct mbt_session_config cfg = {.ev = ev, .disable_utp = 1,
+	    .default_storage = mbt_storage_memory_storage(mem),
+	    .timers = {.lsd_interval = 5}};
+
+	assert(mbt_session_new(&s, &cfg) == 0);
+	mbt_session_disable_dht(s);
+	assert(mbt_session_enable_lsd(s) == 0);
+	port = mbt_session_listen_port(s);
+	for (int i = 0; i < N; i++)
+		assert(mbt_session_add_infohash(s, ih[i], NULL, NULL) == 0);
+	return s;
+}
+
+/* Where the first packet of a new node starts in the list. */
+static int
+first_start(struct mbt_storage_memory *mem, struct mbt_infohash **ih)
+{
+	struct mbt_session *s = start(mem, ih);
+	double end = now() + 3;
+
+	first_idx = -1;
+	while (first_idx < 0 && now() < end)
+		mbt_ev_step(ev, 10);
+	assert(first_idx >= 0);
+	mbt_session_free(s);
+	return first_idx;
+}
+
 int
 main(void)
 {
@@ -109,23 +147,27 @@ main(void)
 
 	mem = mbt_storage_memory_new();
 	assert(mem);
-	struct mbt_session_config cfg = {.ev = ev, .disable_utp = 1,
-	    .default_storage = mbt_storage_memory_storage(mem),
-	    .timers = {.lsd_interval = 5}};
-	assert(mbt_session_new(&s, &cfg) == 0);
-	mbt_session_disable_dht(s);
-	assert(mbt_session_enable_lsd(s) == 0);
-	port = mbt_session_listen_port(s);
-
-	srand((unsigned)time(NULL) ^ port);
+	srand((unsigned)time(NULL) ^ (unsigned)getpid());
 	for (int i = 0; i < N; i++) {
 		snprintf(hashes[i], sizeof(hashes[i]), "%08x%08x%08x%08x%08x",
 		         (unsigned)rand(), (unsigned)rand(), (unsigned)rand(),
 		         (unsigned)rand(), (unsigned)i);
 		assert(mbt_infohash_new(&ih[i], MBT_INFOHASH_SHA1, hashes[i]) == 0);
 		mbt_infohash_string(ih[i], hashes[i], sizeof(hashes[i]));
-		assert(mbt_session_add_infohash(s, ih[i], NULL, NULL) == 0);
 	}
+
+	/* Four nodes, same list: all four at one start is 1 in 8 million. */
+	int a = first_start(mem, ih), same = 1;
+	for (int k = 0; k < 3; k++)
+		same += first_start(mem, ih) == a;
+	assert(same < 4);
+
+	memset(seen, 0, sizeof(seen));
+	packets = 0;
+	max_len = 0;
+	last_packet = 0;
+	min_gap = 1e9;
+	s = start(mem, ih);
 
 	/* A burst of adds shares one packet, not one packet per torrent. */
 	run(1.6);
